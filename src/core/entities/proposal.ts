@@ -8,5 +8,6 @@ export type Proposal = {
     excerpt: string;
   };
   generatedBy: "Demo Analyzer Generated";
+  status: "Pending" | "Accepted";
   createdAt: string;
 };

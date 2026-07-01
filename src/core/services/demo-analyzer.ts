@@ -26,6 +26,7 @@ export function analyzeSource(source: ImportedSource): Proposal {
       excerpt: excerpt(content, EVIDENCE_LENGTH),
     },
     generatedBy: "Demo Analyzer Generated",
+    status: "Pending",
     createdAt: new Date().toISOString(),
   };
 }

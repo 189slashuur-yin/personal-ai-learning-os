@@ -4,7 +4,7 @@ export default function KnowledgePage() {
       <p className="page-step">步骤 4</p>
       <h1 className="page-title">知识库</h1>
       <p className="page-description">
-        用户确认后的知识卡会出现在这里，而不是显示原始聊天记录。
+        Proposal 已接受，KnowledgeCard 将在 Task6 创建。
       </p>
     </main>
   );
