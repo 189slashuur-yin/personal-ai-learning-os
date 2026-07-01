@@ -5,5 +5,5 @@ export type KnowledgeCard = {
   content: string;
   sourceFile: string;
   createdAt: string;
-  status: "Active";
+  status: "Active" | "Archived";
 };

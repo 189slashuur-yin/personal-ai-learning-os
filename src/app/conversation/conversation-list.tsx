@@ -3,6 +3,11 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import type { Conversation } from "@/core/entities/conversation";
+import {
+  deleteConversationWorkspace,
+  duplicateConversationWorkspace,
+  type ConversationWorkspaceStorages,
+} from "@/core/services/conversation-workspace";
 import { BrowserConversationStorage } from "@/infrastructure/storage/browser-conversation-storage";
 import { BrowserKnowledgeCardStorage } from "@/infrastructure/storage/browser-knowledge-card-storage";
 import { BrowserProposalStorage } from "@/infrastructure/storage/browser-proposal-storage";
@@ -16,38 +21,67 @@ type ConversationItem = {
   proposalCount: number;
 };
 
+function createWorkspaceStorages(): ConversationWorkspaceStorages {
+  return {
+    conversations: new BrowserConversationStorage(),
+    sources: new BrowserSourceStorage(),
+    proposals: new BrowserProposalStorage(),
+    knowledgeCards: new BrowserKnowledgeCardStorage(),
+  };
+}
+
+function loadConversationItems(): ConversationItem[] {
+  const storages = createWorkspaceStorages();
+  const conversations = storages.conversations.getAll();
+
+  return conversations.map((conversation) => {
+    const source = storages.sources.getByConversationId(conversation.id);
+    const conversationProposal = source
+      ? storages.proposals.getBySourceId(source.id)
+      : null;
+
+    return {
+      conversation,
+      proposalCount: conversationProposal ? 1 : 0,
+      knowledgeCount: conversationProposal
+        ? storages.knowledgeCards
+            .getAll()
+            .filter((card) => card.proposalId === conversationProposal.id)
+            .length
+        : 0,
+    };
+  });
+}
+
 export function ConversationList() {
   const [items, setItems] = useState<ConversationItem[] | null>(null);
   const [isCreating, setIsCreating] = useState(false);
 
   useEffect(() => {
     const loadTimer = window.setTimeout(() => {
-      const conversations = new BrowserConversationStorage().getAll();
-      const sourceStorage = new BrowserSourceStorage();
-      const proposal = new BrowserProposalStorage().getCurrent();
-      const knowledgeCards = new BrowserKnowledgeCardStorage().getAll();
-
-      setItems(
-        conversations.map((conversation) => {
-          const source = sourceStorage.getByConversationId(conversation.id);
-          const conversationProposal =
-            source && proposal?.sourceId === source.id ? proposal : null;
-
-          return {
-            conversation,
-            proposalCount: conversationProposal ? 1 : 0,
-            knowledgeCount: conversationProposal
-              ? knowledgeCards.filter(
-                  (card) => card.proposalId === conversationProposal.id,
-                ).length
-              : 0,
-          };
-        }),
-      );
+      setItems(loadConversationItems());
     }, 0);
 
     return () => window.clearTimeout(loadTimer);
   }, []);
+
+  function handleDelete(conversation: Conversation) {
+    const confirmed = window.confirm(
+      `确定删除「${conversation.title}」吗？关联的 Source、Proposal 与 KnowledgeCard 也会删除。`,
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    deleteConversationWorkspace(conversation.id, createWorkspaceStorages());
+    setItems(loadConversationItems());
+  }
+
+  function handleDuplicate(conversation: Conversation) {
+    duplicateConversationWorkspace(conversation.id, createWorkspaceStorages());
+    setItems(loadConversationItems());
+  }
 
   if (!items) {
     return (
@@ -98,7 +132,12 @@ export function ConversationList() {
       ) : (
         <div className="mt-6 grid gap-4 sm:grid-cols-2">
           {items.map((item) => (
-            <ConversationCard key={item.conversation.id} {...item} />
+            <ConversationCard
+              key={item.conversation.id}
+              onDelete={handleDelete}
+              onDuplicate={handleDuplicate}
+              {...item}
+            />
           ))}
         </div>
       )}

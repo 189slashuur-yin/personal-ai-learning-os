@@ -1,6 +1,12 @@
 import { ReviewProposal } from "./review-proposal";
 
-export default function ReviewPage() {
+type ReviewPageProps = {
+  searchParams: Promise<{ proposal?: string }>;
+};
+
+export default async function ReviewPage({ searchParams }: ReviewPageProps) {
+  const { proposal } = await searchParams;
+
   return (
     <main className="page-shell">
       <p className="page-step">步骤 3</p>
@@ -8,7 +14,7 @@ export default function ReviewPage() {
       <p className="page-description">
         查看 Demo Analyzer 生成的 Proposal，并决定是否接受。
       </p>
-      <ReviewProposal />
+      <ReviewProposal proposalId={proposal} />
     </main>
   );
 }

@@ -1,4 +1,5 @@
 import { DashboardOverview } from "./dashboard-overview";
+import { DashboardSearch } from "./dashboard-search";
 
 export default function Home() {
   return (
@@ -11,6 +12,7 @@ export default function Home() {
         <p className="mt-3 max-w-2xl text-base leading-7 text-zinc-600">
           从原始 Conversation 出发，整理 Proposal，并沉淀为可持续使用的 Knowledge。
         </p>
+        <DashboardSearch />
       </div>
       <DashboardOverview />
     </main>

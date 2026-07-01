@@ -38,6 +38,7 @@ export function CreateConversationDialog({
       sourceType,
       createdAt: timestamp,
       updatedAt: timestamp,
+      lastOpenedAt: timestamp,
     });
 
     router.push(`/conversation/${id}`);

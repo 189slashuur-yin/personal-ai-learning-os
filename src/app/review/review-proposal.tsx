@@ -14,13 +14,16 @@ type ReviewState =
   | { status: "missing-proposal" }
   | { status: "ready"; proposal: Proposal };
 
-export function ReviewProposal() {
+export function ReviewProposal({ proposalId }: { proposalId?: string }) {
   const router = useRouter();
   const [state, setState] = useState<ReviewState>({ status: "loading" });
 
   useEffect(() => {
     const loadTimer = window.setTimeout(() => {
-      const proposal = new BrowserProposalStorage().getCurrent();
+      const storage = new BrowserProposalStorage();
+      const proposal = proposalId
+        ? storage.getById(proposalId)
+        : storage.getCurrent();
 
       setState(
         proposal
@@ -30,7 +33,7 @@ export function ReviewProposal() {
     }, 0);
 
     return () => window.clearTimeout(loadTimer);
-  }, []);
+  }, [proposalId]);
 
   if (state.status === "loading") {
     return (
@@ -69,6 +72,8 @@ export function ReviewProposal() {
 
     if (knowledgeCard) {
       new BrowserKnowledgeCardStorage().save(knowledgeCard);
+      router.push(`/knowledge/${knowledgeCard.id}`);
+      return;
     }
 
     router.push("/knowledge");

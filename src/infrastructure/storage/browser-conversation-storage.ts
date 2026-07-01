@@ -29,13 +29,29 @@ export class BrowserConversationStorage implements ConversationStorage {
       return [];
     }
 
-    return (JSON.parse(storedConversations) as Conversation[]).sort(
-      (left, right) =>
-        new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime(),
-    );
+    return (JSON.parse(storedConversations) as Conversation[])
+      .map((conversation) => ({
+        ...conversation,
+        lastOpenedAt: conversation.lastOpenedAt ?? conversation.updatedAt,
+      }))
+      .sort(
+        (left, right) =>
+          new Date(right.updatedAt).getTime() -
+          new Date(left.updatedAt).getTime(),
+      );
   }
 
   getById(id: string) {
     return this.getAll().find((conversation) => conversation.id === id) ?? null;
+  }
+
+  remove(id: string) {
+    const conversations = this.getAll().filter(
+      (conversation) => conversation.id !== id,
+    );
+    window.localStorage.setItem(
+      CONVERSATIONS_KEY,
+      JSON.stringify(conversations),
+    );
   }
 }

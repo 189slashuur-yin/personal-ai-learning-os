@@ -5,4 +5,5 @@ export type ImportedSource = {
   name: string;
   content: string;
   importedAt: string;
+  updatedAt: string;
 };

@@ -45,12 +45,14 @@ export function TxtImportForm() {
         return;
       }
 
+      const timestamp = new Date().toISOString();
       setSource({
         id: crypto.randomUUID(),
         kind: "text",
         name: file.name,
         content,
-        importedAt: new Date().toISOString(),
+        importedAt: timestamp,
+        updatedAt: timestamp,
       });
     } catch {
       setError("文件读取失败，请重新选择。");
@@ -76,6 +78,7 @@ export function TxtImportForm() {
         sourceType: "TXT",
         createdAt: timestamp,
         updatedAt: timestamp,
+        lastOpenedAt: timestamp,
       };
     } else {
       conversation = { ...conversation, updatedAt: timestamp };

@@ -33,6 +33,9 @@ export default function RootLayout({
               <Link className="whitespace-nowrap rounded-md px-2 py-1.5 hover:bg-zinc-100 hover:text-zinc-950" href="/knowledge">
                 知识库
               </Link>
+              <Link className="whitespace-nowrap rounded-md px-2 py-1.5 hover:bg-zinc-100 hover:text-zinc-950" href="/search">
+                搜索
+              </Link>
             </div>
           </nav>
         </header>

@@ -32,24 +32,56 @@ export class BrowserSourceStorage implements SourceStorage {
       return null;
     }
 
-    return JSON.parse(storedSource) as ImportedSource;
+    return this.normalize(JSON.parse(storedSource) as ImportedSource);
   }
 
   getByConversationId(conversationId: string) {
     return (
-      this.getAll().find(
-        (source) => source.conversationId === conversationId,
-      ) ?? null
+      this.getAll()
+        .filter((source) => source.conversationId === conversationId)
+        .sort(
+          (left, right) =>
+            new Date(right.updatedAt).getTime() -
+            new Date(left.updatedAt).getTime(),
+        )[0] ?? null
     );
   }
 
-  private getAll() {
+  removeByConversationId(conversationId: string) {
+    const sources = this.getAll();
+    const removedSourceIds = new Set(
+      sources
+        .filter((source) => source.conversationId === conversationId)
+        .map((source) => source.id),
+    );
+    const remainingSources = sources.filter(
+      (source) => source.conversationId !== conversationId,
+    );
+
+    window.localStorage.setItem(SOURCES_KEY, JSON.stringify(remainingSources));
+
+    const currentSource = this.getCurrent();
+    if (currentSource && removedSourceIds.has(currentSource.id)) {
+      window.localStorage.removeItem(CURRENT_SOURCE_KEY);
+    }
+  }
+
+  getAll() {
     const storedSources = window.localStorage.getItem(SOURCES_KEY);
 
     if (!storedSources) {
       return [];
     }
 
-    return JSON.parse(storedSources) as ImportedSource[];
+    return (JSON.parse(storedSources) as ImportedSource[]).map((source) =>
+      this.normalize(source),
+    );
+  }
+
+  private normalize(source: ImportedSource) {
+    return {
+      ...source,
+      updatedAt: source.updatedAt ?? source.importedAt,
+    };
   }
 }

@@ -15,4 +15,5 @@ export type Conversation = {
   sourceType: ConversationSourceType;
   createdAt: string;
   updatedAt: string;
+  lastOpenedAt: string;
 };

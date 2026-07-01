@@ -1,0 +1,178 @@
+"use client";
+
+import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
+import type { KnowledgeCard } from "@/core/entities/knowledge-card";
+import { BrowserKnowledgeCardStorage } from "@/infrastructure/storage/browser-knowledge-card-storage";
+
+const PAGE_SIZE = 6;
+
+type Filter = "All" | KnowledgeCard["status"];
+type Sort = "newest" | "oldest" | "title";
+
+const filters: Filter[] = ["All", "Active", "Archived"];
+
+function formatDate(value: string) {
+  return new Intl.DateTimeFormat("zh-CN", { dateStyle: "medium" }).format(
+    new Date(value),
+  );
+}
+
+export function KnowledgeList() {
+  const [cards, setCards] = useState<KnowledgeCard[] | null>(null);
+  const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState<Filter>("Active");
+  const [sort, setSort] = useState<Sort>("newest");
+  const [page, setPage] = useState(1);
+
+  useEffect(() => {
+    const loadTimer = window.setTimeout(() => {
+      setCards(new BrowserKnowledgeCardStorage().getAll());
+    }, 0);
+
+    return () => window.clearTimeout(loadTimer);
+  }, []);
+
+  const visibleCards = useMemo(() => {
+    if (!cards) return [];
+
+    const normalizedQuery = query.trim().toLocaleLowerCase();
+    return cards
+      .filter((card) => filter === "All" || card.status === filter)
+      .filter((card) =>
+        [card.title, card.content, card.sourceFile].some((value) =>
+          value.toLocaleLowerCase().includes(normalizedQuery),
+        ),
+      )
+      .sort((a, b) => {
+        if (sort === "title") return a.title.localeCompare(b.title, "zh-CN");
+        const direction = sort === "newest" ? -1 : 1;
+        return direction * (Date.parse(a.createdAt) - Date.parse(b.createdAt));
+      });
+  }, [cards, filter, query, sort]);
+
+  if (!cards) {
+    return <p className="mt-8 text-sm text-zinc-500" role="status">正在读取知识库…</p>;
+  }
+
+  const pageCount = Math.max(1, Math.ceil(visibleCards.length / PAGE_SIZE));
+  const currentPage = Math.min(page, pageCount);
+  const pageCards = visibleCards.slice(
+    (currentPage - 1) * PAGE_SIZE,
+    currentPage * PAGE_SIZE,
+  );
+
+  return (
+    <section className="mt-8">
+      <div className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm">
+        <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
+          <label>
+            <span className="sr-only">搜索知识</span>
+            <input
+              className="w-full rounded-lg border border-zinc-200 px-3.5 py-2.5 text-sm outline-none placeholder:text-zinc-400 focus:border-zinc-400"
+              onChange={(event) => {
+                setQuery(event.target.value);
+                setPage(1);
+              }}
+              placeholder="搜索标题、内容或来源"
+              type="search"
+              value={query}
+            />
+          </label>
+          <label>
+            <span className="sr-only">排序</span>
+            <select
+              className="w-full rounded-lg border border-zinc-200 bg-white px-3.5 py-2.5 text-sm text-zinc-700 outline-none focus:border-zinc-400"
+              onChange={(event) => {
+                setSort(event.target.value as Sort);
+                setPage(1);
+              }}
+              value={sort}
+            >
+              <option value="newest">最新创建</option>
+              <option value="oldest">最早创建</option>
+              <option value="title">标题 A–Z</option>
+            </select>
+          </label>
+        </div>
+
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-zinc-100 pt-4">
+          <div className="flex rounded-lg bg-zinc-100 p-1">
+            {filters.map((item) => (
+              <button
+                className={`rounded-md px-3 py-1.5 text-sm font-medium ${filter === item ? "bg-white text-zinc-950 shadow-sm" : "text-zinc-500 hover:text-zinc-800"}`}
+                key={item}
+                onClick={() => {
+                  setFilter(item);
+                  setPage(1);
+                }}
+                type="button"
+              >
+                {item}
+              </button>
+            ))}
+          </div>
+          <p className="text-sm text-zinc-500">{visibleCards.length} 条知识</p>
+        </div>
+      </div>
+
+      {pageCards.length === 0 ? (
+        <div className="mt-6 rounded-xl border border-dashed border-zinc-300 bg-white p-10 text-center">
+          <h2 className="font-semibold text-zinc-950">没有匹配的知识</h2>
+          <p className="mt-2 text-sm leading-6 text-zinc-500">
+            {cards.length === 0
+              ? "接受 Proposal 后，知识会沉淀在这里。"
+              : "试试调整搜索词或筛选条件。"}
+          </p>
+        </div>
+      ) : (
+        <div className="mt-6 grid gap-4 sm:grid-cols-2">
+          {pageCards.map((card) => (
+            <Link
+              className="group flex min-h-52 flex-col rounded-xl border border-zinc-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-zinc-300 hover:shadow-md"
+              href={`/knowledge/${card.id}`}
+              key={card.id}
+            >
+              <div className="flex items-start justify-between gap-4">
+                <h2 className="line-clamp-2 font-semibold leading-6 text-zinc-950">{card.title}</h2>
+                <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${card.status === "Active" ? "bg-emerald-50 text-emerald-700" : "bg-zinc-100 text-zinc-600"}`}>
+                  {card.status}
+                </span>
+              </div>
+              <p className="mt-3 line-clamp-3 text-sm leading-6 text-zinc-600">{card.content}</p>
+              <div className="mt-auto flex items-end justify-between gap-4 border-t border-zinc-100 pt-4 text-xs text-zinc-500">
+                <div className="min-w-0">
+                  <p className="truncate">{card.sourceFile}</p>
+                  <p className="mt-1">{formatDate(card.createdAt)}</p>
+                </div>
+                <span className="text-sm transition group-hover:translate-x-0.5">→</span>
+              </div>
+            </Link>
+          ))}
+        </div>
+      )}
+
+      {pageCount > 1 ? (
+        <nav aria-label="知识分页" className="mt-6 flex items-center justify-center gap-3">
+          <button
+            className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm font-medium text-zinc-700 disabled:cursor-not-allowed disabled:opacity-40"
+            disabled={currentPage === 1}
+            onClick={() => setPage((value) => Math.max(1, value - 1))}
+            type="button"
+          >
+            上一页
+          </button>
+          <span className="text-sm text-zinc-500">{currentPage} / {pageCount}</span>
+          <button
+            className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm font-medium text-zinc-700 disabled:cursor-not-allowed disabled:opacity-40"
+            disabled={currentPage === pageCount}
+            onClick={() => setPage((value) => Math.min(pageCount, value + 1))}
+            type="button"
+          >
+            下一页
+          </button>
+        </nav>
+      ) : null}
+    </section>
+  );
+}

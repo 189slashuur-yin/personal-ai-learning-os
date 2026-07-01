@@ -1,12 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 import type { Conversation } from "@/core/entities/conversation";
 import type { ImportedSource } from "@/core/entities/imported-source";
 import type { KnowledgeCard } from "@/core/entities/knowledge-card";
 import type { Proposal } from "@/core/entities/proposal";
 import { analyzeSource } from "@/core/services/demo-analyzer";
+import { countWords } from "@/core/services/text-statistics";
 import { BrowserConversationStorage } from "@/infrastructure/storage/browser-conversation-storage";
 import { BrowserKnowledgeCardStorage } from "@/infrastructure/storage/browser-knowledge-card-storage";
 import { BrowserProposalStorage } from "@/infrastructure/storage/browser-proposal-storage";
@@ -27,10 +28,16 @@ type DetailState =
       knowledgeCard: KnowledgeCard | null;
     };
 
+type SaveStatus = "saved" | "editing";
+
 export function ConversationDetail({ conversationId }: ConversationDetailProps) {
   const [state, setState] = useState<DetailState>({ status: "loading" });
   const [draft, setDraft] = useState("");
-  const [feedback, setFeedback] = useState<string | null>(null);
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>("saved");
+  const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
+  const [isRenaming, setIsRenaming] = useState(false);
+  const [titleDraft, setTitleDraft] = useState("");
+  const lastSavedContent = useRef("");
 
   useEffect(() => {
     const loadTimer = window.setTimeout(() => {
@@ -43,22 +50,28 @@ export function ConversationDetail({ conversationId }: ConversationDetailProps) 
         return;
       }
 
-      const source = new BrowserSourceStorage().getByConversationId(
-        conversationId,
-      );
-      const currentProposal = new BrowserProposalStorage().getCurrent();
-      const proposal =
-        source && currentProposal?.sourceId === source.id
-          ? currentProposal
-          : null;
+      const openedConversation = {
+        ...conversation,
+        lastOpenedAt: new Date().toISOString(),
+      };
+      new BrowserConversationStorage().save(openedConversation);
+
+      const source = new BrowserSourceStorage().getByConversationId(conversationId);
+      const proposal = source
+        ? new BrowserProposalStorage().getBySourceId(source.id)
+        : null;
       const knowledgeCard = proposal
         ? new BrowserKnowledgeCardStorage().getByProposalId(proposal.id)
         : null;
 
-      setDraft(source?.content ?? "");
+      const sourceContent = source?.content ?? "";
+      lastSavedContent.current = sourceContent;
+      setDraft(sourceContent);
+      setTitleDraft(openedConversation.title);
+      setLastSavedAt(source?.updatedAt ?? null);
       setState({
         status: "ready",
-        conversation,
+        conversation: openedConversation,
         source,
         proposal,
         knowledgeCard,
@@ -67,6 +80,52 @@ export function ConversationDetail({ conversationId }: ConversationDetailProps) 
 
     return () => window.clearTimeout(loadTimer);
   }, [conversationId]);
+
+  useEffect(() => {
+    if (
+      state.status !== "ready" ||
+      draft === lastSavedContent.current ||
+      (!state.source && draft.length === 0)
+    ) {
+      return;
+    }
+
+    const autosaveTimer = window.setTimeout(() => {
+      const timestamp = new Date().toISOString();
+      const nextSource: ImportedSource = {
+        id: state.source?.id ?? crypto.randomUUID(),
+        conversationId: state.conversation.id,
+        kind: "text",
+        name:
+          state.source?.name ??
+          `${state.conversation.title}-${state.conversation.sourceType}.txt`,
+        content: draft,
+        importedAt: state.source?.importedAt ?? timestamp,
+        updatedAt: timestamp,
+      };
+      const nextConversation: Conversation = {
+        ...state.conversation,
+        updatedAt: timestamp,
+      };
+
+      new BrowserSourceStorage().save(nextSource);
+      new BrowserConversationStorage().save(nextConversation);
+      lastSavedContent.current = draft;
+      setLastSavedAt(timestamp);
+      setSaveStatus("saved");
+      setState((currentState) =>
+        currentState.status === "ready"
+          ? {
+              ...currentState,
+              conversation: nextConversation,
+              source: nextSource,
+            }
+          : currentState,
+      );
+    }, 800);
+
+    return () => window.clearTimeout(autosaveTimer);
+  }, [draft, state]);
 
   if (state.status === "loading") {
     return (
@@ -97,40 +156,6 @@ export function ConversationDetail({ conversationId }: ConversationDetailProps) 
     timeStyle: "short",
   }).format(new Date(conversation.updatedAt));
 
-  function saveRawText() {
-    if (state.status !== "ready" || !draft.trim()) {
-      setFeedback("请先粘贴或输入原始文本。");
-      return;
-    }
-
-    const timestamp = new Date().toISOString();
-    const nextSource: ImportedSource = {
-      id: state.source?.id ?? crypto.randomUUID(),
-      conversationId: state.conversation.id,
-      kind: "text",
-      name:
-        state.source?.name ??
-        `${state.conversation.title}-${state.conversation.sourceType}.txt`,
-      content: draft.trim(),
-      importedAt: state.source?.importedAt ?? timestamp,
-    };
-    const nextConversation: Conversation = {
-      ...state.conversation,
-      updatedAt: timestamp,
-    };
-
-    new BrowserSourceStorage().save(nextSource);
-    new BrowserConversationStorage().save(nextConversation);
-    setState({
-      ...state,
-      conversation: nextConversation,
-      source: nextSource,
-      proposal: null,
-      knowledgeCard: null,
-    });
-    setFeedback("原始文本已保存。现在可以运行 Demo Analyzer。");
-  }
-
   function runDemoAnalyzer() {
     if (state.status !== "ready" || !state.source) {
       return;
@@ -143,7 +168,45 @@ export function ConversationDetail({ conversationId }: ConversationDetailProps) 
       proposal: nextProposal,
       knowledgeCard: null,
     });
-    setFeedback("已生成 1 条 Proposal。");
+  }
+
+  function saveTitle() {
+    if (state.status !== "ready") {
+      return;
+    }
+
+    const nextTitle = titleDraft.trim();
+
+    if (!nextTitle) {
+      setTitleDraft(state.conversation.title);
+      setIsRenaming(false);
+      return;
+    }
+
+    if (nextTitle === state.conversation.title) {
+      setIsRenaming(false);
+      return;
+    }
+
+    const nextConversation = {
+      ...state.conversation,
+      title: nextTitle,
+      updatedAt: new Date().toISOString(),
+    };
+    new BrowserConversationStorage().save(nextConversation);
+    setState({ ...state, conversation: nextConversation });
+    setIsRenaming(false);
+  }
+
+  function handleTitleKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key === "Enter") {
+      event.currentTarget.blur();
+    }
+
+    if (event.key === "Escape") {
+      setTitleDraft(conversation.title);
+      setIsRenaming(false);
+    }
   }
 
   return (
@@ -159,9 +222,27 @@ export function ConversationDetail({ conversationId }: ConversationDetailProps) 
         <div className="flex flex-wrap items-start justify-between gap-5">
           <div>
             <p className="eyebrow">Conversation workspace</p>
-            <h1 className="mt-3 text-3xl font-semibold tracking-tight text-zinc-950 sm:text-4xl">
-              {conversation.title}
-            </h1>
+            {isRenaming ? (
+              <input
+                aria-label="Conversation 标题"
+                autoFocus
+                className="mt-3 w-full max-w-2xl border-b border-zinc-400 bg-transparent text-3xl font-semibold tracking-tight text-zinc-950 outline-none sm:text-4xl"
+                onBlur={saveTitle}
+                onChange={(event) => setTitleDraft(event.target.value)}
+                onKeyDown={handleTitleKeyDown}
+                value={titleDraft}
+              />
+            ) : (
+              <button
+                aria-label="重命名 Conversation"
+                className="mt-3 block text-left text-3xl font-semibold tracking-tight text-zinc-950 hover:text-zinc-600 sm:text-4xl"
+                onClick={() => setIsRenaming(true)}
+                title="点击重命名"
+                type="button"
+              >
+                {conversation.title}
+              </button>
+            )}
           </div>
           <span className="rounded-full border border-zinc-200 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-600 shadow-sm">
             {conversation.sourceType}
@@ -207,22 +288,34 @@ export function ConversationDetail({ conversationId }: ConversationDetailProps) 
             className="min-h-64 w-full resize-y rounded-lg border border-zinc-200 bg-zinc-50 p-4 font-mono text-sm leading-7 text-zinc-800 outline-none focus:border-zinc-400 focus:bg-white focus:ring-2 focus:ring-zinc-100"
             onChange={(event) => {
               setDraft(event.target.value);
-              setFeedback(null);
+              setSaveStatus("editing");
             }}
             placeholder="在这里粘贴 ChatGPT、Claude、DeepSeek、Markdown 或其他原始文本…"
             value={draft}
           />
-          <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-            <p className="text-sm text-zinc-500" role="status">
-              {feedback ?? `${draft.length} 字符`}
-            </p>
-            <button
-              className="rounded-lg bg-zinc-950 px-4 py-2.5 text-sm font-medium text-white hover:bg-zinc-800"
-              onClick={saveRawText}
-              type="button"
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-xs text-zinc-500">
+            <div className="flex flex-wrap gap-x-4 gap-y-1">
+              <span>{draft.length} 字符</span>
+              <span>{countWords(draft)} 字</span>
+              <span>
+                最后保存：
+                {lastSavedAt
+                  ? new Intl.DateTimeFormat("zh-CN", {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                      second: "2-digit",
+                    }).format(new Date(lastSavedAt))
+                  : "尚未保存"}
+              </span>
+            </div>
+            <p
+              className={
+                saveStatus === "saved" ? "text-emerald-700" : "text-amber-700"
+              }
+              role="status"
             >
-              保存原始文本
-            </button>
+              {saveStatus === "saved" ? "Saved" : "Editing..."}
+            </p>
           </div>
         </div>
       </section>
@@ -249,6 +342,7 @@ export function ConversationDetail({ conversationId }: ConversationDetailProps) 
             <Link
               className="mt-5 inline-block rounded-lg border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-800 hover:bg-zinc-50"
               href="/review"
+              onClick={() => new BrowserProposalStorage().saveCurrent(proposal)}
             >
               前往整理建议
             </Link>
@@ -260,7 +354,7 @@ export function ConversationDetail({ conversationId }: ConversationDetailProps) 
             </p>
             <button
               className="rounded-lg bg-zinc-950 px-4 py-2.5 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-zinc-300"
-              disabled={!source}
+              disabled={!source || saveStatus === "editing"}
               onClick={runDemoAnalyzer}
               type="button"
             >
