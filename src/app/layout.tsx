@@ -15,22 +15,22 @@ export default function RootLayout({
   return (
     <html lang="zh-CN">
       <body>
-        <header className="border-b border-zinc-200 bg-white">
-          <nav className="mx-auto flex max-w-5xl items-center justify-between px-6 py-4">
-            <Link className="font-semibold text-zinc-950" href="/">
-              AI Learning OS
+        <header className="sticky top-0 z-40 border-b border-zinc-200/80 bg-white/90 backdrop-blur">
+          <nav className="mx-auto flex max-w-6xl items-center justify-between gap-5 px-5 py-3.5 sm:px-6">
+            <Link className="shrink-0 font-semibold tracking-tight text-zinc-950" href="/">
+              Learning OS
             </Link>
-            <div className="flex gap-5 text-sm text-zinc-600">
-              <Link className="hover:text-zinc-950" href="/import">
-                导入
+            <div className="flex items-center gap-2 overflow-x-auto text-sm text-zinc-600 sm:gap-5">
+              <Link className="whitespace-nowrap rounded-md px-2 py-1.5 hover:bg-zinc-100 hover:text-zinc-950" href="/">
+                首页
               </Link>
-              <Link className="hover:text-zinc-950" href="/analysis">
-                AI 分析
+              <Link className="whitespace-nowrap rounded-md px-2 py-1.5 hover:bg-zinc-100 hover:text-zinc-950" href="/conversation">
+                Conversation
               </Link>
-              <Link className="hover:text-zinc-950" href="/review">
-                审核
+              <Link className="whitespace-nowrap rounded-md px-2 py-1.5 hover:bg-zinc-100 hover:text-zinc-950" href="/review">
+                整理建议
               </Link>
-              <Link className="hover:text-zinc-950" href="/knowledge">
+              <Link className="whitespace-nowrap rounded-md px-2 py-1.5 hover:bg-zinc-100 hover:text-zinc-950" href="/knowledge">
                 知识库
               </Link>
             </div>

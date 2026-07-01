@@ -1,25 +1,18 @@
-import Link from "next/link";
+import { DashboardOverview } from "./dashboard-overview";
 
 export default function Home() {
   return (
-    <main className="flex min-h-[calc(100vh-65px)] items-center justify-center px-6">
-      <section className="max-w-xl space-y-5 text-center">
-        <p className="text-sm font-medium tracking-[0.2em] text-zinc-500">
-          PERSONAL AI LEARNING OS
-        </p>
-        <h1 className="text-4xl font-semibold tracking-tight text-zinc-950 sm:text-5xl">
-          把对话变成持续演化的知识
+    <main className="workspace-shell pb-24">
+      <div className="rounded-2xl border border-zinc-200 bg-white px-6 py-8 shadow-sm sm:px-8">
+        <p className="eyebrow">Dashboard</p>
+        <h1 className="mt-3 text-3xl font-semibold tracking-tight text-zinc-950 sm:text-4xl">
+          你的学习工作区
         </h1>
-        <p className="text-lg leading-8 text-zinc-600">
-          Sprint 1 已启动。下一步，我们会打通从 TXT 导入到第一张知识卡的完整体验。
+        <p className="mt-3 max-w-2xl text-base leading-7 text-zinc-600">
+          从原始 Conversation 出发，整理 Proposal，并沉淀为可持续使用的 Knowledge。
         </p>
-        <Link
-          className="inline-block rounded-lg bg-zinc-950 px-5 py-3 text-sm font-medium text-white"
-          href="/import"
-        >
-          开始体验
-        </Link>
-      </section>
+      </div>
+      <DashboardOverview />
     </main>
   );
 }

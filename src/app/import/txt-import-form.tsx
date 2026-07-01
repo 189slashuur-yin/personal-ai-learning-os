@@ -1,14 +1,26 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { type ChangeEvent, useState } from "react";
+import { type ChangeEvent, useEffect, useState } from "react";
+import type { Conversation } from "@/core/entities/conversation";
 import type { ImportedSource } from "@/core/entities/imported-source";
+import { BrowserConversationStorage } from "@/infrastructure/storage/browser-conversation-storage";
 import { BrowserSourceStorage } from "@/infrastructure/storage/browser-source-storage";
 
 export function TxtImportForm() {
   const router = useRouter();
   const [source, setSource] = useState<ImportedSource | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [conversationId, setConversationId] = useState("auto");
+
+  useEffect(() => {
+    const loadTimer = window.setTimeout(() => {
+      setConversations(new BrowserConversationStorage().getAll());
+    }, 0);
+
+    return () => window.clearTimeout(loadTimer);
+  }, []);
 
   async function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
@@ -45,13 +57,36 @@ export function TxtImportForm() {
     }
   }
 
-  function continueToAnalysis() {
+  function saveToConversation() {
     if (!source) {
       return;
     }
 
-    new BrowserSourceStorage().saveCurrent(source);
-    router.push("/analysis");
+    const conversationStorage = new BrowserConversationStorage();
+    const timestamp = new Date().toISOString();
+    let conversation =
+      conversationId === "auto"
+        ? null
+        : conversationStorage.getById(conversationId);
+
+    if (!conversation) {
+      conversation = {
+        id: crypto.randomUUID(),
+        title: source.name.replace(/\.txt$/i, ""),
+        sourceType: "TXT",
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      };
+    } else {
+      conversation = { ...conversation, updatedAt: timestamp };
+    }
+
+    conversationStorage.save(conversation);
+    new BrowserSourceStorage().save({
+      ...source,
+      conversationId: conversation.id,
+    });
+    router.push(`/conversation/${conversation.id}`);
   }
 
   return (
@@ -86,12 +121,27 @@ export function TxtImportForm() {
           <p className="max-h-36 overflow-hidden whitespace-pre-wrap rounded-lg bg-zinc-50 p-4 text-sm leading-6 text-zinc-700">
             {source.content.slice(0, 300)}
           </p>
+          <label className="block text-sm font-medium text-zinc-800">
+            保存到 Conversation
+            <select
+              className="mt-2 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2.5 outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+              onChange={(event) => setConversationId(event.target.value)}
+              value={conversationId}
+            >
+              <option value="auto">自动创建新的 Conversation</option>
+              {conversations.map((conversation) => (
+                <option key={conversation.id} value={conversation.id}>
+                  {conversation.title}
+                </option>
+              ))}
+            </select>
+          </label>
           <button
             className="rounded-lg bg-zinc-950 px-5 py-3 text-sm font-medium text-white"
-            onClick={continueToAnalysis}
+            onClick={saveToConversation}
             type="button"
           >
-            保存并进入分析
+            保存并打开 Conversation
           </button>
         </div>
       ) : null}

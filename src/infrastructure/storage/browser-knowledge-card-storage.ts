@@ -21,7 +21,11 @@ export class BrowserKnowledgeCardStorage implements KnowledgeCardStorage {
     return this.getAll()[0] ?? null;
   }
 
-  private getAll() {
+  getByProposalId(proposalId: string) {
+    return this.getAll().find((card) => card.proposalId === proposalId) ?? null;
+  }
+
+  getAll() {
     const storedCards = window.localStorage.getItem(KNOWLEDGE_CARDS_KEY);
 
     if (!storedCards) {
