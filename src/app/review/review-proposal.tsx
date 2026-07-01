@@ -4,7 +4,9 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import type { Proposal } from "@/core/entities/proposal";
+import { createKnowledgeCard } from "@/core/services/knowledge-card-creation";
 import { acceptProposal } from "@/core/services/proposal-review";
+import { BrowserKnowledgeCardStorage } from "@/infrastructure/storage/browser-knowledge-card-storage";
 import { BrowserProposalStorage } from "@/infrastructure/storage/browser-proposal-storage";
 
 type ReviewState =
@@ -62,6 +64,13 @@ export function ReviewProposal() {
 
     const acceptedProposal = acceptProposal(state.proposal);
     new BrowserProposalStorage().saveCurrent(acceptedProposal);
+
+    const knowledgeCard = createKnowledgeCard(acceptedProposal);
+
+    if (knowledgeCard) {
+      new BrowserKnowledgeCardStorage().save(knowledgeCard);
+    }
+
     router.push("/knowledge");
   }
 
