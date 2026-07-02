@@ -10,6 +10,10 @@ export type Proposal = {
     excerpt: string;
   };
   generatedBy: "Demo Analyzer Generated";
+  providerId?: string;
+  providerName?: string;
+  generatedAt?: string;
+  analysisMode?: "source" | "messages";
   status: "Pending" | "Accepted" | "Rejected" | "Applied";
   createdAt: string;
 };

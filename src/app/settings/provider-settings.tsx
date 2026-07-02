@@ -53,6 +53,12 @@ export function ProviderSettings() {
                 <span className="mt-1 block text-sm text-zinc-500">
                   {provider.enabled ? "可用" : "Coming Soon"}
                 </span>
+                {provider.kind === "demo" ? (
+                  <span className="mt-2 block max-w-xl text-xs leading-5 text-zinc-500">
+                    Demo Provider uses deterministic local logic and does not
+                    call external AI APIs.
+                  </span>
+                ) : null}
               </span>
               <span
                 className={`rounded-full px-3 py-1 text-xs font-semibold ${

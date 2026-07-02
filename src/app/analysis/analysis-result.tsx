@@ -13,8 +13,22 @@ type AnalysisState =
   | { status: "complete"; proposal: Proposal }
   | { status: "missing-source" };
 
+function formatDate(value: string) {
+  return new Intl.DateTimeFormat("zh-CN", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(value));
+}
+
 export function AnalysisResult() {
   const [state, setState] = useState<AnalysisState>({ status: "analyzing" });
+  const [providerName] = useState(() =>
+    typeof window === "undefined"
+      ? "Demo Provider"
+      : new ProviderService(
+          new BrowserAIProviderStorage(),
+        ).getCurrentProvider().providerInfo.name,
+  );
 
   useEffect(() => {
     const analysisTimer = window.setTimeout(() => {
@@ -55,9 +69,14 @@ export function AnalysisResult() {
 
   if (state.status === "analyzing") {
     return (
-      <p className="mt-8 text-sm text-zinc-500" role="status">
-        Demo Analyzer 正在分析已保存的 TXT Source…
-      </p>
+      <section className="mt-8 max-w-2xl rounded-xl border border-zinc-200 bg-white p-6">
+        <p className="text-sm font-medium text-zinc-900">
+          当前 Provider：{providerName}
+        </p>
+        <p className="mt-3 text-sm text-zinc-500" role="status">
+          Demo Analyzer 正在分析已保存的 TXT Source…
+        </p>
+      </section>
     );
   }
 
@@ -75,6 +94,36 @@ export function AnalysisResult() {
           {state.proposal.generatedBy}
         </p>
         <p className="mt-2 font-medium text-zinc-900">{state.proposal.title}</p>
+        <dl className="mt-4 grid gap-3 border-t border-zinc-200 pt-4 text-sm sm:grid-cols-2">
+          <div>
+            <dt className="text-zinc-500">Provider</dt>
+            <dd className="mt-1 font-medium text-zinc-900">
+              {state.proposal.providerName ?? "Unknown Provider"}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-zinc-500">生成时间</dt>
+            <dd className="mt-1 font-medium text-zinc-900">
+              {formatDate(
+                state.proposal.generatedAt ?? state.proposal.createdAt,
+              )}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-zinc-500">Source type</dt>
+            <dd className="mt-1 font-medium capitalize text-zinc-900">
+              {state.proposal.analysisMode ?? "source"}
+            </dd>
+          </div>
+          {state.proposal.analysisMode === "messages" ? (
+            <div>
+              <dt className="text-zinc-500">Selected messages</dt>
+              <dd className="mt-1 font-medium text-zinc-900">
+                {state.proposal.sourceMessageIds?.length ?? 0}
+              </dd>
+            </div>
+          ) : null}
+        </dl>
       </div>
 
       <Link

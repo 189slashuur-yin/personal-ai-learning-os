@@ -294,6 +294,15 @@ export function KnowledgeDetail({ cardId }: { cardId: string }) {
             ) : null}
             <div><dt className="font-medium text-zinc-500">创建时间</dt><dd className="mt-1.5 text-zinc-900">{formatDate(card.createdAt)}</dd></div>
             <div><dt className="font-medium text-zinc-500">更新时间</dt><dd className="mt-1.5 text-zinc-900">{formatDate(card.updatedAt)}</dd></div>
+            {card.providerName ? (
+              <div><dt className="font-medium text-zinc-500">来源 Provider</dt><dd className="mt-1.5 text-zinc-900">{card.providerName}</dd></div>
+            ) : null}
+            {card.generatedAt ? (
+              <div><dt className="font-medium text-zinc-500">Proposal 生成时间</dt><dd className="mt-1.5 text-zinc-900">{formatDate(card.generatedAt)}</dd></div>
+            ) : null}
+            {card.analysisMode ? (
+              <div><dt className="font-medium text-zinc-500">Analysis mode</dt><dd className="mt-1.5 capitalize text-zinc-900">{card.analysisMode}</dd></div>
+            ) : null}
             <div><dt className="font-medium text-zinc-500">状态</dt><dd className="mt-1.5 text-zinc-900">{draft.status}</dd></div>
           </dl>
           {missingSourceMessageCount > 0 && sourceEvidenceExcerpt ? (

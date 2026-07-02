@@ -65,6 +65,13 @@ export function ConversationDetail({ conversationId }: ConversationDetailProps) 
   const [selectedMessageIds, setSelectedMessageIds] = useState<Set<string>>(
     new Set(),
   );
+  const [providerName] = useState(() =>
+    typeof window === "undefined"
+      ? "Demo Provider"
+      : new ProviderService(
+          new BrowserAIProviderStorage(),
+        ).getCurrentProvider().providerInfo.name,
+  );
   const lastSavedContent = useRef("");
 
   useEffect(() => {
@@ -545,14 +552,19 @@ export function ConversationDetail({ conversationId }: ConversationDetailProps) 
                 ))}
               </ol>
               <div className="mt-5 flex justify-end">
-                <button
-                  className="rounded-lg bg-zinc-950 px-4 py-2.5 text-sm font-medium text-white hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-300"
-                  disabled={selectedMessageIds.size === 0}
-                  onClick={runMessageAnalyzer}
-                  type="button"
-                >
-                  基于选中 Messages 生成 Proposal
-                </button>
+                <div className="text-right">
+                  <p className="mb-2 text-xs text-zinc-500">
+                    当前 Provider：{providerName}
+                  </p>
+                  <button
+                    className="rounded-lg bg-zinc-950 px-4 py-2.5 text-sm font-medium text-white hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-300"
+                    disabled={selectedMessageIds.size === 0}
+                    onClick={runMessageAnalyzer}
+                    type="button"
+                  >
+                    基于选中 Messages 生成 Proposal
+                  </button>
+                </div>
               </div>
             </>
           ) : (
@@ -573,14 +585,19 @@ export function ConversationDetail({ conversationId }: ConversationDetailProps) 
         </div>
         <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
           <p className="text-sm text-zinc-500">共 {proposals.length} 条 Proposal</p>
-          <button
-            className="rounded-lg border border-zinc-200 bg-white px-4 py-2.5 text-sm font-medium text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-40"
-            disabled={!source || saveStatus === "editing"}
-            onClick={runDemoAnalyzer}
-            type="button"
-          >
-            从 Source 生成 Proposal
-          </button>
+          <div className="text-right">
+            <p className="mb-2 text-xs text-zinc-500">
+              当前 Provider：{providerName}
+            </p>
+            <button
+              className="rounded-lg border border-zinc-200 bg-white px-4 py-2.5 text-sm font-medium text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-40"
+              disabled={!source || saveStatus === "editing"}
+              onClick={runDemoAnalyzer}
+              type="button"
+            >
+              从 Source 生成 Proposal
+            </button>
+          </div>
         </div>
         <ProposalWorkspace proposals={proposals} onDelete={deleteProposal} />
       </section>

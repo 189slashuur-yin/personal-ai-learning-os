@@ -38,6 +38,7 @@ export class DemoProvider implements AnalyzerProvider {
   analyzeSource(source: ImportedSource): Proposal {
     const content = normalizeText(source.content);
     const sourceTitle = source.name.replace(/\.txt$/i, "");
+    const generatedAt = new Date().toISOString();
 
     return {
       id: `source-proposal-${crypto.randomUUID()}`,
@@ -50,8 +51,12 @@ export class DemoProvider implements AnalyzerProvider {
         excerpt: excerpt(content, EVIDENCE_LENGTH),
       },
       generatedBy: "Demo Analyzer Generated",
+      providerId: this.providerInfo.id,
+      providerName: this.providerInfo.name,
+      generatedAt,
+      analysisMode: "source",
       status: "Pending",
-      createdAt: new Date().toISOString(),
+      createdAt: generatedAt,
     };
   }
 
@@ -73,6 +78,7 @@ export class DemoProvider implements AnalyzerProvider {
       )
       .join("\n\n");
     const normalizedEvidence = normalizeText(evidence);
+    const generatedAt = new Date().toISOString();
 
     return {
       id: `message-proposal-${crypto.randomUUID()}`,
@@ -85,8 +91,12 @@ export class DemoProvider implements AnalyzerProvider {
         excerpt: evidence,
       },
       generatedBy: "Demo Analyzer Generated",
+      providerId: this.providerInfo.id,
+      providerName: this.providerInfo.name,
+      generatedAt,
+      analysisMode: "messages",
       status: "Pending",
-      createdAt: new Date().toISOString(),
+      createdAt: generatedAt,
     };
   }
 }

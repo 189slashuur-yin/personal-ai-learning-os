@@ -10,6 +10,9 @@ export type KnowledgeCard = {
   sourceMessageIds?: string[];
   sourceMessageCount?: number;
   sourceEvidenceExcerpt?: string;
+  providerName?: string;
+  generatedAt?: string;
+  analysisMode?: "source" | "messages";
   tagIds: string[];
   createdAt: string;
   updatedAt: string;
