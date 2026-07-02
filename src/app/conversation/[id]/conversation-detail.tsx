@@ -5,11 +5,14 @@ import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 import type { Conversation } from "@/core/entities/conversation";
 import type { ImportedSource } from "@/core/entities/imported-source";
 import type { KnowledgeCard } from "@/core/entities/knowledge-card";
+import type { Message, MessageRole } from "@/core/entities/message";
 import type { Proposal } from "@/core/entities/proposal";
-import { analyzeSource } from "@/core/services/demo-analyzer";
+import { analyzeMessages, analyzeSource } from "@/core/services/demo-analyzer";
+import { parseMessagesFromRawText } from "@/core/services/message-parser";
 import { countWords } from "@/core/services/text-statistics";
 import { BrowserConversationStorage } from "@/infrastructure/storage/browser-conversation-storage";
 import { BrowserKnowledgeCardStorage } from "@/infrastructure/storage/browser-knowledge-card-storage";
+import { BrowserMessageStorage } from "@/infrastructure/storage/browser-message-storage";
 import { BrowserProposalStorage } from "@/infrastructure/storage/browser-proposal-storage";
 import { BrowserSourceStorage } from "@/infrastructure/storage/browser-source-storage";
 
@@ -24,11 +27,31 @@ type DetailState =
       status: "ready";
       conversation: Conversation;
       source: ImportedSource | null;
-      proposal: Proposal | null;
+      messages: Message[];
+      proposals: Proposal[];
       knowledgeCard: KnowledgeCard | null;
     };
 
 type SaveStatus = "saved" | "editing";
+
+const messageRoleLabels: Record<MessageRole, string> = {
+  user: "User",
+  assistant: "Assistant",
+  system: "System",
+  unknown: "Unknown",
+};
+
+function messageStyle(role: MessageRole) {
+  if (role === "user") {
+    return "ml-auto border-sky-200 bg-sky-50";
+  }
+
+  if (role === "assistant") {
+    return "mr-auto border-violet-200 bg-violet-50";
+  }
+
+  return "mx-auto border-zinc-200 bg-zinc-50";
+}
 
 export function ConversationDetail({ conversationId }: ConversationDetailProps) {
   const [state, setState] = useState<DetailState>({ status: "loading" });
@@ -37,6 +60,9 @@ export function ConversationDetail({ conversationId }: ConversationDetailProps) 
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
   const [isRenaming, setIsRenaming] = useState(false);
   const [titleDraft, setTitleDraft] = useState("");
+  const [selectedMessageIds, setSelectedMessageIds] = useState<Set<string>>(
+    new Set(),
+  );
   const lastSavedContent = useRef("");
 
   useEffect(() => {
@@ -57,12 +83,28 @@ export function ConversationDetail({ conversationId }: ConversationDetailProps) 
       new BrowserConversationStorage().save(openedConversation);
 
       const source = new BrowserSourceStorage().getByConversationId(conversationId);
-      const proposal = source
-        ? new BrowserProposalStorage().getBySourceId(source.id)
+      const proposalStorage = new BrowserProposalStorage();
+      const conversationProposals = proposalStorage.getByConversationId(
+        conversationId,
+      );
+      const sourceProposal = source
+        ? proposalStorage.getBySourceId(source.id)
         : null;
-      const knowledgeCard = proposal
-        ? new BrowserKnowledgeCardStorage().getByProposalId(proposal.id)
-        : null;
+      const proposals = (
+        sourceProposal &&
+        !conversationProposals.some(
+          (proposal) => proposal.id === sourceProposal.id,
+        )
+          ? [sourceProposal, ...conversationProposals]
+          : conversationProposals
+      ).sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+      const knowledgeCardStorage = new BrowserKnowledgeCardStorage();
+      const knowledgeCard = proposals
+        .map((proposal) => knowledgeCardStorage.getByProposalId(proposal.id))
+        .find((card) => card !== null) ?? null;
+      const messages = new BrowserMessageStorage().getByConversationId(
+        conversationId,
+      );
 
       const sourceContent = source?.content ?? "";
       lastSavedContent.current = sourceContent;
@@ -73,7 +115,8 @@ export function ConversationDetail({ conversationId }: ConversationDetailProps) 
         status: "ready",
         conversation: openedConversation,
         source,
-        proposal,
+        messages,
+        proposals,
         knowledgeCard,
       });
     }, 0);
@@ -150,7 +193,8 @@ export function ConversationDetail({ conversationId }: ConversationDetailProps) 
     );
   }
 
-  const { conversation, source, proposal, knowledgeCard } = state;
+  const { conversation, source, proposals, knowledgeCard } = state;
+  const latestProposal = proposals[0] ?? null;
   const updatedAt = new Intl.DateTimeFormat("zh-CN", {
     dateStyle: "medium",
     timeStyle: "short",
@@ -165,8 +209,69 @@ export function ConversationDetail({ conversationId }: ConversationDetailProps) 
     new BrowserProposalStorage().saveCurrent(nextProposal);
     setState({
       ...state,
-      proposal: nextProposal,
+      proposals: [
+        nextProposal,
+        ...state.proposals.filter((proposal) => proposal.id !== nextProposal.id),
+      ],
       knowledgeCard: null,
+    });
+  }
+
+  function runMessageAnalyzer() {
+    if (state.status !== "ready" || selectedMessageIds.size === 0) {
+      return;
+    }
+
+    const selectedMessages = state.messages.filter((message) =>
+      selectedMessageIds.has(message.id),
+    );
+    const nextProposal = analyzeMessages(
+      state.conversation.id,
+      selectedMessages,
+    );
+    const proposalStorage = new BrowserProposalStorage();
+    proposalStorage.saveFromMessages(nextProposal);
+    proposalStorage.saveCurrent(nextProposal);
+    setState({
+      ...state,
+      proposals: [nextProposal, ...state.proposals],
+    });
+  }
+
+  function generateMessages() {
+    if (state.status !== "ready" || !draft.trim()) {
+      return;
+    }
+
+    if (
+      state.messages.length > 0 &&
+      !window.confirm(
+        `当前已有 ${state.messages.length} 条 Message。继续将覆盖现有 Messages，确定吗？`,
+      )
+    ) {
+      return;
+    }
+
+    const messages = parseMessagesFromRawText(draft, state.conversation.id);
+    new BrowserMessageStorage().replaceByConversationId(
+      state.conversation.id,
+      messages,
+    );
+    setSelectedMessageIds(new Set());
+    setState({ ...state, messages });
+  }
+
+  function toggleMessage(messageId: string) {
+    setSelectedMessageIds((currentIds) => {
+      const nextIds = new Set(currentIds);
+
+      if (nextIds.has(messageId)) {
+        nextIds.delete(messageId);
+      } else {
+        nextIds.add(messageId);
+      }
+
+      return nextIds;
     });
   }
 
@@ -255,7 +360,7 @@ export function ConversationDetail({ conversationId }: ConversationDetailProps) 
           <p className="detail-kicker">01 · Context</p>
           <h2 className="detail-title">Conversation 信息</h2>
         </div>
-        <dl className="grid gap-4 rounded-xl border border-zinc-200 bg-white p-5 text-sm sm:grid-cols-3">
+        <dl className="grid gap-4 rounded-xl border border-zinc-200 bg-white p-5 text-sm sm:grid-cols-5">
           <div>
             <dt className="text-zinc-500">来源</dt>
             <dd className="mt-1 font-medium text-zinc-900">
@@ -272,6 +377,18 @@ export function ConversationDetail({ conversationId }: ConversationDetailProps) 
               {source ? `${source.content.length} 字符` : "尚未保存"}
             </dd>
           </div>
+          <div>
+            <dt className="text-zinc-500">Messages</dt>
+            <dd className="mt-1 font-medium text-zinc-900">
+              {state.messages.length} 条
+            </dd>
+          </div>
+          <div>
+            <dt className="text-zinc-500">Proposals</dt>
+            <dd className="mt-1 font-medium text-zinc-900">
+              {proposals.length} 条
+            </dd>
+          </div>
         </dl>
       </section>
 
@@ -280,7 +397,7 @@ export function ConversationDetail({ conversationId }: ConversationDetailProps) 
           <p className="detail-kicker">02 · Source</p>
           <h2 className="detail-title">原始文本 Preview</h2>
           <p className="detail-description">
-            可直接使用 Ctrl+V 粘贴完整文本；Sprint2 暂不拆分 Message。
+            可直接使用 Ctrl+V 粘贴完整文本；保存后仍保留原文。
           </p>
         </div>
         <div className="rounded-xl border border-zinc-200 bg-white p-5">
@@ -322,29 +439,135 @@ export function ConversationDetail({ conversationId }: ConversationDetailProps) 
 
       <section className="detail-section">
         <div className="detail-section-heading">
-          <p className="detail-kicker">03 · Distill</p>
-          <h2 className="detail-title">AI 提炼</h2>
+          <p className="detail-kicker">03 · Messages</p>
+          <h2 className="detail-title">Message Timeline</h2>
           <p className="detail-description">
-            当前继续使用 Sprint1 的 Demo Analyzer，不调用任何 AI。
+            按发言标记拆分原始文本，不调用 AI API。
           </p>
         </div>
-        {proposal ? (
-          <div className="rounded-xl border border-zinc-200 bg-white p-5">
-            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500">
-              {proposal.generatedBy}
+        <div>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm text-zinc-500">
+              {state.messages.length > 0
+                ? `已生成 ${state.messages.length} 条 Message`
+                : "尚未生成 Message"}
             </p>
+            <button
+              className="rounded-lg bg-zinc-950 px-4 py-2.5 text-sm font-medium text-white hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-300"
+              disabled={!draft.trim()}
+              onClick={generateMessages}
+              type="button"
+            >
+              从原始文本生成 Messages
+            </button>
+          </div>
+
+          {state.messages.length > 0 ? (
+            <>
+              <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-zinc-200 bg-white px-4 py-3">
+                <p className="text-sm font-medium text-zinc-700" role="status">
+                  已选择 {selectedMessageIds.size} / {state.messages.length} 条
+                </p>
+                <div className="flex items-center gap-2">
+                  <button
+                    className="rounded-md border border-zinc-200 px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-50"
+                    onClick={() =>
+                      setSelectedMessageIds(
+                        new Set(state.messages.map((message) => message.id)),
+                      )
+                    }
+                    type="button"
+                  >
+                    全选
+                  </button>
+                  <button
+                    className="rounded-md border border-zinc-200 px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-40"
+                    disabled={selectedMessageIds.size === 0}
+                    onClick={() => setSelectedMessageIds(new Set())}
+                    type="button"
+                  >
+                    清空选择
+                  </button>
+                </div>
+              </div>
+              <ol className="mt-4 space-y-4">
+                {state.messages.map((message) => (
+                  <li
+                    className={`flex max-w-[90%] gap-3 rounded-xl border p-4 sm:max-w-[82%] ${messageStyle(message.role)} ${selectedMessageIds.has(message.id) ? "ring-2 ring-zinc-400 ring-offset-2" : ""}`}
+                    key={message.id}
+                  >
+                    <input
+                      aria-label={`选择第 ${message.order + 1} 条 Message`}
+                      checked={selectedMessageIds.has(message.id)}
+                      className="mt-0.5 size-4 shrink-0 accent-zinc-950"
+                      onChange={() => toggleMessage(message.id)}
+                      type="checkbox"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center justify-between gap-4 text-xs">
+                        <span className="font-semibold uppercase tracking-[0.12em] text-zinc-600">
+                          {messageRoleLabels[message.role]}
+                        </span>
+                        <span className="text-zinc-400">#{message.order + 1}</span>
+                      </div>
+                      <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-zinc-800">
+                        {message.content}
+                      </p>
+                    </div>
+                  </li>
+                ))}
+              </ol>
+              <div className="mt-5 flex justify-end">
+                <button
+                  className="rounded-lg bg-zinc-950 px-4 py-2.5 text-sm font-medium text-white hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-300"
+                  disabled={selectedMessageIds.size === 0}
+                  onClick={runMessageAnalyzer}
+                  type="button"
+                >
+                  基于选中 Messages 生成 Proposal
+                </button>
+              </div>
+            </>
+          ) : (
+            <div className="mt-5 rounded-xl border border-dashed border-zinc-300 bg-zinc-50 p-5 text-sm leading-6 text-zinc-500">
+              支持识别“我：”“用户：”“GPT：”“AI：”“Assistant：”。无法识别的文本会保存为 Unknown Message。
+            </div>
+          )}
+        </div>
+      </section>
+
+      <section className="detail-section">
+        <div className="detail-section-heading">
+          <p className="detail-kicker">04 · Distill</p>
+          <h2 className="detail-title">AI 提炼</h2>
+          <p className="detail-description">
+            汇总当前 Conversation 的 Proposal，不调用任何 AI。
+          </p>
+        </div>
+        {latestProposal ? (
+          <div className="rounded-xl border border-zinc-200 bg-white p-5">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500">
+                最近生成 · {latestProposal.generatedBy}
+              </p>
+              <span className="rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-semibold text-zinc-600">
+                共 {proposals.length} 条 Proposal
+              </span>
+            </div>
             <h3 className="mt-2 font-semibold text-zinc-950">
-              {proposal.title}
+              {latestProposal.title}
             </h3>
             <p className="mt-3 line-clamp-3 text-sm leading-6 text-zinc-600">
-              {proposal.summary}
+              {latestProposal.summary}
             </p>
             <Link
               className="mt-5 inline-block rounded-lg border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-800 hover:bg-zinc-50"
-              href="/review"
-              onClick={() => new BrowserProposalStorage().saveCurrent(proposal)}
+              href={`/review?proposal=${latestProposal.id}`}
+              onClick={() =>
+                new BrowserProposalStorage().saveCurrent(latestProposal)
+              }
             >
-              前往整理建议
+              前往 Review
             </Link>
           </div>
         ) : (
@@ -366,7 +589,7 @@ export function ConversationDetail({ conversationId }: ConversationDetailProps) 
 
       <section className="detail-section">
         <div className="detail-section-heading">
-          <p className="detail-kicker">04 · Knowledge</p>
+          <p className="detail-kicker">05 · Knowledge</p>
           <h2 className="detail-title">KnowledgeCard</h2>
         </div>
         {knowledgeCard ? (

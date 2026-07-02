@@ -101,9 +101,14 @@ export function ReviewProposal({ proposalId }: { proposalId?: string }) {
           <p className="text-sm font-medium text-zinc-600">
             {state.proposal.sourceEvidence.sourceName}
           </p>
-          <blockquote className="mt-2 border-l-2 border-zinc-300 pl-4 leading-7 text-zinc-700">
+          <blockquote className="mt-2 whitespace-pre-wrap border-l-2 border-zinc-300 pl-4 leading-7 text-zinc-700">
             {state.proposal.sourceEvidence.excerpt}
           </blockquote>
+          {state.proposal.sourceMessageIds?.length ? (
+            <p className="mt-3 text-xs text-zinc-500">
+              来源 Message IDs：{state.proposal.sourceMessageIds.join("、")}
+            </p>
+          ) : null}
         </div>
       </section>
 

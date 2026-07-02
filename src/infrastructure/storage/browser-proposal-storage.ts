@@ -20,6 +20,14 @@ export class BrowserProposalStorage implements ProposalStorage {
     window.localStorage.setItem(PROPOSALS_KEY, JSON.stringify(proposals));
   }
 
+  saveFromMessages(proposal: Proposal) {
+    if (!proposal.conversationId || !proposal.sourceMessageIds?.length) {
+      return;
+    }
+
+    this.save(proposal);
+  }
+
   saveCurrent(proposal: Proposal) {
     this.save(proposal);
     window.localStorage.setItem(CURRENT_PROPOSAL_KEY, JSON.stringify(proposal));
@@ -60,15 +68,37 @@ export class BrowserProposalStorage implements ProposalStorage {
     return this.getAll().find((proposal) => proposal.sourceId === sourceId) ?? null;
   }
 
+  getByConversationId(conversationId: string) {
+    return this.getAll()
+      .filter((proposal) => proposal.conversationId === conversationId)
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+  }
+
   removeBySourceIds(sourceIds: string[]) {
     const sourceIdSet = new Set(sourceIds);
     const proposals = this.getAll().filter(
-      (proposal) => !sourceIdSet.has(proposal.sourceId),
+      (proposal) =>
+        !proposal.sourceId || !sourceIdSet.has(proposal.sourceId),
     );
     window.localStorage.setItem(PROPOSALS_KEY, JSON.stringify(proposals));
 
     const currentProposal = this.getCurrent();
-    if (currentProposal && sourceIdSet.has(currentProposal.sourceId)) {
+    if (
+      currentProposal?.sourceId &&
+      sourceIdSet.has(currentProposal.sourceId)
+    ) {
+      window.localStorage.removeItem(CURRENT_PROPOSAL_KEY);
+    }
+  }
+
+  removeByConversationId(conversationId: string) {
+    const proposals = this.getAll().filter(
+      (proposal) => proposal.conversationId !== conversationId,
+    );
+    window.localStorage.setItem(PROPOSALS_KEY, JSON.stringify(proposals));
+
+    const currentProposal = this.getCurrent();
+    if (currentProposal?.conversationId === conversationId) {
       window.localStorage.removeItem(CURRENT_PROPOSAL_KEY);
     }
   }

@@ -6,11 +6,14 @@ import type { Conversation } from "@/core/entities/conversation";
 import type { KnowledgeCard } from "@/core/entities/knowledge-card";
 import { BrowserConversationStorage } from "@/infrastructure/storage/browser-conversation-storage";
 import { BrowserKnowledgeCardStorage } from "@/infrastructure/storage/browser-knowledge-card-storage";
+import { BrowserMessageStorage } from "@/infrastructure/storage/browser-message-storage";
 import { BrowserProposalStorage } from "@/infrastructure/storage/browser-proposal-storage";
 
 type DashboardData = {
   conversationCount: number;
   knowledgeCount: number;
+  messageCount: number;
+  messageCountsByConversation: Record<string, number>;
   proposalCount: number;
   recentConversations: Conversation[];
   recentKnowledge: KnowledgeCard[];
@@ -46,10 +49,21 @@ export function DashboardOverview() {
           new Date(right.lastOpenedAt).getTime() -
           new Date(left.lastOpenedAt).getTime(),
       );
+      const messages = new BrowserMessageStorage().getAll();
+      const messageCountsByConversation = messages.reduce<Record<string, number>>(
+        (counts, message) => {
+          counts[message.conversationId] =
+            (counts[message.conversationId] ?? 0) + 1;
+          return counts;
+        },
+        {},
+      );
 
       setData({
         conversationCount: conversations.length,
         knowledgeCount: activeKnowledge.length,
+        messageCount: messages.length,
+        messageCountsByConversation,
         proposalCount: new BrowserProposalStorage().getAll().length,
         recentConversations: recentConversations.slice(0, 4),
         recentKnowledge: activeKnowledge.slice(0, 4),
@@ -74,6 +88,7 @@ export function DashboardOverview() {
 
   const stats = [
     { label: "Conversation", value: data.conversationCount },
+    { label: "Messages", value: data.messageCount },
     { label: "Knowledge", value: data.knowledgeCount },
     { label: "Proposal", value: data.proposalCount },
     { label: "最近更新时间", value: formatDashboardTime(data.latestUpdatedAt) },
@@ -82,7 +97,7 @@ export function DashboardOverview() {
 
   return (
     <>
-      <section className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+      <section className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-6">
         {stats.map((stat) => (
           <div
             className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm"
@@ -137,7 +152,7 @@ export function DashboardOverview() {
                     {conversation.title}
                   </p>
                   <p className="mt-1 text-xs text-zinc-500">
-                    {conversation.sourceType} · 更新 {formatDashboardTime(conversation.updatedAt)} · 打开 {formatDashboardTime(conversation.lastOpenedAt)}
+                    {conversation.sourceType} · {data.messageCountsByConversation[conversation.id] ?? 0} Messages · 更新 {formatDashboardTime(conversation.updatedAt)} · 打开 {formatDashboardTime(conversation.lastOpenedAt)}
                   </p>
                 </div>
                 <span className="text-sm text-zinc-400">→</span>

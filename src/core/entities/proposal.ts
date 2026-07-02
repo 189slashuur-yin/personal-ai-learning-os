@@ -1,6 +1,8 @@
 export type Proposal = {
   id: string;
-  sourceId: string;
+  sourceId?: string;
+  conversationId?: string;
+  sourceMessageIds?: string[];
   title: string;
   summary: string;
   sourceEvidence: {

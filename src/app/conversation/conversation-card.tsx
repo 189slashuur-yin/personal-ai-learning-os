@@ -4,6 +4,7 @@ import type { Conversation } from "@/core/entities/conversation";
 type ConversationCardProps = {
   conversation: Conversation;
   knowledgeCount: number;
+  messageCount: number;
   proposalCount: number;
   onDelete: (conversation: Conversation) => void;
   onDuplicate: (conversation: Conversation) => void;
@@ -12,6 +13,7 @@ type ConversationCardProps = {
 export function ConversationCard({
   conversation,
   knowledgeCount,
+  messageCount,
   proposalCount,
   onDelete,
   onDuplicate,
@@ -41,7 +43,11 @@ export function ConversationCard({
         </span>
       </div>
       <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-zinc-100 pt-4 text-xs text-zinc-500">
-        <div className="flex gap-5">
+        <div className="flex flex-wrap gap-x-5 gap-y-2">
+          <span>
+            <strong className="mr-1 text-zinc-800">{messageCount}</strong>
+            Messages
+          </span>
           <span>
             <strong className="mr-1 text-zinc-800">{knowledgeCount}</strong>
             Knowledge
