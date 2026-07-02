@@ -12,7 +12,7 @@ Proposal → Review
 KnowledgeCard + Tags
 ```
 
-当前是完成 Sprint8 的浏览器端 MVP：数据保存在当前浏览器的 LocalStorage 中，不需要数据库，也不会调用外部 AI API。内置 Demo Provider 使用确定性的本地逻辑，适合验证产品流程，不代表真实 AI 分析质量。
+当前是完成 Sprint9 的浏览器端 MVP：数据保存在当前浏览器的 LocalStorage 中，不需要数据库。内置 Demo Provider 使用确定性的本地逻辑；用户也可以显式启用本机 Ollama，通过本地 HTTP 生成待审核 Proposal。
 
 ## 当前功能
 
@@ -30,8 +30,10 @@ KnowledgeCard + Tags
 - 展示 Proposal confidence、risk level 与 suggested action；旧数据使用 legacy 默认展示。
 - Provider Configuration 默认目录、只读参数、enabled 状态与离线 Connection Test。
 - Provider Capability Badge，以及 Proposal 和 KnowledgeCard 的生成能力快照。
+- Ollama Provider Adapter，以及可编辑的本地地址、模型、超时和真实本地连接测试。
+- Source 与 selected Messages 可使用已启用并选中的 Ollama；非法输出不会写入 Proposal。
 
-OpenAI、Claude、Gemini、Ollama、DeepSeek 和 Azure OpenAI 只提供默认配置与能力展示；不会联网，也不能作为 Analyzer 运行。
+OpenAI、Claude、Gemini、DeepSeek 和 Azure OpenAI 只提供默认配置与能力展示，不会发起真实请求。Ollama 默认关闭，Demo Provider 始终可作为默认回退。
 
 ## 运行项目
 
@@ -77,7 +79,7 @@ git diff --check
 - Next.js 16、React 19、TypeScript、Tailwind CSS 4。
 - 模块化单体：`Entity → Contract ← BrowserStorage`，由 Service 编排业务，Page 负责交互。
 - 页面不得直接调用 LocalStorage；所有 key、序列化和兼容逻辑集中在 `src/infrastructure/storage`。
-- 当前没有账号、云同步、服务端数据库、真实 AI 调用或多人协作。
+- 当前没有账号、云同步、服务端数据库、云端 AI 调用或多人协作；唯一真实模型调用是用户显式启用的本地 Ollama。
 - 清除浏览器站点数据会删除本地内容；当前尚无正式备份恢复流程。
 
 更详细的产品边界见 [PROJECT.md](./PROJECT.md)，分层与数据流见 [ARCHITECTURE.md](./ARCHITECTURE.md)，后续计划见 [ROADMAP.md](./ROADMAP.md)。

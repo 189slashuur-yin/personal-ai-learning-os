@@ -12,6 +12,7 @@ import { BrowserConversationStorage } from "@/infrastructure/storage/browser-con
 import { BrowserKnowledgeCardStorage } from "@/infrastructure/storage/browser-knowledge-card-storage";
 import { BrowserMessageStorage } from "@/infrastructure/storage/browser-message-storage";
 import { BrowserProposalStorage } from "@/infrastructure/storage/browser-proposal-storage";
+import { BrowserPromptTemplateStorage } from "@/infrastructure/storage/browser-prompt-template-storage";
 import { BrowserProviderConfigurationStorage } from "@/infrastructure/storage/browser-provider-configuration-storage";
 import { BrowserTagStorage } from "@/infrastructure/storage/browser-tag-storage";
 
@@ -71,11 +72,20 @@ export function DashboardOverview() {
         },
         {},
       );
+      const providerService = new ProviderService(
+        new BrowserAIProviderStorage(),
+        new BrowserProviderConfigurationStorage(),
+        new BrowserPromptTemplateStorage(),
+      );
+      const currentProvider = providerService.getCurrentProvider();
       const providerConfiguration = new ProviderConfigurationService(
         new BrowserProviderConfigurationStorage(),
       )
         .listConfigurations()
-        .find((configuration) => configuration.providerId === "demo");
+        .find(
+          (configuration) =>
+            configuration.providerId === currentProvider.providerInfo.id,
+        );
 
       setData({
         conversationCount: conversations.length,
@@ -92,9 +102,7 @@ export function DashboardOverview() {
             .map((conversation) => conversation.updatedAt)
             .sort((left, right) => right.localeCompare(left))[0] ?? null,
         latestOpenedAt: recentConversations[0]?.lastOpenedAt ?? null,
-        providerName: new ProviderService(
-          new BrowserAIProviderStorage(),
-        ).getCurrentProvider().providerInfo.name,
+        providerName: currentProvider.providerInfo.name,
         providerLastTest: providerConfiguration?.lastTestTime
           ? `${providerConfiguration.lastTestStatus} · ${formatDashboardTime(providerConfiguration.lastTestTime)}`
           : (providerConfiguration?.lastTestStatus ?? "Never Tested"),

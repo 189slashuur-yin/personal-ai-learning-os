@@ -38,7 +38,7 @@ export const demoProviderInfo: AIProvider = {
 export class DemoProvider implements AnalyzerProvider {
   readonly providerInfo = demoProviderInfo;
 
-  analyzeSource(source: ImportedSource): Proposal {
+  async analyzeSource(source: ImportedSource): Promise<Proposal> {
     const content = normalizeText(source.content);
     const sourceTitle = source.name.replace(/\.txt$/i, "");
     const generatedAt = new Date().toISOString();
@@ -77,10 +77,10 @@ export class DemoProvider implements AnalyzerProvider {
     };
   }
 
-  analyzeMessages(
+  async analyzeMessages(
     conversationId: string,
     selectedMessages: Message[],
-  ): Proposal {
+  ): Promise<Proposal> {
     if (selectedMessages.length === 0) {
       throw new Error("Demo Analyzer 至少需要一条 Message。");
     }

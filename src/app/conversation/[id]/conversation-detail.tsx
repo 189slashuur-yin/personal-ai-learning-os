@@ -8,10 +8,11 @@ import type { ImportedSource } from "@/core/entities/imported-source";
 import type { KnowledgeCard } from "@/core/entities/knowledge-card";
 import type { Message, MessageRole } from "@/core/entities/message";
 import type { Proposal } from "@/core/entities/proposal";
-import { DEMO_PROVIDER_CAPABILITIES } from "@/core/entities/provider-capability";
+import type { ProviderCapability } from "@/core/entities/provider-capability";
 import { AnalyzerExecutionService } from "@/core/services/analyzer-execution";
 import { parseMessagesFromRawText } from "@/core/services/message-parser";
 import { PromptTemplateService } from "@/core/services/prompt-template-service";
+import { ProviderConfigurationService } from "@/core/services/provider-configuration-service";
 import { ProviderService } from "@/core/services/provider-service";
 import { countWords } from "@/core/services/text-statistics";
 import { BrowserConversationStorage } from "@/infrastructure/storage/browser-conversation-storage";
@@ -21,6 +22,7 @@ import { BrowserKnowledgeCardStorage } from "@/infrastructure/storage/browser-kn
 import { BrowserMessageStorage } from "@/infrastructure/storage/browser-message-storage";
 import { BrowserProposalStorage } from "@/infrastructure/storage/browser-proposal-storage";
 import { BrowserPromptTemplateStorage } from "@/infrastructure/storage/browser-prompt-template-storage";
+import { BrowserProviderConfigurationStorage } from "@/infrastructure/storage/browser-provider-configuration-storage";
 import { BrowserSourceStorage } from "@/infrastructure/storage/browser-source-storage";
 import { ProposalWorkspace } from "./proposal-workspace";
 import { CapabilityBadges } from "@/app/capability-badges";
@@ -65,6 +67,8 @@ function messageStyle(role: MessageRole) {
 function createAnalyzerExecutionService() {
   const provider = new ProviderService(
     new BrowserAIProviderStorage(),
+    new BrowserProviderConfigurationStorage(),
+    new BrowserPromptTemplateStorage(),
   ).getCurrentProvider();
   return new AnalyzerExecutionService(
     provider,
@@ -86,13 +90,32 @@ export function ConversationDetail({ conversationId }: ConversationDetailProps) 
   const [analyzerError, setAnalyzerError] = useState<string | null>(null);
   const [latestAnalyzerRun, setLatestAnalyzerRun] =
     useState<AnalyzerRun | null>(null);
-  const [providerName] = useState(() =>
-    typeof window === "undefined"
-      ? "Demo Provider"
-      : new ProviderService(
-          new BrowserAIProviderStorage(),
-        ).getCurrentProvider().providerInfo.name,
-  );
+  const [providerDetails] = useState<{
+    id: string;
+    name: string;
+    capabilities: ProviderCapability[];
+  }>(() => {
+    if (typeof window === "undefined") {
+      return { id: "demo", name: "Demo Provider", capabilities: [] };
+    }
+
+    const provider = new ProviderService(
+      new BrowserAIProviderStorage(),
+      new BrowserProviderConfigurationStorage(),
+      new BrowserPromptTemplateStorage(),
+    ).getCurrentProvider();
+    const configuration = new ProviderConfigurationService(
+      new BrowserProviderConfigurationStorage(),
+    )
+      .listConfigurations()
+      .find((item) => item.providerId === provider.providerInfo.id);
+
+    return {
+      id: provider.providerInfo.id,
+      name: provider.providerInfo.name,
+      capabilities: configuration?.capabilities ?? [],
+    };
+  });
   const lastSavedContent = useRef("");
 
   useEffect(() => {
@@ -234,12 +257,12 @@ export function ConversationDetail({ conversationId }: ConversationDetailProps) 
     timeStyle: "short",
   }).format(new Date(conversation.updatedAt));
 
-  function runDemoAnalyzer(simulateFailure = false) {
+  async function runSourceAnalyzer(simulateFailure = false) {
     if (state.status !== "ready" || !state.source) {
       return;
     }
 
-    const result = createAnalyzerExecutionService().runSource(state.source, {
+    const result = await createAnalyzerExecutionService().runSource(state.source, {
       simulateRecoverableError: simulateFailure,
     });
     setLatestAnalyzerRun(result.run);
@@ -257,7 +280,7 @@ export function ConversationDetail({ conversationId }: ConversationDetailProps) 
     });
   }
 
-  function runMessageAnalyzer() {
+  async function runMessageAnalyzer() {
     if (state.status !== "ready" || selectedMessageIds.size === 0) {
       return;
     }
@@ -265,7 +288,7 @@ export function ConversationDetail({ conversationId }: ConversationDetailProps) 
     const selectedMessages = state.messages.filter((message) =>
       selectedMessageIds.has(message.id),
     );
-    const result = createAnalyzerExecutionService().runMessages(
+    const result = await createAnalyzerExecutionService().runMessages(
       state.conversation.id,
       selectedMessages,
     );
@@ -286,7 +309,7 @@ export function ConversationDetail({ conversationId }: ConversationDetailProps) 
     });
   }
 
-  function retryAnalyzer() {
+  async function retryAnalyzer() {
     if (
       state.status !== "ready" ||
       latestAnalyzerRun?.status !== "failed" ||
@@ -305,7 +328,7 @@ export function ConversationDetail({ conversationId }: ConversationDetailProps) 
         return;
       }
 
-      const result = createAnalyzerExecutionService().runSource(retrySource);
+      const result = await createAnalyzerExecutionService().runSource(retrySource);
       setLatestAnalyzerRun(result.run);
 
       if (!result.proposal) {
@@ -333,7 +356,7 @@ export function ConversationDetail({ conversationId }: ConversationDetailProps) 
       return;
     }
 
-    const result = createAnalyzerExecutionService().runMessages(
+    const result = await createAnalyzerExecutionService().runMessages(
       state.conversation.id,
       retryMessages,
     );
@@ -660,10 +683,10 @@ export function ConversationDetail({ conversationId }: ConversationDetailProps) 
               <div className="mt-5 flex justify-end">
                 <div className="text-right">
                   <p className="mb-2 text-xs text-zinc-500">
-                    当前 Provider：{providerName}
+                    当前 Provider：{providerDetails.name}
                   </p>
                   <div className="mb-3 flex justify-end">
-                    <CapabilityBadges capabilities={DEMO_PROVIDER_CAPABILITIES} />
+                    <CapabilityBadges capabilities={providerDetails.capabilities} />
                   </div>
                   <button
                     className="rounded-lg bg-zinc-950 px-4 py-2.5 text-sm font-medium text-white hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-300"
@@ -696,27 +719,29 @@ export function ConversationDetail({ conversationId }: ConversationDetailProps) 
           <p className="text-sm text-zinc-500">共 {proposals.length} 条 Proposal</p>
           <div className="text-right">
             <p className="mb-2 text-xs text-zinc-500">
-              当前 Provider：{providerName}
+              当前 Provider：{providerDetails.name}
             </p>
             <div className="mb-3 flex justify-end">
-              <CapabilityBadges capabilities={DEMO_PROVIDER_CAPABILITIES} />
+              <CapabilityBadges capabilities={providerDetails.capabilities} />
             </div>
             <button
               className="rounded-lg border border-zinc-200 bg-white px-4 py-2.5 text-sm font-medium text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-40"
               disabled={!source || saveStatus === "editing"}
-              onClick={() => runDemoAnalyzer(false)}
+              onClick={() => runSourceAnalyzer(false)}
               type="button"
             >
               从 Source 生成 Proposal
             </button>
+            {providerDetails.id === "demo" ? (
             <button
               className="ml-2 rounded-lg border border-zinc-200 bg-white px-4 py-2.5 text-sm font-medium text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-40"
               disabled={!source || saveStatus === "editing"}
-              onClick={() => runDemoAnalyzer(true)}
+              onClick={() => runSourceAnalyzer(true)}
               type="button"
             >
               模拟失败
             </button>
+            ) : null}
           </div>
         </div>
         {latestAnalyzerRun ? (

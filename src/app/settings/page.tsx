@@ -6,7 +6,7 @@ export default function SettingsPage() {
       <p className="eyebrow">Settings</p>
       <h1 className="page-title">AI Provider 设置</h1>
       <p className="page-description">
-        查看 Analyzer 与 Provider Configuration。当前版本仅运行本地 Demo。
+        查看 Analyzer 与 Provider Configuration。Demo 与启用后的本地 Ollama 可运行。
       </p>
       <ProviderSettings />
     </main>

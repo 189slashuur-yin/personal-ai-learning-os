@@ -43,6 +43,12 @@ export class ProviderRegistry {
   }
 }
 
-export function createDefaultProviderRegistry(currentProviderId = "demo") {
-  return new ProviderRegistry([new DemoProvider()], currentProviderId);
+export function createDefaultProviderRegistry(
+  currentProviderId = "demo",
+  additionalProviders: AnalyzerProvider[] = [],
+) {
+  return new ProviderRegistry(
+    [new DemoProvider(), ...additionalProviders],
+    currentProviderId,
+  );
 }

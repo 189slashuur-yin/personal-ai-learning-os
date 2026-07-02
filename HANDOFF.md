@@ -1,75 +1,73 @@
-# Sprint8 Handoff
+# Sprint9 Handoff
 
 ## 当前状态
 
-截至 2026-07-02，Sprint8A、Sprint8B、Sprint8C 已完成。没有接入真实 API、网络请求、API Key 或数据库，没有修改 Demo Provider 的确定性分析行为，也没有创建 Git commit。
+截至 2026-07-02，Sprint9A、Sprint9B、Sprint9C 已完成。只接入本地 Ollama，没有接入 OpenAI、Claude 或其它云 Provider，没有保存 API Key、引入数据库或创建 Git commit。Demo Provider 行为保持不变，并继续作为默认回退。
 
-Demo Provider 仍是唯一可运行的 Analyzer。配置中的 enabled 只是本地配置状态，不会把其它 Provider 注册为 Analyzer。
+## Part1 — Sprint9A Ollama Provider Adapter
 
-## Part1 — Sprint8A Provider Configuration
+- 新增 `OllamaProvider`，实现 `AnalyzerProvider.providerInfo`、`analyzeSource` 和 `analyzeMessages`。
+- AnalyzerProvider Contract 与执行器改为异步，以支持本地 HTTP；Demo 输出逻辑未改变。
+- 默认配置为 `http://localhost:11434`、`qwen2.5:7b`、60000 ms，且默认 disabled。
+- 使用 Ollama `/api/chat`，固定 `stream: false` 与 JSON 格式；未实现 streaming、embedding 或 tool calling。
+- 网络不可达和超时作为 recoverable AnalyzerError，Provider 不依赖或写入 ProposalStorage。
+- checkpoint：lint、build、diff-check 通过。
 
-- 新增 `ProviderConfiguration` Entity、Storage Contract、BrowserStorage 与 Service。
-- 内置 Demo、OpenAI、Claude、Gemini、Ollama、DeepSeek、Azure OpenAI 七个默认配置。
-- Settings 展示只读 baseUrl、model、timeout 与支持标记；仅 enabled 可切换并持久化。
-- 已完成 checkpoint：lint、build、diff-check 通过。
+## Part2 — Sprint9B Ollama Settings
 
-## Part2 — Sprint8B Connection Test
+- Settings 支持编辑并持久化 Ollama enabled、baseUrl、model、timeout。
+- Ollama Test Connection 真实请求配置地址的 `/api/tags`，保存 Success/Failed、时间和错误信息。
+- Demo Test Connection 仍为 Success；其它云 Provider 仍为 Not Implemented，且不会发请求。
+- 明确展示：`Ollama runs locally and requires Ollama service to be running.`
+- checkpoint：lint、build、diff-check 通过。
 
-- `ProviderService.testConnection()` 全程离线执行。
-- Demo 返回 Success；其它 Provider 返回 Not Implemented。
-- 保存 lastTestTime 与 lastTestStatus；状态模型包含 Never Tested、Success、Failed、Not Implemented。
-- Settings 增加 Test Connection；Dashboard 增加 Current Provider 与 Last Test。
-- 已完成 checkpoint：lint、build、diff-check 通过。
+## Part3 — Sprint9C Use Ollama for Analyzer
 
-## Part3 — Sprint8C Capability System
-
-- 新增 chat、vision、tool_call、reasoning、json_output、stream、embedding、long_context 能力枚举。
-- Demo 固定能力为 chat、json_output、reasoning；其它 Provider 使用默认能力。
-- Settings、Analysis、Conversation、Proposal Workspace 与 Review 展示 Capability Badge。
-- Demo Proposal 保存生成时 Capability；KnowledgeCard 保存 Provider Capability Snapshot。
-- 旧 Proposal / KnowledgeCard 缺少能力时显示 unknown / legacy，不清空或强制回写旧数据。
+- Provider Registry 在 Ollama enabled 时注册 OllamaProvider；禁用或不可用配置会回退 Demo。
+- Source Analysis 和 selected Messages Analysis 都支持当前选中的 Ollama。
+- Prompt 使用 Sprint7 PromptTemplate；模型 JSON 使用 Sprint7 AnalyzerOutputValidator。
+- 非法 JSON 或结构记录 `INVALID_OUTPUT` 并显示错误；页面只在执行器返回 Proposal 后写 ProposalStorage。
+- Proposal Workspace、Review 与 KnowledgeCard 继续展示 providerName、generatedAt、analysisMode 和 capabilities 快照。
+- checkpoint：lint、build、diff-check 通过；首次 build 暴露 Settings SSR 读取 BrowserStorage，已做一次最小修复后通过。
 
 ## 新增文件
 
-- `src/app/capability-badges.tsx`
-- `src/core/entities/provider-configuration.ts`
-- `src/core/entities/provider-capability.ts`
-- `src/core/contracts/provider-configuration-storage.ts`
-- `src/core/services/provider-configuration-service.ts`
-- `src/infrastructure/storage/browser-provider-configuration-storage.ts`
+- `src/core/services/ollama-provider.ts`
 
 ## 修改文件
 
-- Provider：`src/core/services/provider-service.ts`、`src/core/services/demo-provider.ts`
-- 快照：`src/core/entities/proposal.ts`、`src/core/entities/knowledge-card.ts`、`src/core/services/knowledge-card-creation.ts`
-- UI：Settings、Dashboard、Analysis、Conversation Detail、Proposal Workspace、Review、Knowledge Detail
+- Contract / Entity：`src/core/contracts/analyzer-provider.ts`、`src/core/entities/proposal.ts`、`src/core/entities/provider-configuration.ts`
+- Service：`src/core/services/analyzer-execution.ts`、`demo-provider.ts`、`provider-configuration-service.ts`、`provider-registry.ts`、`provider-service.ts`
+- Storage：`src/infrastructure/storage/browser-provider-configuration-storage.ts`
+- UI：Analysis、Conversation Detail、Dashboard、Settings
 - 文档：README、PROJECT、ARCHITECTURE、ROADMAP、CHANGELOG、HANDOFF
 
-## 手动验收
+## 手动验收步骤
 
-1. 打开 `/settings`，确认显示七个 Provider Configuration；除 enabled 外没有可编辑字段。
-2. 切换任一 enabled，刷新页面，确认状态保留且当前 Analyzer 仍为 Demo。
-3. 对 Demo 点击 Test Connection，确认显示 Success；对其它 Provider 测试，确认显示 Not Implemented，且没有网络请求。
-4. 打开 `/`，确认 Current Provider 为 Demo Provider，Last Test 与 Settings 一致。
-5. 在 `/analysis` 生成 Proposal，确认生成前显示 Demo 的三个 Capability Badge。
-6. 在 Conversation 从 Source 或 Messages 生成 Proposal，确认 Conversation 与 Proposal Workspace 显示 Capability。
-7. 在 Review 确认 Generated using Capability；接受后进入 Knowledge Detail，确认保存 Provider Capability Snapshot。
-8. 打开旧 Proposal / KnowledgeCard，确认缺少快照时显示 unknown / legacy，旧数据仍可使用。
+1. 启动 Ollama，执行 `ollama pull qwen2.5:7b`，再运行本项目。
+2. 打开 `/settings`，确认提示 Ollama 需要本地服务；编辑 baseUrl/model/timeout，启用 Ollama并保存。
+3. 点击 Ollama Test Connection，确认服务运行时显示 Success；停止服务后重试，确认显示 Failed 和错误。
+4. 确认 Demo Test Connection 为 Success；OpenAI、Claude 等云 Provider 为 Not Implemented 且不产生网络请求。
+5. 启用 Ollama 后在顶部 Provider 列表选择 Ollama，刷新页面确认选择保留。
+6. 导入 TXT 后进入 `/analysis`，确认当前 Provider 为 Ollama，并能生成带 providerName、generatedAt、analysisMode、capabilities 的 Proposal。
+7. 在 Conversation 生成 Messages、选择多条并生成 Proposal，确认 Message 引用和元数据正确。
+8. Review 并接受 Proposal，确认 KnowledgeCard 保留 Provider Capability Snapshot。
+9. 将 model 改为不存在的模型或让模型返回不合法结构，确认显示错误且 Proposal 数量不增加。
+10. 回到 Settings 选择 Demo，确认 Source 与 Messages 两条分析链路仍可运行。
 
 ## 已知限制
 
-- 非 Demo Provider 只有默认配置和能力元数据，没有客户端、鉴权、网络测试或 Analyzer 实现。
-- Failed 状态已建模，但当前离线确定性测试没有触发 Failed 的分支。
-- 默认 baseUrl 与 model 仅供只读展示，不代表当前可用性或生产推荐。
+- 需要用户自行安装、启动 Ollama 并下载所选模型；项目不会管理 Ollama 进程或模型。
+- 浏览器必须能够访问配置的 Ollama 地址；Ollama CORS、HTTPS mixed-content、防火墙或代理设置可能阻止请求。
+- 不支持 streaming、embedding、tool calling、RAG、自动模型下载或 API Key。
+- 结构化输出质量取决于本地模型；Validator 会拒绝不完整或越界字段，但不会自动修复模型输出。
 - LocalStorage 仍是单浏览器存储，不具备事务、同步或正式备份恢复。
-- 没有自动化测试套件；本轮验收边界为每 Part 的 lint、production build、diff-check 与手动流程。
+- 没有自动化测试套件；验收边界为每 Part 的 lint、production build、diff-check 和上述手动流程。
 
-## 下一步建议
+## Ollama 未安装或未启动时的提示
 
-1. Sprint9 开始前单独确认范围，不把真实 Provider 接入视为默认下一步。
-2. 优先补充 Provider Configuration / Connection Test / Capability Snapshot 的自动化测试。
-3. 若未来批准真实 Provider，先完成密钥、安全、隐私、费用、错误处理和验收方案，再新增独立 AnalyzerProvider 实现。
+Settings 的 Test Connection 显示 `Failed` 及浏览器返回的连接错误。Analyzer 显示“无法连接 Ollama（配置地址）。请确认本地 Ollama service 已启动。”，运行记录标记为可恢复，允许服务启动后 Retry；不会写入 Proposal。用户也可随时在 Settings 切回 Demo Provider。
 
 ## 质量检查
 
-Sprint8A、Sprint8B、Sprint8C 的 `npm run lint`、`npm run build`、`git diff --check` 均通过；最终 production build 成功生成 12 个页面。
+Sprint9A、Sprint9B、Sprint9C 的 `npm run lint`、`npm run build`、`git diff --check` 均通过；文档同步后的最终三项检查也通过。

@@ -19,6 +19,7 @@ function createProviderService() {
   return new ProviderService(
     new BrowserAIProviderStorage(),
     new BrowserProviderConfigurationStorage(),
+    new BrowserPromptTemplateStorage(),
   );
 }
 
@@ -33,9 +34,7 @@ function createProviderConfigurationService() {
 }
 
 export function ProviderSettings() {
-  const [providers] = useState<AIProvider[]>(() =>
-    createProviderService().getProviders(),
-  );
+  const [providers, setProviders] = useState<AIProvider[]>([]);
   const [currentProviderId, setCurrentProviderId] = useState(() =>
     typeof window === "undefined"
       ? "demo"
@@ -48,9 +47,13 @@ export function ProviderSettings() {
   const [configurations, setConfigurations] = useState<
     ProviderConfiguration[]
   >([]);
+  const [testingProviderId, setTestingProviderId] = useState<string | null>(
+    null,
+  );
 
   useEffect(() => {
     const loadTimer = window.setTimeout(() => {
+      setProviders(createProviderService().getProviders());
       setTemplates(createPromptTemplateService().listTemplates());
       setConfigurations(
         createProviderConfigurationService().listConfigurations(),
@@ -81,11 +84,62 @@ export function ProviderSettings() {
     setConfigurations(
       createProviderConfigurationService().setEnabled(providerId, enabled),
     );
-    setMessage("Provider configuration 已保存；不会发起网络请求。");
+    setProviders(createProviderService().getProviders());
+
+    if (providerId === "ollama" && !enabled && currentProviderId === "ollama") {
+      setCurrentProviderId(createProviderService().getCurrentProvider().providerInfo.id);
+    }
+    setMessage("Provider configuration 已保存。");
   }
 
-  function testConnection(providerId: string) {
-    const result = createProviderService().testConnection(providerId);
+  function updateOllamaDraft(
+    field: "baseUrl" | "model" | "timeout",
+    value: string,
+  ) {
+    setConfigurations((current) =>
+      current.map((configuration) =>
+        configuration.providerId === "ollama"
+          ? {
+              ...configuration,
+              [field]: field === "timeout" ? Number(value) : value,
+            }
+          : configuration,
+      ),
+    );
+  }
+
+  function saveOllamaSettings() {
+    const ollama = configurations.find(
+      (configuration) => configuration.providerId === "ollama",
+    );
+
+    if (!ollama) {
+      return false;
+    }
+
+    try {
+      setConfigurations(
+        createProviderConfigurationService().updateOllamaSettings({
+          baseUrl: ollama.baseUrl,
+          model: ollama.model,
+          timeout: ollama.timeout,
+        }),
+      );
+      setMessage("Ollama configuration 已保存。");
+      return true;
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Ollama 配置无效。");
+      return false;
+    }
+  }
+
+  async function testConnection(providerId: string) {
+    if (providerId === "ollama" && !saveOllamaSettings()) {
+      return;
+    }
+
+    setTestingProviderId(providerId);
+    const result = await createProviderService().testConnection(providerId);
     setConfigurations((current) =>
       current.map((configuration) =>
         configuration.providerId === providerId
@@ -93,11 +147,19 @@ export function ProviderSettings() {
           : configuration,
       ),
     );
-    setMessage(
-      result.status === "Success"
-        ? "Demo connection test: Success。"
-        : "此 Provider connection test: Not Implemented；未发起网络请求。",
-    );
+    setTestingProviderId(null);
+
+    if (providerId === "ollama") {
+      setMessage(
+        result.status === "Success"
+          ? "Ollama connection test: Success。"
+          : `Ollama connection test: Failed。${result.error ?? "请确认本地服务已启动。"}`,
+      );
+    } else if (result.status === "Success") {
+      setMessage("Demo connection test: Success。");
+    } else {
+      setMessage("此云 Provider connection test: Not Implemented；未发起网络请求。");
+    }
   }
 
   return (
@@ -126,6 +188,10 @@ export function ProviderSettings() {
                     Demo Provider uses deterministic local logic and does not
                     call external AI APIs.
                   </span>
+                ) : provider.kind === "ollama" ? (
+                  <span className="mt-2 block max-w-xl text-xs leading-5 text-zinc-500">
+                    Ollama runs locally and requires Ollama service to be running.
+                  </span>
                 ) : null}
               </span>
               <span
@@ -149,8 +215,7 @@ export function ProviderSettings() {
             Provider Configuration
           </h2>
           <p className="mt-1 text-sm leading-6 text-zinc-500">
-            默认配置只读；enabled 仅保存配置状态，不会启用真实 API。Demo
-            仍是唯一可运行的 Analyzer。
+            Ollama 可配置并测试本地服务；其它非 Demo Provider 仍仅展示占位配置。
           </p>
         </div>
         <div className="mt-5 space-y-4">
@@ -183,6 +248,54 @@ export function ProviderSettings() {
                   enabled
                 </label>
               </div>
+              {configuration.providerId === "ollama" ? (
+                <div className="mt-4 grid gap-3 border-t border-zinc-100 pt-4 text-sm sm:grid-cols-2">
+                  <label className="text-zinc-500">
+                    Base URL
+                    <input
+                      className="mt-1 w-full rounded-lg border border-zinc-300 px-3 py-2 font-medium text-zinc-800"
+                      onChange={(event) =>
+                        updateOllamaDraft("baseUrl", event.target.value)
+                      }
+                      type="url"
+                      value={configuration.baseUrl}
+                    />
+                  </label>
+                  <label className="text-zinc-500">
+                    Model
+                    <input
+                      className="mt-1 w-full rounded-lg border border-zinc-300 px-3 py-2 font-medium text-zinc-800"
+                      onChange={(event) =>
+                        updateOllamaDraft("model", event.target.value)
+                      }
+                      type="text"
+                      value={configuration.model}
+                    />
+                  </label>
+                  <label className="text-zinc-500">
+                    Timeout (ms)
+                    <input
+                      className="mt-1 w-full rounded-lg border border-zinc-300 px-3 py-2 font-medium text-zinc-800"
+                      min="1000"
+                      onChange={(event) =>
+                        updateOllamaDraft("timeout", event.target.value)
+                      }
+                      step="1000"
+                      type="number"
+                      value={configuration.timeout}
+                    />
+                  </label>
+                  <div className="flex items-end">
+                    <button
+                      className="rounded-lg border border-zinc-300 px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-50"
+                      onClick={saveOllamaSettings}
+                      type="button"
+                    >
+                      Save Ollama Settings
+                    </button>
+                  </div>
+                </div>
+              ) : (
               <dl className="mt-4 grid gap-3 border-t border-zinc-100 pt-4 text-sm sm:grid-cols-2">
                 <div>
                   <dt className="text-zinc-500">Base URL</dt>
@@ -209,6 +322,7 @@ export function ProviderSettings() {
                   </dd>
                 </div>
               </dl>
+              )}
               <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-zinc-100 pt-4">
                 <p className="text-xs text-zinc-500">
                   Last test: {configuration.lastTestStatus}
@@ -216,12 +330,20 @@ export function ProviderSettings() {
                     ? ` · ${new Date(configuration.lastTestTime).toLocaleString("zh-CN")}`
                     : ""}
                 </p>
+                {configuration.lastTestError ? (
+                  <p className="w-full text-xs text-red-700">
+                    {configuration.lastTestError}
+                  </p>
+                ) : null}
                 <button
                   className="rounded-lg border border-zinc-300 px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-50"
+                  disabled={testingProviderId === configuration.providerId}
                   onClick={() => testConnection(configuration.providerId)}
                   type="button"
                 >
-                  Test Connection
+                  {testingProviderId === configuration.providerId
+                    ? "Testing…"
+                    : "Test Connection"}
                 </button>
               </div>
               <p className="mt-3 text-xs text-zinc-500">
@@ -247,7 +369,7 @@ export function ProviderSettings() {
               Analyzer Templates
             </h2>
             <p className="mt-1 text-sm text-zinc-500">
-              当前模板仅用于 Demo / Mock 分析流程，暂不支持编辑。
+              当前模板用于 Demo 与 Ollama 分析流程，暂不支持编辑。
             </p>
           </div>
           <button

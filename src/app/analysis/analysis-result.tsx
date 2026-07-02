@@ -5,14 +5,16 @@ import { useEffect, useState } from "react";
 import type { AnalyzerRun } from "@/core/entities/analyzer-run";
 import type { ImportedSource } from "@/core/entities/imported-source";
 import type { Proposal } from "@/core/entities/proposal";
-import { DEMO_PROVIDER_CAPABILITIES } from "@/core/entities/provider-capability";
+import type { ProviderCapability } from "@/core/entities/provider-capability";
 import { AnalyzerExecutionService } from "@/core/services/analyzer-execution";
 import { PromptTemplateService } from "@/core/services/prompt-template-service";
+import { ProviderConfigurationService } from "@/core/services/provider-configuration-service";
 import { ProviderService } from "@/core/services/provider-service";
 import { BrowserAIProviderStorage } from "@/infrastructure/storage/browser-ai-provider-storage";
 import { BrowserAnalyzerRunStorage } from "@/infrastructure/storage/browser-analyzer-run-storage";
 import { BrowserPromptTemplateStorage } from "@/infrastructure/storage/browser-prompt-template-storage";
 import { BrowserProposalStorage } from "@/infrastructure/storage/browser-proposal-storage";
+import { BrowserProviderConfigurationStorage } from "@/infrastructure/storage/browser-provider-configuration-storage";
 import { BrowserSourceStorage } from "@/infrastructure/storage/browser-source-storage";
 import { CapabilityBadges } from "@/app/capability-badges";
 
@@ -32,6 +34,8 @@ function formatDate(value: string) {
 function runSourceAnalysis(source: ImportedSource, simulateFailure = false) {
   const provider = new ProviderService(
     new BrowserAIProviderStorage(),
+    new BrowserProviderConfigurationStorage(),
+    new BrowserPromptTemplateStorage(),
   ).getCurrentProvider();
   return new AnalyzerExecutionService(
     provider,
@@ -43,16 +47,35 @@ function runSourceAnalysis(source: ImportedSource, simulateFailure = false) {
 export function AnalysisResult() {
   const [state, setState] = useState<AnalysisState>({ status: "analyzing" });
   const [latestRun, setLatestRun] = useState<AnalyzerRun | null>(null);
-  const [providerName] = useState(() =>
-    typeof window === "undefined"
-      ? "Demo Provider"
-      : new ProviderService(
-          new BrowserAIProviderStorage(),
-        ).getCurrentProvider().providerInfo.name,
-  );
+  const [providerDetails] = useState<{
+    id: string;
+    name: string;
+    capabilities: ProviderCapability[];
+  }>(() => {
+    if (typeof window === "undefined") {
+      return { id: "demo", name: "Demo Provider", capabilities: [] };
+    }
+
+    const provider = new ProviderService(
+      new BrowserAIProviderStorage(),
+      new BrowserProviderConfigurationStorage(),
+      new BrowserPromptTemplateStorage(),
+    ).getCurrentProvider();
+    const configuration = new ProviderConfigurationService(
+      new BrowserProviderConfigurationStorage(),
+    )
+      .listConfigurations()
+      .find((item) => item.providerId === provider.providerInfo.id);
+
+    return {
+      id: provider.providerInfo.id,
+      name: provider.providerInfo.name,
+      capabilities: configuration?.capabilities ?? [],
+    };
+  });
 
   useEffect(() => {
-    const analysisTimer = window.setTimeout(() => {
+    const analysisTimer = window.setTimeout(async () => {
       const source = new BrowserSourceStorage().getCurrent();
 
       if (!source) {
@@ -60,7 +83,7 @@ export function AnalysisResult() {
         return;
       }
 
-      const result = runSourceAnalysis(source);
+      const result = await runSourceAnalysis(source);
       setLatestRun(result.run);
 
       if (result.proposal) {
@@ -78,7 +101,7 @@ export function AnalysisResult() {
     return () => window.clearTimeout(analysisTimer);
   }, []);
 
-  function retryOrSimulate(simulateFailure = false) {
+  async function retryOrSimulate(simulateFailure = false) {
     const sourceStorage = new BrowserSourceStorage();
     const sourceId = latestRun?.sourceId;
     const source = sourceId
@@ -91,7 +114,7 @@ export function AnalysisResult() {
     }
 
     setState({ status: "analyzing" });
-    const result = runSourceAnalysis(source, simulateFailure);
+    const result = await runSourceAnalysis(source, simulateFailure);
     setLatestRun(result.run);
 
     if (!result.proposal) {
@@ -111,7 +134,7 @@ export function AnalysisResult() {
       <section className="mt-8 max-w-2xl rounded-xl border border-amber-200 bg-amber-50 p-6">
         <p className="font-medium text-amber-950">尚未找到可分析的 TXT Source</p>
         <p className="mt-2 text-sm leading-6 text-amber-800">
-          请先导入并保存一份 TXT 文件，再运行 Demo Analyzer。
+          请先导入并保存一份 TXT 文件，再运行 Analyzer。
         </p>
         <Link
           className="mt-5 inline-block rounded-lg bg-zinc-950 px-5 py-3 text-sm font-medium text-white"
@@ -127,14 +150,14 @@ export function AnalysisResult() {
     return (
       <section className="mt-8 max-w-2xl rounded-xl border border-zinc-200 bg-white p-6">
         <p className="text-sm font-medium text-zinc-900">
-          当前 Provider：{providerName}
+          当前 Provider：{providerDetails.name}
         </p>
         <div className="mt-3">
           <p className="mb-2 text-xs font-medium text-zinc-500">Capabilities</p>
-          <CapabilityBadges capabilities={DEMO_PROVIDER_CAPABILITIES} />
+          <CapabilityBadges capabilities={providerDetails.capabilities} />
         </div>
         <p className="mt-3 text-sm text-zinc-500" role="status">
-          Demo Analyzer 正在分析已保存的 TXT Source…
+          Analyzer 正在分析已保存的 TXT Source…
         </p>
       </section>
     );
@@ -226,6 +249,7 @@ export function AnalysisResult() {
         >
           前往 Review 页面
         </Link>
+        {providerDetails.id === "demo" ? (
         <button
           className="rounded-lg border border-zinc-300 px-5 py-3 text-sm font-medium text-zinc-700"
           onClick={() => retryOrSimulate(true)}
@@ -233,6 +257,7 @@ export function AnalysisResult() {
         >
           模拟可恢复失败
         </button>
+        ) : null}
       </div>
     </section>
   );

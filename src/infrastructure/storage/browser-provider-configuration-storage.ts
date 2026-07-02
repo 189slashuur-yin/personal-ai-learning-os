@@ -26,6 +26,10 @@ export class BrowserProviderConfigurationStorage
     ).map((configuration) => ({
       ...configuration,
       lastTestStatus: configuration.lastTestStatus ?? "Never Tested",
+      lastTestError:
+        typeof configuration.lastTestError === "string"
+          ? configuration.lastTestError
+          : undefined,
     }));
   }
 

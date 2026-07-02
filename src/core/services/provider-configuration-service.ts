@@ -97,16 +97,16 @@ const providerDefaults: ProviderDefaults[] = [
     providerId: "ollama",
     displayName: "Ollama",
     baseUrl: "http://localhost:11434",
-    model: "llama3.2",
+    model: "qwen2.5:7b",
     timeout: 60_000,
     enabled: false,
     requiresApiKey: false,
-    supportsStreaming: true,
+    supportsStreaming: false,
     supportsVision: false,
     supportsToolCalling: false,
     supportsJsonMode: true,
     lastTestStatus: "Never Tested",
-    capabilities: ["chat", "reasoning", "json_output", "stream"],
+    capabilities: ["chat", "reasoning", "json_output"],
   },
   {
     providerId: "deepseek",
@@ -179,9 +179,29 @@ export class ProviderConfigurationService {
         defaultConfiguration.providerId,
       );
 
-      return storedConfiguration
-        ? { ...defaultConfiguration, ...storedConfiguration }
-        : defaultConfiguration;
+      if (!storedConfiguration) {
+        return defaultConfiguration;
+      }
+
+      const mergedConfiguration = {
+        ...defaultConfiguration,
+        ...storedConfiguration,
+      };
+
+      if (
+        mergedConfiguration.providerId === "ollama" &&
+        mergedConfiguration.model === "llama3.2"
+      ) {
+        mergedConfiguration.model = defaultConfiguration.model;
+      }
+
+      if (mergedConfiguration.providerId === "ollama") {
+        mergedConfiguration.supportsStreaming = false;
+        mergedConfiguration.capabilities =
+          defaultConfiguration.capabilities.slice();
+      }
+
+      return mergedConfiguration;
     });
   }
 
@@ -199,5 +219,51 @@ export class ProviderConfigurationService {
     configuration.updatedAt = new Date().toISOString();
     this.storage.saveAll(configurations);
     return configurations;
+  }
+
+  updateOllamaSettings(settings: {
+    baseUrl: string;
+    model: string;
+    timeout: number;
+  }): ProviderConfiguration[] {
+    const configurations = this.listConfigurations();
+    const configuration = configurations.find(
+      (item) => item.providerId === "ollama",
+    );
+
+    if (!configuration) {
+      throw new Error("Ollama Provider Configuration 不存在。");
+    }
+
+    const baseUrl = settings.baseUrl.trim().replace(/\/+$/, "");
+    const model = settings.model.trim();
+
+    if (!/^https?:\/\//i.test(baseUrl)) {
+      throw new Error("Ollama Base URL 必须使用 http:// 或 https://。");
+    }
+
+    if (!model) {
+      throw new Error("Ollama Model 不能为空。");
+    }
+
+    if (!Number.isFinite(settings.timeout) || settings.timeout < 1_000) {
+      throw new Error("Ollama Timeout 必须至少为 1000 ms。");
+    }
+
+    const updatedConfiguration: ProviderConfiguration = {
+      ...configuration,
+      baseUrl,
+      model,
+      timeout: Math.round(settings.timeout),
+      lastTestStatus: "Never Tested",
+      lastTestTime: undefined,
+      lastTestError: undefined,
+      updatedAt: new Date().toISOString(),
+    };
+    const updatedConfigurations = configurations.map((item) =>
+      item.providerId === "ollama" ? updatedConfiguration : item,
+    );
+    this.storage.saveAll(updatedConfigurations);
+    return updatedConfigurations;
   }
 }

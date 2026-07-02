@@ -101,6 +101,7 @@ Service 承担领域转换和跨实体编排：
 
 - `message-parser`：把原始文本按说话人规则解析为 Message。
 - `demo-provider`：以确定性本地逻辑分析 Source 或 Messages。
+- `ollama-provider`：使用 ProviderConfiguration 与 PromptTemplate，通过本地 `/api/chat` 非流式生成结构化输出并执行 Validator。
 - `provider-registry` / `provider-service`：注册、选择、回退和持久化当前 Provider。
 - `provider-configuration-service`：合并默认配置、保存 enabled 状态，并为离线 Connection Test 提供持久化入口。
 - `proposal-review`：执行 Accepted、Rejected、Applied 状态转换。
@@ -165,7 +166,7 @@ AnalyzerProvider
   → KnowledgeCard 中保存必要快照
 ```
 
-目前 Registry 只注册 Demo Provider。其它 Provider 的 configuration enabled 与 Registry 可运行状态相互独立，不包含网络客户端、密钥或真实调用。Demo 生成 Proposal 时保存 Capability，Review 展示该快照，接受后 KnowledgeCard 保存独立 Capability Snapshot。
+Registry 始终注册 Demo Provider，并在 Ollama configuration enabled 时注册 OllamaProvider；当前 Provider 不可用时回退 Demo。其它 Provider 不包含网络客户端、密钥或真实调用。生成 Proposal 时保存 Capability，Review 展示该快照，接受后 KnowledgeCard 保存独立 Capability Snapshot。
 
 ## 一致性与兼容
 
@@ -177,6 +178,7 @@ AnalyzerProvider
 - 新增字段必须为旧 LocalStorage 数据提供安全默认值或显式迁移。
 - 旧 Proposal 缺少结构化字段时，UI 使用 unknown / legacy 展示，不回写或清空旧数据。
 - Analyzer 失败只写 AnalyzerRun，不写 ProposalStorage；可恢复失败可按原 Source 或 Message IDs 重试。
+- Ollama 网络不可达或超时为可恢复失败；JSON 或结构校验失败为 `INVALID_OUTPUT`，两者都不会写 ProposalStorage。
 
 ## 当前限制与演进边界
 

@@ -21,6 +21,7 @@ export type ProviderConfiguration = {
   capabilities: ProviderCapability[];
   lastTestTime?: string;
   lastTestStatus: ProviderConnectionTestStatus;
+  lastTestError?: string;
   createdAt: string;
   updatedAt: string;
 };

@@ -2,6 +2,15 @@
 
 本文件记录当前仓库已经完成的 Sprint 与关键提交。日期使用仓库 commit date。
 
+## 2026-07-02 — Sprint9: Local Ollama Provider
+
+状态：已完成，尚未创建 Git commit。
+
+- 增加 OllamaProvider，通过本地 `/api/chat` 非流式分析 Source 或 selected Messages。
+- Settings 支持 Ollama enabled、baseUrl、model、timeout 与真实 `/api/tags` Connection Test。
+- Ollama 输出复用 Sprint7 PromptTemplate 和 AnalyzerOutputValidator；失败不写 Proposal。
+- Demo Provider 保持默认回退；未接入云 Provider、API Key、数据库、streaming、embedding 或 tool calling。
+
 ## 2026-07-02 — Sprint8: Provider Configuration / Test / Capability
 
 状态：已完成，尚未创建 Git commit。

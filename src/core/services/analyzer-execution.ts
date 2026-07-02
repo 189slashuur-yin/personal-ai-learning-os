@@ -61,10 +61,10 @@ export class AnalyzerExecutionService {
     private readonly runs: AnalyzerRunStorage,
   ) {}
 
-  runSource(
+  async runSource(
     source: ImportedSource,
     options: AnalyzerExecutionOptions = {},
-  ): AnalyzerExecutionResult {
+  ): Promise<AnalyzerExecutionResult> {
     return this.execute(
       {
         conversationId: source.conversationId,
@@ -76,11 +76,11 @@ export class AnalyzerExecutionService {
     );
   }
 
-  runMessages(
+  async runMessages(
     conversationId: string,
     messages: Message[],
     options: AnalyzerExecutionOptions = {},
-  ): AnalyzerExecutionResult {
+  ): Promise<AnalyzerExecutionResult> {
     return this.execute(
       {
         conversationId,
@@ -92,12 +92,12 @@ export class AnalyzerExecutionService {
     );
   }
 
-  private execute(
+  private async execute(
     source: Pick<AnalyzerRun, "conversationId" | "sourceId" | "messageIds">,
     mode: "source" | "messages",
-    analyze: () => Proposal,
+    analyze: () => Promise<Proposal>,
     options: AnalyzerExecutionOptions,
-  ): AnalyzerExecutionResult {
+  ): Promise<AnalyzerExecutionResult> {
     const startedAt = new Date().toISOString();
     const running: AnalyzerRun = {
       id: crypto.randomUUID(),
@@ -134,7 +134,7 @@ export class AnalyzerExecutionService {
         );
       }
 
-      const proposal = analyze();
+      const proposal = await analyze();
       const successfulRun: AnalyzerRun = {
         ...running,
         status: "success",

@@ -5,9 +5,9 @@ import type { Proposal } from "@/core/entities/proposal";
 
 export interface AnalyzerProvider {
   readonly providerInfo: AIProvider;
-  analyzeSource(source: ImportedSource): Proposal;
+  analyzeSource(source: ImportedSource): Promise<Proposal>;
   analyzeMessages(
     conversationId: string,
     selectedMessages: Message[],
-  ): Proposal;
+  ): Promise<Proposal>;
 }

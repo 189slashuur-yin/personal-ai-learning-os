@@ -15,7 +15,7 @@ export type Proposal = {
     sourceName: string;
     excerpt: string;
   };
-  generatedBy: "Demo Analyzer Generated";
+  generatedBy: "Demo Analyzer Generated" | "Ollama Analyzer Generated";
   providerId?: string;
   providerName?: string;
   providerCapabilities?: ProviderCapability[];

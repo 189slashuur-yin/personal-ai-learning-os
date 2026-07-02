@@ -12,7 +12,7 @@
 | Sprint6 | 已完成 | AI Provider Interface、Provider Registry/Service、Settings、Analyzer 与 Knowledge 元数据。仅 Demo Provider 可用。 |
 | Sprint7 | 已完成 | Analyzer Prompt Template、Structured Output Schema、Error / Retry / Safety。 |
 | Sprint8 | 已完成 | Provider Configuration、离线 Connection Test、Capability System 与生成快照。 |
-| Sprint9 | 未开始 | 建议：生产化决策；评估部署与可选真实 Provider。只有安全和产品方案获批后才接入真实 AI。范围待确认。 |
+| Sprint9 | 已完成 | Ollama 本地 Provider Adapter、Settings/Connection Test，以及 Source 与 selected Messages Analyzer 集成。 |
 
 ## 已完成里程碑
 
@@ -72,9 +72,16 @@
 - Capability Badge 覆盖 Settings、Analysis、Conversation 与 Review。
 - Proposal 保存生成能力，KnowledgeCard 保存 Provider Capability Snapshot。
 
+### Sprint9 — Local Ollama Provider
+
+- 增加非流式 OllamaProvider，默认 `http://localhost:11434` 与 `qwen2.5:7b`，默认不启用。
+- Settings 支持 Ollama enabled、baseUrl、model、timeout，并通过 `/api/tags` 执行真实本地连接测试。
+- Source 与 selected Messages 使用 Sprint7 PromptTemplate 和 AnalyzerOutputValidator 生成 Proposal。
+- Ollama 不可达时保留可恢复错误，不写 Proposal；Demo 始终作为默认回退。
+
 ## 下一 Sprint 开始前
 
-1. 由产品负责人确认 Sprint9 的实际范围与验收标准。
-2. 不把建议主题视为已批准需求。
-3. 保持 Demo Provider 为唯一启用项，除非收到明确的真实 AI 接入任务。
+1. 由产品负责人确认后续 Sprint 的实际范围与验收标准。
+2. 不把 streaming、RAG、embedding 或云 Provider 视为已批准需求。
+3. 保持 Demo 默认回退，不收集或保存云端 API Key。
 4. 每个 Sprint 完成时同步更新 README、PROJECT、ARCHITECTURE、ROADMAP、CHANGELOG 和 HANDOFF。
