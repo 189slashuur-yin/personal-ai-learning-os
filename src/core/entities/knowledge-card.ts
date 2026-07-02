@@ -3,6 +3,7 @@ export type KnowledgeCard = {
   proposalId: string;
   title: string;
   content: string;
+  summary: string;
   sourceFile: string;
   sourceId?: string;
   sourceConversationId?: string;
@@ -11,5 +12,7 @@ export type KnowledgeCard = {
   sourceEvidenceExcerpt?: string;
   tagIds: string[];
   createdAt: string;
+  updatedAt: string;
+  archivedAt?: string;
   status: "Active" | "Archived";
 };

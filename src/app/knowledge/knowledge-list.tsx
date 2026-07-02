@@ -84,7 +84,7 @@ export function KnowledgeList() {
         return card.tagIds.includes(tagFilter);
       })
       .filter((card) =>
-        [card.title, card.content, card.sourceFile].some((value) =>
+        [card.title, card.summary, card.content, card.sourceFile].some((value) =>
           value.toLocaleLowerCase().includes(normalizedQuery),
         ),
       )
@@ -206,7 +206,9 @@ export function KnowledgeList() {
                   {card.status}
                 </span>
               </div>
-              <p className="mt-3 line-clamp-3 text-sm leading-6 text-zinc-600">{card.content}</p>
+              <p className="mt-3 line-clamp-3 text-sm leading-6 text-zinc-600">
+                {card.summary}
+              </p>
               {card.tagIds.length ? (
                 <div className="mt-4 flex flex-wrap gap-1.5">
                   {card.tagIds.flatMap((tagId) => {
@@ -237,7 +239,7 @@ export function KnowledgeList() {
                   {card.missingSourceMessageCount > 0 ? (
                     <p className="mt-1 text-amber-700">原 Message 不可用，Evidence 快照仍可用</p>
                   ) : null}
-                  <p className="mt-1">{formatDate(card.createdAt)}</p>
+                  <p className="mt-1">更新：{formatDate(card.updatedAt)}</p>
                 </div>
                 <span className="text-sm transition group-hover:translate-x-0.5">→</span>
               </div>

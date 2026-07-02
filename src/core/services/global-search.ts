@@ -76,7 +76,7 @@ export function searchLearningOS(data: SearchData, rawQuery: string) {
       id: card.id,
       type: "knowledge" as const,
       title: card.title,
-      content: card.content,
+      content: [card.summary, card.content].filter(Boolean).join(" "),
       source: card.sourceFile,
       href: `/knowledge/${card.id}`,
     }))

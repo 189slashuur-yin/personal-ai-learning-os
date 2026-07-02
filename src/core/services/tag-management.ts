@@ -18,6 +18,24 @@ export function createTag(name: string, color?: string): Tag {
   };
 }
 
+export function updateTag(
+  tag: Tag,
+  updates: Pick<Tag, "name" | "color">,
+): Tag {
+  const normalizedName = updates.name.trim();
+
+  if (!normalizedName) {
+    throw new Error("Tag 名称不能为空。");
+  }
+
+  return {
+    ...tag,
+    name: normalizedName,
+    color: updates.color?.trim() || undefined,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
 export function addTagToKnowledgeCard(
   card: KnowledgeCard,
   tagId: string,

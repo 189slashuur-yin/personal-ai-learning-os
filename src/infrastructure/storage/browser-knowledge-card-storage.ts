@@ -52,7 +52,9 @@ export class BrowserKnowledgeCardStorage implements KnowledgeCardStorage {
 
     return cards.map((card) => ({
       ...card,
+      summary: card.summary ?? card.content ?? "",
       tagIds: card.tagIds ?? [],
+      updatedAt: card.updatedAt ?? card.createdAt,
       status: card.status === "Archived" ? "Archived" : "Active",
     }));
   }

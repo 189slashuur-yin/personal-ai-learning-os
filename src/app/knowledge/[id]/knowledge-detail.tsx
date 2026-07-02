@@ -16,7 +16,10 @@ import { BrowserMessageStorage } from "@/infrastructure/storage/browser-message-
 import { BrowserProposalStorage } from "@/infrastructure/storage/browser-proposal-storage";
 import { BrowserTagStorage } from "@/infrastructure/storage/browser-tag-storage";
 
-type Draft = Pick<KnowledgeCard, "title" | "content" | "status" | "tagIds">;
+type Draft = Pick<
+  KnowledgeCard,
+  "title" | "content" | "summary" | "status" | "tagIds"
+>;
 
 function formatDate(value: string) {
   return new Intl.DateTimeFormat("zh-CN", {
@@ -36,7 +39,9 @@ export function KnowledgeDetail({ cardId }: { cardId: string }) {
   const [tags, setTags] = useState<Tag[]>([]);
   const [newTagName, setNewTagName] = useState("");
   const [tagError, setTagError] = useState<string | null>(null);
-  const [saveStatus, setSaveStatus] = useState<"saved" | "saving">("saved");
+  const [saveStatus, setSaveStatus] = useState<"idle" | "dirty" | "saved">(
+    "idle",
+  );
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -71,6 +76,7 @@ export function KnowledgeDetail({ cardId }: { cardId: string }) {
           ? {
               title: storedCard.title,
               content: storedCard.content,
+              summary: storedCard.summary,
               status: storedCard.status,
               tagIds: storedCard.tagIds,
             }
@@ -79,16 +85,6 @@ export function KnowledgeDetail({ cardId }: { cardId: string }) {
     }, 0);
     return () => window.clearTimeout(timer);
   }, [cardId]);
-
-  useEffect(() => {
-    if (!card || !draft) return;
-
-    const timer = window.setTimeout(() => {
-      new BrowserKnowledgeCardStorage().update({ ...card, ...draft });
-      setSaveStatus("saved");
-    }, 500);
-    return () => window.clearTimeout(timer);
-  }, [card, draft]);
 
   if (card === undefined) {
     return <p className="workspace-shell text-sm text-zinc-500" role="status">正在读取 Knowledge…</p>;
@@ -106,7 +102,26 @@ export function KnowledgeDetail({ cardId }: { cardId: string }) {
 
   function changeDraft(next: Partial<Draft>) {
     setDraft((current) => (current ? { ...current, ...next } : current));
-    setSaveStatus("saving");
+    setSaveStatus("dirty");
+  }
+
+  function saveKnowledge() {
+    if (!card || !draft || saveStatus !== "dirty") return;
+
+    const timestamp = new Date().toISOString();
+    const nextCard: KnowledgeCard = {
+      ...card,
+      ...draft,
+      updatedAt: timestamp,
+      archivedAt:
+        draft.status === "Archived"
+          ? card.archivedAt ?? timestamp
+          : undefined,
+    };
+
+    new BrowserKnowledgeCardStorage().update(nextCard);
+    setCard(nextCard);
+    setSaveStatus("saved");
   }
 
   function deleteKnowledge() {
@@ -155,9 +170,23 @@ export function KnowledgeDetail({ cardId }: { cardId: string }) {
     <main className="workspace-shell pb-24">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <Link className="text-sm font-medium text-zinc-500 hover:text-zinc-950" href="/knowledge">← 返回知识库</Link>
-        <span aria-live="polite" className="text-xs text-zinc-500">
-          {saveStatus === "saving" ? "自动保存中…" : "已自动保存"}
-        </span>
+        <div className="flex items-center gap-3">
+          <span aria-live="polite" className="text-xs text-zinc-500">
+            {saveStatus === "dirty"
+              ? "有未保存更改"
+              : saveStatus === "saved"
+                ? "已保存"
+                : ""}
+          </span>
+          <button
+            className="rounded-lg bg-zinc-950 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-zinc-300"
+            disabled={saveStatus !== "dirty"}
+            onClick={saveKnowledge}
+            type="button"
+          >
+            保存
+          </button>
+        </div>
       </div>
 
       <article className="mt-6 overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm">
@@ -187,7 +216,17 @@ export function KnowledgeDetail({ cardId }: { cardId: string }) {
 
         <div className="p-6 sm:p-8">
           <label className="block">
-            <span className="text-sm font-semibold text-zinc-900">内容</span>
+            <span className="text-sm font-semibold text-zinc-900">简短摘要</span>
+            <textarea
+              className="mt-3 min-h-28 w-full resize-y rounded-xl border border-zinc-200 bg-zinc-50 p-4 leading-7 text-zinc-700 outline-none focus:border-zinc-400 focus:bg-white"
+              onChange={(event) => changeDraft({ summary: event.target.value })}
+              placeholder="用几句话概括这条知识"
+              value={draft.summary}
+            />
+          </label>
+
+          <label className="block">
+            <span className="mt-6 block text-sm font-semibold text-zinc-900">内容</span>
             <textarea
               className="mt-3 min-h-72 w-full resize-y rounded-xl border border-zinc-200 bg-zinc-50 p-4 leading-7 text-zinc-700 outline-none focus:border-zinc-400 focus:bg-white"
               onChange={(event) => changeDraft({ content: event.target.value })}
@@ -254,6 +293,7 @@ export function KnowledgeDetail({ cardId }: { cardId: string }) {
               </div>
             ) : null}
             <div><dt className="font-medium text-zinc-500">创建时间</dt><dd className="mt-1.5 text-zinc-900">{formatDate(card.createdAt)}</dd></div>
+            <div><dt className="font-medium text-zinc-500">更新时间</dt><dd className="mt-1.5 text-zinc-900">{formatDate(card.updatedAt)}</dd></div>
             <div><dt className="font-medium text-zinc-500">状态</dt><dd className="mt-1.5 text-zinc-900">{draft.status}</dd></div>
           </dl>
           {missingSourceMessageCount > 0 && sourceEvidenceExcerpt ? (

@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import type { Proposal } from "@/core/entities/proposal";
-import { analyzeSource } from "@/core/services/demo-analyzer";
+import { ProviderService } from "@/core/services/provider-service";
+import { BrowserAIProviderStorage } from "@/infrastructure/storage/browser-ai-provider-storage";
 import { BrowserProposalStorage } from "@/infrastructure/storage/browser-proposal-storage";
 import { BrowserSourceStorage } from "@/infrastructure/storage/browser-source-storage";
 
@@ -24,7 +25,10 @@ export function AnalysisResult() {
         return;
       }
 
-      const proposal = analyzeSource(source);
+      const provider = new ProviderService(
+        new BrowserAIProviderStorage(),
+      ).getCurrentProvider();
+      const proposal = provider.analyzeSource(source);
       new BrowserProposalStorage().saveCurrent(proposal);
       setState({ status: "complete", proposal });
     }, 0);

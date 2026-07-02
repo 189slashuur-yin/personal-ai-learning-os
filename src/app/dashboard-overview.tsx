@@ -5,6 +5,8 @@ import { useEffect, useState } from "react";
 import type { Conversation } from "@/core/entities/conversation";
 import type { KnowledgeCard } from "@/core/entities/knowledge-card";
 import type { Tag } from "@/core/entities/tag";
+import { ProviderService } from "@/core/services/provider-service";
+import { BrowserAIProviderStorage } from "@/infrastructure/storage/browser-ai-provider-storage";
 import { BrowserConversationStorage } from "@/infrastructure/storage/browser-conversation-storage";
 import { BrowserKnowledgeCardStorage } from "@/infrastructure/storage/browser-knowledge-card-storage";
 import { BrowserMessageStorage } from "@/infrastructure/storage/browser-message-storage";
@@ -23,6 +25,7 @@ type DashboardData = {
   recentTags: Tag[];
   latestUpdatedAt: string | null;
   latestOpenedAt: string | null;
+  providerName: string;
 };
 
 function formatDashboardTime(timestamp: string | null) {
@@ -81,6 +84,9 @@ export function DashboardOverview() {
             .map((conversation) => conversation.updatedAt)
             .sort((left, right) => right.localeCompare(left))[0] ?? null,
         latestOpenedAt: recentConversations[0]?.lastOpenedAt ?? null,
+        providerName: new ProviderService(
+          new BrowserAIProviderStorage(),
+        ).getCurrentProvider().providerInfo.name,
       });
     }, 0);
 
@@ -96,6 +102,7 @@ export function DashboardOverview() {
   }
 
   const stats = [
+    { label: "当前 Provider", value: data.providerName },
     { label: "Conversation", value: data.conversationCount },
     { label: "Messages", value: data.messageCount },
     { label: "Knowledge", value: data.knowledgeCount },
@@ -127,8 +134,8 @@ export function DashboardOverview() {
             <p className="eyebrow">Tags Recent</p>
             <h2 className="mt-2 text-lg font-semibold text-zinc-950">最近 Tags</h2>
           </div>
-          <Link className="text-sm font-medium text-zinc-600 hover:text-zinc-950" href="/knowledge">
-            前往知识库 →
+          <Link className="text-sm font-medium text-zinc-600 hover:text-zinc-950" href="/tags">
+            管理 Tags →
           </Link>
         </div>
         {data.recentTags.length ? (
@@ -144,7 +151,7 @@ export function DashboardOverview() {
             ))}
           </div>
         ) : (
-          <p className="mt-4 text-sm text-zinc-500">尚无 Tag，可在 Knowledge Detail 中快速新建。</p>
+          <p className="mt-4 text-sm text-zinc-500">尚无 Tag，可在 Tag 管理页或 Knowledge Detail 中新建。</p>
         )}
       </section>
 

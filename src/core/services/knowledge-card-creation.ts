@@ -8,11 +8,14 @@ export function createKnowledgeCard(
     return null;
   }
 
+  const timestamp = new Date().toISOString();
+
   return {
     id: `knowledge-card-${proposal.id}`,
     proposalId: proposal.id,
     title: proposal.title,
     content: proposal.summary,
+    summary: proposal.summary,
     sourceFile: proposal.sourceEvidence.sourceName,
     sourceId: proposal.sourceId,
     sourceConversationId: proposal.conversationId,
@@ -20,7 +23,8 @@ export function createKnowledgeCard(
     sourceMessageCount: proposal.sourceMessageIds?.length,
     sourceEvidenceExcerpt: proposal.sourceEvidence.excerpt,
     tagIds: [],
-    createdAt: new Date().toISOString(),
+    createdAt: timestamp,
+    updatedAt: timestamp,
     status: "Active",
   };
 }

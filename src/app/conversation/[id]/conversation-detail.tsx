@@ -7,10 +7,11 @@ import type { ImportedSource } from "@/core/entities/imported-source";
 import type { KnowledgeCard } from "@/core/entities/knowledge-card";
 import type { Message, MessageRole } from "@/core/entities/message";
 import type { Proposal } from "@/core/entities/proposal";
-import { analyzeMessages, analyzeSource } from "@/core/services/demo-analyzer";
 import { parseMessagesFromRawText } from "@/core/services/message-parser";
+import { ProviderService } from "@/core/services/provider-service";
 import { countWords } from "@/core/services/text-statistics";
 import { BrowserConversationStorage } from "@/infrastructure/storage/browser-conversation-storage";
+import { BrowserAIProviderStorage } from "@/infrastructure/storage/browser-ai-provider-storage";
 import { BrowserKnowledgeCardStorage } from "@/infrastructure/storage/browser-knowledge-card-storage";
 import { BrowserMessageStorage } from "@/infrastructure/storage/browser-message-storage";
 import { BrowserProposalStorage } from "@/infrastructure/storage/browser-proposal-storage";
@@ -205,7 +206,10 @@ export function ConversationDetail({ conversationId }: ConversationDetailProps) 
       return;
     }
 
-    const nextProposal = analyzeSource(state.source);
+    const provider = new ProviderService(
+      new BrowserAIProviderStorage(),
+    ).getCurrentProvider();
+    const nextProposal = provider.analyzeSource(state.source);
     new BrowserProposalStorage().saveCurrent(nextProposal);
     setState({
       ...state,
@@ -221,7 +225,10 @@ export function ConversationDetail({ conversationId }: ConversationDetailProps) 
     const selectedMessages = state.messages.filter((message) =>
       selectedMessageIds.has(message.id),
     );
-    const nextProposal = analyzeMessages(
+    const provider = new ProviderService(
+      new BrowserAIProviderStorage(),
+    ).getCurrentProvider();
+    const nextProposal = provider.analyzeMessages(
       state.conversation.id,
       selectedMessages,
     );
