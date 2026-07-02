@@ -77,3 +77,15 @@
 - Sprint10C：lint、build、diff-check 通过。
 - Sprint10D / 最终检查：lint、build、diff-check 通过。
 - 本地 UI smoke test：Import 双入口、64 字符/6 行统计、成功跳转、六步流程、详情统计与代码块保护均通过。
+
+## Manual QA Checklist 文档交接
+
+- 新增 `docs/QA_CHECKLIST.md`，覆盖 Sprint10 新功能与 Sprint1-Sprint9 回归范围。
+- 清单重点覆盖 Import、Conversation、Messages、Proposal、Review、Knowledge、Tag、Provider 和 Ollama。
+- 每个用例均记录操作、预期结果、失败可能性与失败模块。
+- 文档保留独立的 Smoke Test、Regression Test 和 Edge Case Checklist。
+- `README.md` 已增加 Manual QA Checklist 入口。
+- 本次仅修改文档，未修改业务代码，未创建 Git commit。
+- 本次文档交付检查：`npm run lint`、`npm run build`、`git diff --check` 通过。
+- 限制：该文件是待执行的手工验收基线，不表示所有 UI 或 Ollama 场景已在本次实际执行。
+- 下一步：由 QA 按 Smoke Test 起步，再执行完整 Regression 与 Edge Case；Ollama 成功链路需准备本地服务和模型。

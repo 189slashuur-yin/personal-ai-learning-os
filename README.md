@@ -97,6 +97,8 @@ git diff --check
 
 更详细的产品边界见 [PROJECT.md](./PROJECT.md)，分层与数据流见 [ARCHITECTURE.md](./ARCHITECTURE.md)，后续计划见 [ROADMAP.md](./ROADMAP.md)。
 
+手工验收步骤见 [Manual QA Checklist](./docs/QA_CHECKLIST.md)。
+
 ## License
 
 MIT
