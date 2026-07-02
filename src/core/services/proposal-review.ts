@@ -6,3 +6,17 @@ export function acceptProposal(proposal: Proposal): Proposal {
     status: "Accepted",
   };
 }
+
+export function rejectProposal(proposal: Proposal): Proposal {
+  return {
+    ...proposal,
+    status: "Rejected",
+  };
+}
+
+export function applyProposal(proposal: Proposal): Proposal {
+  return {
+    ...proposal,
+    status: "Applied",
+  };
+}

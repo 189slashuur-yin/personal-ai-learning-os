@@ -113,6 +113,9 @@ export function ProposalWorkspace({
             >
               删除 Proposal
             </button>
+            <span className="text-xs text-zinc-500">
+              删除 Proposal 不会删除已生成知识卡
+            </span>
           </div>
         </li>
       ))}

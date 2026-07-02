@@ -7,7 +7,11 @@ import type { Proposal } from "@/core/entities/proposal";
 import type { Conversation } from "@/core/entities/conversation";
 import type { Message } from "@/core/entities/message";
 import { createKnowledgeCard } from "@/core/services/knowledge-card-creation";
-import { acceptProposal } from "@/core/services/proposal-review";
+import {
+  acceptProposal,
+  applyProposal,
+  rejectProposal,
+} from "@/core/services/proposal-review";
 import { BrowserKnowledgeCardStorage } from "@/infrastructure/storage/browser-knowledge-card-storage";
 import { BrowserConversationStorage } from "@/infrastructure/storage/browser-conversation-storage";
 import { BrowserMessageStorage } from "@/infrastructure/storage/browser-message-storage";
@@ -80,23 +84,50 @@ export function ReviewProposal({ proposalId }: { proposalId?: string }) {
   }
 
   function handleAccept() {
-    if (state.status !== "ready") {
+    if (state.status !== "ready" || state.proposal.status !== "Pending") {
+      return;
+    }
+
+    const proposalStorage = new BrowserProposalStorage();
+    const knowledgeStorage = new BrowserKnowledgeCardStorage();
+    const existingCard = knowledgeStorage.getByProposalId(state.proposal.id);
+
+    if (existingCard) {
+      const appliedProposal = applyProposal(state.proposal);
+      proposalStorage.saveCurrent(appliedProposal);
+      setState({ ...state, proposal: appliedProposal });
+      router.push(`/knowledge/${existingCard.id}`);
       return;
     }
 
     const acceptedProposal = acceptProposal(state.proposal);
-    new BrowserProposalStorage().saveCurrent(acceptedProposal);
-
     const knowledgeCard = createKnowledgeCard(acceptedProposal);
 
     if (knowledgeCard) {
-      new BrowserKnowledgeCardStorage().save(knowledgeCard);
+      knowledgeStorage.save(knowledgeCard);
+      proposalStorage.saveCurrent(applyProposal(acceptedProposal));
       router.push(`/knowledge/${knowledgeCard.id}`);
       return;
     }
 
     router.push("/knowledge");
   }
+
+  function handleReject() {
+    if (state.status !== "ready" || state.proposal.status !== "Pending") {
+      return;
+    }
+
+    const rejectedProposal = rejectProposal(state.proposal);
+    new BrowserProposalStorage().saveCurrent(rejectedProposal);
+    setState({ ...state, proposal: rejectedProposal });
+  }
+
+  const isPending = state.proposal.status === "Pending";
+  const missingMessageCount = Math.max(
+    0,
+    (state.proposal.sourceMessageIds?.length ?? 0) - state.sourceMessages.length,
+  );
 
   return (
     <article className="mt-8 max-w-2xl space-y-6 rounded-xl border border-zinc-200 bg-white p-6">
@@ -152,23 +183,35 @@ export function ReviewProposal({ proposalId }: { proposalId?: string }) {
                     </li>
                   ))}
                 </ol>
-              ) : (
+              ) : null}
+              {missingMessageCount > 0 ? (
                 <p className="mt-2 text-xs text-zinc-500">
-                  原始 Messages 已不可用；Evidence 摘要仍保留。
+                  {missingMessageCount} 条原始 Message 已不可用；Evidence 快照仍可用。
                 </p>
-              )}
+              ) : null}
             </div>
           ) : null}
         </div>
       </section>
 
-      <button
-        className="rounded-lg bg-zinc-950 px-5 py-3 text-sm font-medium text-white"
-        onClick={handleAccept}
-        type="button"
-      >
-        接受 Proposal
-      </button>
+      <div className="flex flex-wrap items-center gap-3">
+        <button
+          className="rounded-lg bg-zinc-950 px-5 py-3 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-zinc-300"
+          disabled={!isPending}
+          onClick={handleAccept}
+          type="button"
+        >
+          {isPending ? "接受并生成 KnowledgeCard" : `已处理：${state.proposal.status}`}
+        </button>
+        <button
+          className="rounded-lg border border-red-200 px-5 py-3 text-sm font-medium text-red-700 disabled:cursor-not-allowed disabled:opacity-40"
+          disabled={!isPending}
+          onClick={handleReject}
+          type="button"
+        >
+          拒绝 Proposal
+        </button>
+      </div>
     </article>
   );
 }

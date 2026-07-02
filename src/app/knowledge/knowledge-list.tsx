@@ -3,19 +3,24 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import type { KnowledgeCard } from "@/core/entities/knowledge-card";
+import type { Tag } from "@/core/entities/tag";
 import { BrowserConversationStorage } from "@/infrastructure/storage/browser-conversation-storage";
 import { BrowserKnowledgeCardStorage } from "@/infrastructure/storage/browser-knowledge-card-storage";
+import { BrowserMessageStorage } from "@/infrastructure/storage/browser-message-storage";
 import { BrowserProposalStorage } from "@/infrastructure/storage/browser-proposal-storage";
+import { BrowserTagStorage } from "@/infrastructure/storage/browser-tag-storage";
 
 const PAGE_SIZE = 6;
 
 type Filter = "All" | KnowledgeCard["status"];
+type TagFilter = "All" | "Untagged" | string;
 type Sort = "newest" | "oldest" | "title";
 
 const filters: Filter[] = ["All", "Active", "Archived"];
 
 type KnowledgeListItem = KnowledgeCard & {
   sourceConversationTitle?: string;
+  missingSourceMessageCount: number;
 };
 
 function formatDate(value: string) {
@@ -26,8 +31,10 @@ function formatDate(value: string) {
 
 export function KnowledgeList() {
   const [cards, setCards] = useState<KnowledgeListItem[] | null>(null);
+  const [tags, setTags] = useState<Tag[]>([]);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("Active");
+  const [tagFilter, setTagFilter] = useState<TagFilter>("All");
   const [sort, setSort] = useState<Sort>("newest");
   const [page, setPage] = useState(1);
 
@@ -35,6 +42,10 @@ export function KnowledgeList() {
     const loadTimer = window.setTimeout(() => {
       const proposalStorage = new BrowserProposalStorage();
       const conversationStorage = new BrowserConversationStorage();
+      setTags(new BrowserTagStorage().getAll());
+      const availableMessageIds = new Set(
+        new BrowserMessageStorage().getAll().map((message) => message.id),
+      );
       setCards(
         new BrowserKnowledgeCardStorage().getAll().map((card) => {
           const proposal = proposalStorage.getById(card.proposalId);
@@ -50,6 +61,9 @@ export function KnowledgeList() {
             sourceMessageCount:
               card.sourceMessageCount ?? proposal?.sourceMessageIds?.length,
             sourceConversationTitle: conversation?.title,
+            missingSourceMessageCount: (
+              card.sourceMessageIds ?? proposal?.sourceMessageIds ?? []
+            ).filter((messageId) => !availableMessageIds.has(messageId)).length,
           };
         }),
       );
@@ -64,6 +78,11 @@ export function KnowledgeList() {
     const normalizedQuery = query.trim().toLocaleLowerCase();
     return cards
       .filter((card) => filter === "All" || card.status === filter)
+      .filter((card) => {
+        if (tagFilter === "All") return true;
+        if (tagFilter === "Untagged") return card.tagIds.length === 0;
+        return card.tagIds.includes(tagFilter);
+      })
       .filter((card) =>
         [card.title, card.content, card.sourceFile].some((value) =>
           value.toLocaleLowerCase().includes(normalizedQuery),
@@ -74,7 +93,12 @@ export function KnowledgeList() {
         const direction = sort === "newest" ? -1 : 1;
         return direction * (Date.parse(a.createdAt) - Date.parse(b.createdAt));
       });
-  }, [cards, filter, query, sort]);
+  }, [cards, filter, query, sort, tagFilter]);
+
+  const tagsById = useMemo(
+    () => new Map(tags.map((tag) => [tag.id, tag])),
+    [tags],
+  );
 
   if (!cards) {
     return <p className="mt-8 text-sm text-zinc-500" role="status">正在读取知识库…</p>;
@@ -139,6 +163,24 @@ export function KnowledgeList() {
           </div>
           <p className="text-sm text-zinc-500">{visibleCards.length} 条知识</p>
         </div>
+        <div className="mt-4 border-t border-zinc-100 pt-4">
+          <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500">Tags</p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {[{ id: "All", name: "All" }, { id: "Untagged", name: "Untagged" }, ...tags].map((tag) => (
+              <button
+                className={`rounded-full border px-3 py-1.5 text-xs font-medium ${tagFilter === tag.id ? "border-zinc-950 bg-zinc-950 text-white" : "border-zinc-200 bg-white text-zinc-600 hover:border-zinc-400"}`}
+                key={tag.id}
+                onClick={() => {
+                  setTagFilter(tag.id);
+                  setPage(1);
+                }}
+                type="button"
+              >
+                {tag.name}
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
 
       {pageCards.length === 0 ? (
@@ -165,9 +207,25 @@ export function KnowledgeList() {
                 </span>
               </div>
               <p className="mt-3 line-clamp-3 text-sm leading-6 text-zinc-600">{card.content}</p>
+              {card.tagIds.length ? (
+                <div className="mt-4 flex flex-wrap gap-1.5">
+                  {card.tagIds.flatMap((tagId) => {
+                    const tag = tagsById.get(tagId);
+                    return tag ? (
+                      <span
+                        className="rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-medium text-zinc-600"
+                        key={tag.id}
+                        style={tag.color ? { borderColor: tag.color, borderWidth: 1 } : undefined}
+                      >
+                        {tag.name}
+                      </span>
+                    ) : [];
+                  })}
+                </div>
+              ) : null}
               <div className="mt-auto flex items-end justify-between gap-4 border-t border-zinc-100 pt-4 text-xs text-zinc-500">
                 <div className="min-w-0">
-                  <p className="truncate">{card.sourceFile}</p>
+                  <p className="truncate">Source：{card.sourceFile}</p>
                   {card.sourceConversationTitle ? (
                     <p className="mt-1 truncate">
                       Conversation：{card.sourceConversationTitle}
@@ -175,6 +233,9 @@ export function KnowledgeList() {
                   ) : null}
                   {card.sourceMessageCount ? (
                     <p className="mt-1">来源 Messages：{card.sourceMessageCount} 条</p>
+                  ) : null}
+                  {card.missingSourceMessageCount > 0 ? (
+                    <p className="mt-1 text-amber-700">原 Message 不可用，Evidence 快照仍可用</p>
                   ) : null}
                   <p className="mt-1">{formatDate(card.createdAt)}</p>
                 </div>

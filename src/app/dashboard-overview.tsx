@@ -4,10 +4,12 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import type { Conversation } from "@/core/entities/conversation";
 import type { KnowledgeCard } from "@/core/entities/knowledge-card";
+import type { Tag } from "@/core/entities/tag";
 import { BrowserConversationStorage } from "@/infrastructure/storage/browser-conversation-storage";
 import { BrowserKnowledgeCardStorage } from "@/infrastructure/storage/browser-knowledge-card-storage";
 import { BrowserMessageStorage } from "@/infrastructure/storage/browser-message-storage";
 import { BrowserProposalStorage } from "@/infrastructure/storage/browser-proposal-storage";
+import { BrowserTagStorage } from "@/infrastructure/storage/browser-tag-storage";
 
 type DashboardData = {
   conversationCount: number;
@@ -15,8 +17,10 @@ type DashboardData = {
   messageCount: number;
   messageCountsByConversation: Record<string, number>;
   proposalCount: number;
+  tagCount: number;
   recentConversations: Conversation[];
   recentKnowledge: KnowledgeCard[];
+  recentTags: Tag[];
   latestUpdatedAt: string | null;
   latestOpenedAt: string | null;
 };
@@ -50,6 +54,9 @@ export function DashboardOverview() {
           new Date(left.lastOpenedAt).getTime(),
       );
       const messages = new BrowserMessageStorage().getAll();
+      const tags = new BrowserTagStorage()
+        .getAll()
+        .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
       const messageCountsByConversation = messages.reduce<Record<string, number>>(
         (counts, message) => {
           counts[message.conversationId] =
@@ -65,8 +72,10 @@ export function DashboardOverview() {
         messageCount: messages.length,
         messageCountsByConversation,
         proposalCount: new BrowserProposalStorage().getAll().length,
+        tagCount: tags.length,
         recentConversations: recentConversations.slice(0, 4),
         recentKnowledge: activeKnowledge.slice(0, 4),
+        recentTags: tags.slice(0, 6),
         latestUpdatedAt:
           conversations
             .map((conversation) => conversation.updatedAt)
@@ -91,13 +100,14 @@ export function DashboardOverview() {
     { label: "Messages", value: data.messageCount },
     { label: "Knowledge", value: data.knowledgeCount },
     { label: "Proposal", value: data.proposalCount },
+    { label: "Tags", value: data.tagCount },
     { label: "最近更新时间", value: formatDashboardTime(data.latestUpdatedAt) },
     { label: "最后打开时间", value: formatDashboardTime(data.latestOpenedAt) },
   ];
 
   return (
     <>
-      <section className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-6">
+      <section className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {stats.map((stat) => (
           <div
             className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm"
@@ -109,6 +119,33 @@ export function DashboardOverview() {
             </p>
           </div>
         ))}
+      </section>
+
+      <section className="mt-8 rounded-xl border border-zinc-200 bg-white p-5 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="eyebrow">Tags Recent</p>
+            <h2 className="mt-2 text-lg font-semibold text-zinc-950">最近 Tags</h2>
+          </div>
+          <Link className="text-sm font-medium text-zinc-600 hover:text-zinc-950" href="/knowledge">
+            前往知识库 →
+          </Link>
+        </div>
+        {data.recentTags.length ? (
+          <div className="mt-4 flex flex-wrap gap-2">
+            {data.recentTags.map((tag) => (
+              <span
+                className="rounded-full border border-zinc-200 px-3 py-1.5 text-xs font-medium text-zinc-700"
+                key={tag.id}
+                style={tag.color ? { borderColor: tag.color } : undefined}
+              >
+                {tag.name}
+              </span>
+            ))}
+          </div>
+        ) : (
+          <p className="mt-4 text-sm text-zinc-500">尚无 Tag，可在 Knowledge Detail 中快速新建。</p>
+        )}
       </section>
 
       <section className="mt-10">

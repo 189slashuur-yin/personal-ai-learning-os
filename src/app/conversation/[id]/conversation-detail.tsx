@@ -209,11 +209,7 @@ export function ConversationDetail({ conversationId }: ConversationDetailProps) 
     new BrowserProposalStorage().saveCurrent(nextProposal);
     setState({
       ...state,
-      proposals: [
-        nextProposal,
-        ...state.proposals.filter((proposal) => proposal.id !== nextProposal.id),
-      ],
-      knowledgeCard: null,
+      proposals: [nextProposal, ...state.proposals],
     });
   }
 

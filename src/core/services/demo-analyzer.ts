@@ -25,7 +25,7 @@ export function analyzeSource(source: ImportedSource): Proposal {
   const sourceTitle = source.name.replace(/\.txt$/i, "");
 
   return {
-    id: `demo-proposal-${source.id}`,
+    id: `source-proposal-${crypto.randomUUID()}`,
     sourceId: source.id,
     conversationId: source.conversationId,
     title: `关于「${sourceTitle}」的内容提炼`,

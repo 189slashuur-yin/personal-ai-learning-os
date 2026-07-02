@@ -52,6 +52,7 @@ export class BrowserKnowledgeCardStorage implements KnowledgeCardStorage {
 
     return cards.map((card) => ({
       ...card,
+      tagIds: card.tagIds ?? [],
       status: card.status === "Archived" ? "Archived" : "Active",
     }));
   }
