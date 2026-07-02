@@ -179,6 +179,7 @@ Registry 始终注册 Demo Provider，并在 Ollama configuration enabled 时注
 - 旧 Proposal 缺少结构化字段时，UI 使用 unknown / legacy 展示，不回写或清空旧数据。
 - Analyzer 失败只写 AnalyzerRun，不写 ProposalStorage；可恢复失败可按原 Source 或 Message IDs 重试。
 - Ollama 网络不可达或超时为可恢复失败；JSON 或结构校验失败为 `INVALID_OUTPUT`，两者都不会写 ProposalStorage。
+- Analysis 与 Conversation 在 Ollama 失败时展示 AnalyzerRun 中的具体原因和 Demo Provider 回退入口；切换动作仍由用户在 Settings 明确执行。
 
 ## 当前限制与演进边界
 

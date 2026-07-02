@@ -249,50 +249,70 @@ export function ProviderSettings() {
                 </label>
               </div>
               {configuration.providerId === "ollama" ? (
-                <div className="mt-4 grid gap-3 border-t border-zinc-100 pt-4 text-sm sm:grid-cols-2">
-                  <label className="text-zinc-500">
-                    Base URL
-                    <input
-                      className="mt-1 w-full rounded-lg border border-zinc-300 px-3 py-2 font-medium text-zinc-800"
-                      onChange={(event) =>
-                        updateOllamaDraft("baseUrl", event.target.value)
-                      }
-                      type="url"
-                      value={configuration.baseUrl}
-                    />
-                  </label>
-                  <label className="text-zinc-500">
-                    Model
-                    <input
-                      className="mt-1 w-full rounded-lg border border-zinc-300 px-3 py-2 font-medium text-zinc-800"
-                      onChange={(event) =>
-                        updateOllamaDraft("model", event.target.value)
-                      }
-                      type="text"
-                      value={configuration.model}
-                    />
-                  </label>
-                  <label className="text-zinc-500">
-                    Timeout (ms)
-                    <input
-                      className="mt-1 w-full rounded-lg border border-zinc-300 px-3 py-2 font-medium text-zinc-800"
-                      min="1000"
-                      onChange={(event) =>
-                        updateOllamaDraft("timeout", event.target.value)
-                      }
-                      step="1000"
-                      type="number"
-                      value={configuration.timeout}
-                    />
-                  </label>
-                  <div className="flex items-end">
-                    <button
-                      className="rounded-lg border border-zinc-300 px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-50"
-                      onClick={saveOllamaSettings}
-                      type="button"
-                    >
-                      Save Ollama Settings
-                    </button>
+                <div className="mt-4 border-t border-zinc-100 pt-4 text-sm">
+                  <div className="rounded-lg border border-sky-200 bg-sky-50 p-4 text-sky-950">
+                    <p className="font-semibold">使用 Ollama 前请完成本机准备</p>
+                    <ol className="mt-2 list-decimal space-y-1 pl-5 text-xs leading-5 text-sky-900">
+                      <li>在本机安装 Ollama。</li>
+                      <li>
+                        运行{" "}
+                        <code className="font-semibold">ollama serve</code>{" "}
+                        启动服务。
+                      </li>
+                      <li>
+                        拉取下方配置的模型，例如{" "}
+                        <code className="font-semibold">
+                          ollama pull qwen2.5:7b
+                        </code>
+                        。
+                      </li>
+                    </ol>
+                  </div>
+                  <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                    <label className="text-zinc-500">
+                      Base URL
+                      <input
+                        className="mt-1 w-full rounded-lg border border-zinc-300 px-3 py-2 font-medium text-zinc-800"
+                        onChange={(event) =>
+                          updateOllamaDraft("baseUrl", event.target.value)
+                        }
+                        type="url"
+                        value={configuration.baseUrl}
+                      />
+                    </label>
+                    <label className="text-zinc-500">
+                      Model
+                      <input
+                        className="mt-1 w-full rounded-lg border border-zinc-300 px-3 py-2 font-medium text-zinc-800"
+                        onChange={(event) =>
+                          updateOllamaDraft("model", event.target.value)
+                        }
+                        type="text"
+                        value={configuration.model}
+                      />
+                    </label>
+                    <label className="text-zinc-500">
+                      Timeout (ms)
+                      <input
+                        className="mt-1 w-full rounded-lg border border-zinc-300 px-3 py-2 font-medium text-zinc-800"
+                        min="1000"
+                        onChange={(event) =>
+                          updateOllamaDraft("timeout", event.target.value)
+                        }
+                        step="1000"
+                        type="number"
+                        value={configuration.timeout}
+                      />
+                    </label>
+                    <div className="flex items-end">
+                      <button
+                        className="rounded-lg border border-zinc-300 px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-50"
+                        onClick={saveOllamaSettings}
+                        type="button"
+                      >
+                        Save Ollama Settings
+                      </button>
+                    </div>
                   </div>
                 </div>
               ) : (

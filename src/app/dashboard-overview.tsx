@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import type { Conversation } from "@/core/entities/conversation";
+import type { ImportedSource } from "@/core/entities/imported-source";
 import type { KnowledgeCard } from "@/core/entities/knowledge-card";
 import type { Tag } from "@/core/entities/tag";
 import { ProviderService } from "@/core/services/provider-service";
@@ -14,6 +15,7 @@ import { BrowserMessageStorage } from "@/infrastructure/storage/browser-message-
 import { BrowserProposalStorage } from "@/infrastructure/storage/browser-proposal-storage";
 import { BrowserPromptTemplateStorage } from "@/infrastructure/storage/browser-prompt-template-storage";
 import { BrowserProviderConfigurationStorage } from "@/infrastructure/storage/browser-provider-configuration-storage";
+import { BrowserSourceStorage } from "@/infrastructure/storage/browser-source-storage";
 import { BrowserTagStorage } from "@/infrastructure/storage/browser-tag-storage";
 
 type DashboardData = {
@@ -24,6 +26,11 @@ type DashboardData = {
   proposalCount: number;
   tagCount: number;
   recentConversations: Conversation[];
+  recentImports: Array<{
+    conversation: Conversation;
+    source: ImportedSource;
+    messageCount: number;
+  }>;
   recentKnowledge: KnowledgeCard[];
   recentTags: Tag[];
   latestUpdatedAt: string | null;
@@ -72,6 +79,24 @@ export function DashboardOverview() {
         },
         {},
       );
+      const sourceStorage = new BrowserSourceStorage();
+      const recentImports = [...conversations]
+        .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+        .flatMap((conversation) => {
+          const source = sourceStorage.getByConversationId(conversation.id);
+
+          return source
+            ? [
+                {
+                  conversation,
+                  source,
+                  messageCount:
+                    messageCountsByConversation[conversation.id] ?? 0,
+                },
+              ]
+            : [];
+        })
+        .slice(0, 5);
       const providerService = new ProviderService(
         new BrowserAIProviderStorage(),
         new BrowserProviderConfigurationStorage(),
@@ -95,6 +120,7 @@ export function DashboardOverview() {
         proposalCount: new BrowserProposalStorage().getAll().length,
         tagCount: tags.length,
         recentConversations: recentConversations.slice(0, 4),
+        recentImports,
         recentKnowledge: activeKnowledge.slice(0, 4),
         recentTags: tags.slice(0, 6),
         latestUpdatedAt:
@@ -172,6 +198,41 @@ export function DashboardOverview() {
           </div>
         ) : (
           <p className="mt-4 text-sm text-zinc-500">尚无 Tag，可在 Tag 管理页或 Knowledge Detail 中新建。</p>
+        )}
+      </section>
+
+      <section className="mt-10">
+        <div className="flex items-end justify-between gap-4">
+          <div>
+            <p className="eyebrow">Recent Imports</p>
+            <h2 className="mt-2 text-xl font-semibold text-zinc-950">最近导入</h2>
+          </div>
+          <Link className="text-sm font-medium text-zinc-600 hover:text-zinc-950" href="/import">
+            新建导入 →
+          </Link>
+        </div>
+        {data.recentImports.length ? (
+          <div className="mt-5 overflow-hidden rounded-xl border border-zinc-200 bg-white">
+            {data.recentImports.map(({ conversation, source, messageCount }, index) => (
+              <Link
+                className={`flex items-center justify-between gap-4 px-5 py-4 hover:bg-zinc-50 ${index > 0 ? "border-t border-zinc-100" : ""}`}
+                href={`/conversation/${conversation.id}`}
+                key={conversation.id}
+              >
+                <div className="min-w-0">
+                  <p className="truncate font-medium text-zinc-900">{conversation.title}</p>
+                  <p className="mt-1 text-xs text-zinc-500">
+                    {conversation.sourceType} · {source.content.length} 字符 · {messageCount} Messages · 创建 {formatDashboardTime(conversation.createdAt)}
+                  </p>
+                </div>
+                <span className="text-sm text-zinc-400">→</span>
+              </Link>
+            ))}
+          </div>
+        ) : (
+          <div className="mt-5 rounded-xl border border-dashed border-zinc-300 bg-white p-8 text-center text-sm text-zinc-500">
+            尚无导入记录。
+          </div>
         )}
       </section>
 

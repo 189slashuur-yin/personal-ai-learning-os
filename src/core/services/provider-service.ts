@@ -14,6 +14,9 @@ import { createDefaultProviderRegistry } from "@/core/services/provider-registry
 
 const PLACEHOLDER_CREATED_AT = "2026-01-01T00:00:00.000Z";
 
+const OLLAMA_CONNECTION_CHECKS =
+  "请检查：Ollama 是否已启动；baseUrl 是否正确；配置的 model 是否已下载。";
+
 function comingSoonProvider(
   id: string,
   name: string,
@@ -127,12 +130,13 @@ export class ProviderService {
         status = "Success";
       } catch (error) {
         status = "Failed";
-        testError =
+        const failureReason =
           error instanceof DOMException && error.name === "AbortError"
             ? `连接在 ${configuration.timeout} ms 后超时。`
             : error instanceof Error
               ? error.message
               : "无法连接 Ollama。";
+        testError = `${failureReason} ${OLLAMA_CONNECTION_CHECKS}`;
       } finally {
         globalThis.clearTimeout(timeout);
       }

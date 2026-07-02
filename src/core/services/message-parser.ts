@@ -8,12 +8,14 @@ type MessageParserOptions = {
 };
 
 const SPEAKER_PATTERN =
-  /^\s*(我|GPT|用户|AI|Assistant)\s*[：:]\s*(.*)$/i;
+  /^\s*(我|用户|User|You|ChatGPT|GPT|Assistant|Claude|AI|Gemini|DeepSeek)\s*[：:]\s*(.*)$/i;
+
+const USER_SPEAKERS = new Set(["我", "用户", "user", "you"]);
 
 function roleForSpeaker(speaker: string): MessageRole {
   const normalizedSpeaker = speaker.toLowerCase();
 
-  if (normalizedSpeaker === "我" || normalizedSpeaker === "用户") {
+  if (USER_SPEAKERS.has(normalizedSpeaker)) {
     return "user";
   }
 
@@ -46,9 +48,18 @@ export function parseMessagesFromRawText(
   const drafts: MessageDraft[] = [];
   let currentRole: MessageRole = "unknown";
   let currentLines: string[] = [];
+  let isInsideCodeBlock = false;
 
   normalizedText.split("\n").forEach((line) => {
-    const speakerMatch = line.match(SPEAKER_PATTERN);
+    const isCodeFence = line.trimStart().startsWith("```");
+
+    if (isCodeFence) {
+      currentLines.push(line);
+      isInsideCodeBlock = !isInsideCodeBlock;
+      return;
+    }
+
+    const speakerMatch = isInsideCodeBlock ? null : line.match(SPEAKER_PATTERN);
 
     if (!speakerMatch) {
       currentLines.push(line);

@@ -12,7 +12,8 @@
 | Sprint6 | 已完成 | AI Provider Interface、Provider Registry/Service、Settings、Analyzer 与 Knowledge 元数据。仅 Demo Provider 可用。 |
 | Sprint7 | 已完成 | Analyzer Prompt Template、Structured Output Schema、Error / Retry / Safety。 |
 | Sprint8 | 已完成 | Provider Configuration、离线 Connection Test、Capability System 与生成快照。 |
-| Sprint9 | 已完成 | Ollama 本地 Provider Adapter、Settings/Connection Test，以及 Source 与 selected Messages Analyzer 集成。 |
+| Sprint9 | 已完成 | Ollama 本地 Provider Adapter、Settings/Connection Test、Source 与 selected Messages Analyzer 集成，以及 Stabilization 用户说明和失败兜底。 |
+| Sprint10 | 已完成 | Clipboard Import UI、Conversation Text Parser、Messages → Analyzer 流程、Recent Imports 与导入统计。 |
 
 ## 已完成里程碑
 
@@ -78,6 +79,20 @@
 - Settings 支持 Ollama enabled、baseUrl、model、timeout，并通过 `/api/tags` 执行真实本地连接测试。
 - Source 与 selected Messages 使用 Sprint7 PromptTemplate 和 AnalyzerOutputValidator 生成 Proposal。
 - Ollama 不可达时保留可恢复错误，不写 Proposal；Demo 始终作为默认回退。
+
+### Sprint9 Stabilization — Ollama UX / Documentation
+
+- Settings 明确说明 Ollama 的本机安装、`ollama serve` 和模型拉取步骤。
+- Connection Test 失败信息引导检查服务状态、baseUrl 和已下载模型。
+- Analysis 与 Conversation 显示 Ollama 失败原因、确认未写入 Proposal，并提供切回 Demo Provider 的入口。
+- 同步 README、架构、Roadmap、Changelog 与 Handoff；未扩展云 Provider 或数据基础设施。
+
+### Sprint10 — Clipboard Import Engine
+
+- Import 页面保留 TXT 导入，并增加标题、来源、文本统计和 1000 字预览的 Clipboard Import。
+- Parser 支持 ChatGPT、Claude、DeepSeek、Gemini、中英文用户标记与冒号，保护三反引号代码块，未识别文本保留为 Unknown Message。
+- Conversation Detail 串联原始文本、Messages、选中 Messages、Proposal、Review 与 KnowledgeCard，继续复用 Demo / Ollama 安全链路。
+- Dashboard 增加 Recent Imports；Conversation 列表和详情展示来源与关联内容统计。
 
 ## 下一 Sprint 开始前
 

@@ -2,6 +2,25 @@
 
 本文件记录当前仓库已经完成的 Sprint 与关键提交。日期使用仓库 commit date。
 
+## 2026-07-03 — Sprint10: Clipboard Import Engine
+
+状态：已完成，未创建 Git commit。
+
+- Import 页面增加 Clipboard Import，同时保留现有 TXT 导入。
+- 支持 Conversation 标题、ChatGPT / Claude / DeepSeek / Gemini / Manual / Plain Text 来源、字符与行数统计及原文预览。
+- Conversation Parser 扩展中英文发言标记、冒号与代码块保护；无法识别时完整保留为 Unknown Message。
+- Clipboard Conversation 可从 Messages 进入既有 Demo / Ollama Analyzer、Validator、Retry、Review 与 KnowledgeCard 流程。
+- Dashboard 增加 Recent Imports，并补充 Conversation 与详情统计。
+
+## 2026-07-03 — Sprint9 Stabilization
+
+状态：已完成，未创建 Git commit。
+
+- Settings 增加 Ollama 安装、`ollama serve` 与模型拉取说明。
+- Ollama Connection Test 失败时统一提示检查服务状态、baseUrl 和已下载模型。
+- Analysis 与 Conversation 的 Ollama 失败界面显示具体原因，明确不写入 Proposal，并提示切回 Demo Provider。
+- 更新用户与工程文档；未新增云 Provider、streaming、RAG、embedding 或数据库。
+
 ## 2026-07-02 — Sprint9: Local Ollama Provider
 
 状态：已完成，尚未创建 Git commit。

@@ -29,6 +29,7 @@ import { CapabilityBadges } from "@/app/capability-badges";
 
 type ConversationDetailProps = {
   conversationId: string;
+  importedFromClipboard?: boolean;
 };
 
 type DetailState =
@@ -41,6 +42,7 @@ type DetailState =
       messages: Message[];
       proposals: Proposal[];
       knowledgeCard: KnowledgeCard | null;
+      knowledgeCount: number;
     };
 
 type SaveStatus = "saved" | "editing";
@@ -77,7 +79,10 @@ function createAnalyzerExecutionService() {
   );
 }
 
-export function ConversationDetail({ conversationId }: ConversationDetailProps) {
+export function ConversationDetail({
+  conversationId,
+  importedFromClipboard = false,
+}: ConversationDetailProps) {
   const [state, setState] = useState<DetailState>({ status: "loading" });
   const [draft, setDraft] = useState("");
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("saved");
@@ -155,6 +160,10 @@ export function ConversationDetail({ conversationId }: ConversationDetailProps) 
       const knowledgeCard = proposals
         .map((proposal) => knowledgeCardStorage.getByProposalId(proposal.id))
         .find((card) => card !== null) ?? null;
+      const proposalIds = new Set(proposals.map((proposal) => proposal.id));
+      const knowledgeCount = knowledgeCardStorage
+        .getAll()
+        .filter((card) => proposalIds.has(card.proposalId)).length;
       const messages = new BrowserMessageStorage().getByConversationId(
         conversationId,
       );
@@ -176,6 +185,7 @@ export function ConversationDetail({ conversationId }: ConversationDetailProps) 
         messages,
         proposals,
         knowledgeCard,
+        knowledgeCount,
       });
     }, 0);
 
@@ -518,12 +528,40 @@ export function ConversationDetail({ conversationId }: ConversationDetailProps) 
         </div>
       </header>
 
+      {importedFromClipboard ? (
+        <p
+          className="mt-6 rounded-xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm font-medium text-emerald-800"
+          role="status"
+        >
+          Clipboard 导入成功。原始文本已保存；下一步请生成 Messages。
+        </p>
+      ) : null}
+
+      <nav
+        aria-label="Clipboard Import 流程"
+        className="mt-8 rounded-xl border border-sky-200 bg-sky-50 p-5"
+      >
+        <p className="text-sm font-semibold text-sky-950">Clipboard → Knowledge 流程</p>
+        <ol className="mt-3 grid gap-2 text-xs font-medium text-sky-900 sm:grid-cols-3 lg:grid-cols-6">
+          <li>Step 1 · 原始文本</li>
+          <li>Step 2 · 生成 Messages</li>
+          <li>Step 3 · 选择 Messages</li>
+          <li>Step 4 · 生成 Proposal</li>
+          <li>
+            <Link className="underline" href="/review">Step 5 · Review</Link>
+          </li>
+          <li>
+            <Link className="underline" href="/knowledge">Step 6 · KnowledgeCard</Link>
+          </li>
+        </ol>
+      </nav>
+
       <section className="detail-section">
         <div className="detail-section-heading">
           <p className="detail-kicker">01 · Context</p>
           <h2 className="detail-title">Conversation 信息</h2>
         </div>
-        <dl className="grid gap-4 rounded-xl border border-zinc-200 bg-white p-5 text-sm sm:grid-cols-5">
+        <dl className="grid gap-4 rounded-xl border border-zinc-200 bg-white p-5 text-sm sm:grid-cols-3 lg:grid-cols-6">
           <div>
             <dt className="text-zinc-500">来源</dt>
             <dd className="mt-1 font-medium text-zinc-900">
@@ -537,7 +575,9 @@ export function ConversationDetail({ conversationId }: ConversationDetailProps) 
           <div>
             <dt className="text-zinc-500">原始文本</dt>
             <dd className="mt-1 font-medium text-zinc-900">
-              {source ? `${source.content.length} 字符` : "尚未保存"}
+              {source
+                ? `${source.content.length} 字符 · ${source.content.replace(/\r\n?/g, "\n").split("\n").length} 行`
+                : "尚未保存"}
             </dd>
           </div>
           <div>
@@ -550,6 +590,12 @@ export function ConversationDetail({ conversationId }: ConversationDetailProps) 
             <dt className="text-zinc-500">Proposals</dt>
             <dd className="mt-1 font-medium text-zinc-900">
               {proposals.length} 条
+            </dd>
+          </div>
+          <div>
+            <dt className="text-zinc-500">Knowledge</dt>
+            <dd className="mt-1 font-medium text-zinc-900">
+              {state.knowledgeCount} 条
             </dd>
           </div>
         </dl>
@@ -701,7 +747,14 @@ export function ConversationDetail({ conversationId }: ConversationDetailProps) 
             </>
           ) : (
             <div className="mt-5 rounded-xl border border-dashed border-zinc-300 bg-zinc-50 p-5 text-sm leading-6 text-zinc-500">
-              支持识别“我：”“用户：”“GPT：”“AI：”“Assistant：”。无法识别的文本会保存为 Unknown Message。
+              <p className="font-medium text-zinc-700">
+                请先从原始文本生成 Messages，再选择内容生成 Proposal。
+              </p>
+              <p className="mt-2">
+              支持我、用户、User、You、ChatGPT、GPT、Assistant、Claude、AI、Gemini、DeepSeek
+              等中英文发言标记。代码块中的标记不会被切分；无法识别的文本会完整保存为
+              Unknown Message。
+              </p>
             </div>
           )}
         </div>
@@ -770,9 +823,18 @@ export function ConversationDetail({ conversationId }: ConversationDetailProps) 
           </div>
         ) : null}
         {analyzerError ? (
-          <p className="mb-5 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800">
-            未生成 Proposal：{analyzerError}
-          </p>
+          <div className="mb-5 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800">
+            <p>未生成 Proposal：{analyzerError}</p>
+            {latestAnalyzerRun?.providerId === "ollama" ? (
+              <p className="mt-2 leading-6">
+                本次失败未写入 Proposal。你可以前往{" "}
+                <Link className="font-semibold underline" href="/settings">
+                  Settings
+                </Link>{" "}
+                切回 Demo Provider 后重试。
+              </p>
+            ) : null}
+          </div>
         ) : null}
         <ProposalWorkspace proposals={proposals} onDelete={deleteProposal} />
       </section>

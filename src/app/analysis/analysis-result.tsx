@@ -168,6 +168,15 @@ export function AnalysisResult() {
       <section className="mt-8 max-w-2xl rounded-xl border border-red-200 bg-red-50 p-6">
         <p className="font-medium text-red-950">未生成 Proposal</p>
         <p className="mt-2 text-sm leading-6 text-red-800">{state.message}</p>
+        {latestRun?.providerId === "ollama" ? (
+          <p className="mt-3 text-sm leading-6 text-red-800">
+            本次失败未写入 Proposal。你可以前往{" "}
+            <Link className="font-semibold underline" href="/settings">
+              Settings
+            </Link>{" "}
+            切回 Demo Provider 后重试。
+          </p>
+        ) : null}
         <p className="mt-3 text-xs font-medium uppercase tracking-wider text-red-700">
           最近运行：{latestRun?.status ?? "failed"}
           {latestRun?.error ? ` · ${latestRun.error.code}` : ""}
