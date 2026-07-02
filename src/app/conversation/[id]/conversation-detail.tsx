@@ -15,6 +15,7 @@ import { BrowserKnowledgeCardStorage } from "@/infrastructure/storage/browser-kn
 import { BrowserMessageStorage } from "@/infrastructure/storage/browser-message-storage";
 import { BrowserProposalStorage } from "@/infrastructure/storage/browser-proposal-storage";
 import { BrowserSourceStorage } from "@/infrastructure/storage/browser-source-storage";
+import { ProposalWorkspace } from "./proposal-workspace";
 
 type ConversationDetailProps = {
   conversationId: string;
@@ -194,7 +195,6 @@ export function ConversationDetail({ conversationId }: ConversationDetailProps) 
   }
 
   const { conversation, source, proposals, knowledgeCard } = state;
-  const latestProposal = proposals[0] ?? null;
   const updatedAt = new Intl.DateTimeFormat("zh-CN", {
     dateStyle: "medium",
     timeStyle: "short",
@@ -235,6 +235,30 @@ export function ConversationDetail({ conversationId }: ConversationDetailProps) 
     setState({
       ...state,
       proposals: [nextProposal, ...state.proposals],
+    });
+  }
+
+  function deleteProposal(proposal: Proposal) {
+    if (state.status !== "ready") {
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `确定删除 Proposal「${proposal.title}」吗？已生成的 KnowledgeCard 不会被删除。`,
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    new BrowserProposalStorage().remove(proposal.id);
+    setState({
+      ...state,
+      proposals: state.proposals.filter((item) => item.id !== proposal.id),
+      knowledgeCard:
+        state.knowledgeCard?.proposalId === proposal.id
+          ? null
+          : state.knowledgeCard,
     });
   }
 
@@ -538,53 +562,24 @@ export function ConversationDetail({ conversationId }: ConversationDetailProps) 
 
       <section className="detail-section">
         <div className="detail-section-heading">
-          <p className="detail-kicker">04 · Distill</p>
-          <h2 className="detail-title">AI 提炼</h2>
+          <p className="detail-kicker">04 · Proposal Workspace</p>
+          <h2 className="detail-title">整理建议</h2>
           <p className="detail-description">
-            汇总当前 Conversation 的 Proposal，不调用任何 AI。
+            按创建时间查看、追溯和管理当前 Conversation 下的所有 Proposal。
           </p>
         </div>
-        {latestProposal ? (
-          <div className="rounded-xl border border-zinc-200 bg-white p-5">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500">
-                最近生成 · {latestProposal.generatedBy}
-              </p>
-              <span className="rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-semibold text-zinc-600">
-                共 {proposals.length} 条 Proposal
-              </span>
-            </div>
-            <h3 className="mt-2 font-semibold text-zinc-950">
-              {latestProposal.title}
-            </h3>
-            <p className="mt-3 line-clamp-3 text-sm leading-6 text-zinc-600">
-              {latestProposal.summary}
-            </p>
-            <Link
-              className="mt-5 inline-block rounded-lg border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-800 hover:bg-zinc-50"
-              href={`/review?proposal=${latestProposal.id}`}
-              onClick={() =>
-                new BrowserProposalStorage().saveCurrent(latestProposal)
-              }
-            >
-              前往 Review
-            </Link>
-          </div>
-        ) : (
-          <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-dashed border-zinc-300 bg-zinc-50 p-5">
-            <p className="text-sm text-zinc-600">
-              {source ? "原始文本已就绪。" : "请先保存原始文本。"}
-            </p>
-            <button
-              className="rounded-lg bg-zinc-950 px-4 py-2.5 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-zinc-300"
-              disabled={!source || saveStatus === "editing"}
-              onClick={runDemoAnalyzer}
-              type="button"
-            >
-              运行 Demo Analyzer
-            </button>
-          </div>
-        )}
+        <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+          <p className="text-sm text-zinc-500">共 {proposals.length} 条 Proposal</p>
+          <button
+            className="rounded-lg border border-zinc-200 bg-white px-4 py-2.5 text-sm font-medium text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-40"
+            disabled={!source || saveStatus === "editing"}
+            onClick={runDemoAnalyzer}
+            type="button"
+          >
+            从 Source 生成 Proposal
+          </button>
+        </div>
+        <ProposalWorkspace proposals={proposals} onDelete={deleteProposal} />
       </section>
 
       <section className="detail-section">

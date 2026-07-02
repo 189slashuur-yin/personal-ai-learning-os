@@ -3,7 +3,9 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import type { KnowledgeCard } from "@/core/entities/knowledge-card";
+import { BrowserConversationStorage } from "@/infrastructure/storage/browser-conversation-storage";
 import { BrowserKnowledgeCardStorage } from "@/infrastructure/storage/browser-knowledge-card-storage";
+import { BrowserProposalStorage } from "@/infrastructure/storage/browser-proposal-storage";
 
 const PAGE_SIZE = 6;
 
@@ -12,6 +14,10 @@ type Sort = "newest" | "oldest" | "title";
 
 const filters: Filter[] = ["All", "Active", "Archived"];
 
+type KnowledgeListItem = KnowledgeCard & {
+  sourceConversationTitle?: string;
+};
+
 function formatDate(value: string) {
   return new Intl.DateTimeFormat("zh-CN", { dateStyle: "medium" }).format(
     new Date(value),
@@ -19,7 +25,7 @@ function formatDate(value: string) {
 }
 
 export function KnowledgeList() {
-  const [cards, setCards] = useState<KnowledgeCard[] | null>(null);
+  const [cards, setCards] = useState<KnowledgeListItem[] | null>(null);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("Active");
   const [sort, setSort] = useState<Sort>("newest");
@@ -27,7 +33,26 @@ export function KnowledgeList() {
 
   useEffect(() => {
     const loadTimer = window.setTimeout(() => {
-      setCards(new BrowserKnowledgeCardStorage().getAll());
+      const proposalStorage = new BrowserProposalStorage();
+      const conversationStorage = new BrowserConversationStorage();
+      setCards(
+        new BrowserKnowledgeCardStorage().getAll().map((card) => {
+          const proposal = proposalStorage.getById(card.proposalId);
+          const conversationId =
+            card.sourceConversationId ?? proposal?.conversationId;
+          const conversation = conversationId
+            ? conversationStorage.getById(conversationId)
+            : null;
+
+          return {
+            ...card,
+            sourceConversationId: conversationId,
+            sourceMessageCount:
+              card.sourceMessageCount ?? proposal?.sourceMessageIds?.length,
+            sourceConversationTitle: conversation?.title,
+          };
+        }),
+      );
     }, 0);
 
     return () => window.clearTimeout(loadTimer);
@@ -143,6 +168,14 @@ export function KnowledgeList() {
               <div className="mt-auto flex items-end justify-between gap-4 border-t border-zinc-100 pt-4 text-xs text-zinc-500">
                 <div className="min-w-0">
                   <p className="truncate">{card.sourceFile}</p>
+                  {card.sourceConversationTitle ? (
+                    <p className="mt-1 truncate">
+                      Conversation：{card.sourceConversationTitle}
+                    </p>
+                  ) : null}
+                  {card.sourceMessageCount ? (
+                    <p className="mt-1">来源 Messages：{card.sourceMessageCount} 条</p>
+                  ) : null}
                   <p className="mt-1">{formatDate(card.createdAt)}</p>
                 </div>
                 <span className="text-sm transition group-hover:translate-x-0.5">→</span>

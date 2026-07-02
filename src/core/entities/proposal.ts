@@ -10,6 +10,6 @@ export type Proposal = {
     excerpt: string;
   };
   generatedBy: "Demo Analyzer Generated";
-  status: "Pending" | "Accepted";
+  status: "Pending" | "Accepted" | "Rejected" | "Applied";
   createdAt: string;
 };

@@ -9,6 +9,7 @@ export interface ProposalStorage {
   getById(id: string): Proposal | null;
   getBySourceId(sourceId: string): Proposal | null;
   getByConversationId(conversationId: string): Proposal[];
+  remove(id: string): void;
   removeBySourceIds(sourceIds: string[]): void;
   removeByConversationId(conversationId: string): void;
 }

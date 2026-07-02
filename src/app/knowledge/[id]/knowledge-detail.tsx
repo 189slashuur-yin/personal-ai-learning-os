@@ -4,7 +4,9 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import type { KnowledgeCard } from "@/core/entities/knowledge-card";
+import { BrowserConversationStorage } from "@/infrastructure/storage/browser-conversation-storage";
 import { BrowserKnowledgeCardStorage } from "@/infrastructure/storage/browser-knowledge-card-storage";
+import { BrowserProposalStorage } from "@/infrastructure/storage/browser-proposal-storage";
 
 type Draft = Pick<KnowledgeCard, "title" | "content" | "status">;
 
@@ -19,12 +21,26 @@ export function KnowledgeDetail({ cardId }: { cardId: string }) {
   const router = useRouter();
   const [card, setCard] = useState<KnowledgeCard | null | undefined>(undefined);
   const [draft, setDraft] = useState<Draft | null>(null);
+  const [sourceConversationTitle, setSourceConversationTitle] = useState<string | null>(null);
+  const [sourceMessageCount, setSourceMessageCount] = useState<number | null>(null);
   const [saveStatus, setSaveStatus] = useState<"saved" | "saving">("saved");
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
       const storedCard = new BrowserKnowledgeCardStorage().getById(cardId);
+      const proposal = storedCard
+        ? new BrowserProposalStorage().getById(storedCard.proposalId)
+        : null;
+      const conversationId =
+        storedCard?.sourceConversationId ?? proposal?.conversationId;
+      const conversation = conversationId
+        ? new BrowserConversationStorage().getById(conversationId)
+        : null;
       setCard(storedCard);
+      setSourceConversationTitle(conversation?.title ?? null);
+      setSourceMessageCount(
+        storedCard?.sourceMessageCount ?? proposal?.sourceMessageIds?.length ?? null,
+      );
       setDraft(
         storedCard
           ? {
@@ -120,6 +136,18 @@ export function KnowledgeDetail({ cardId }: { cardId: string }) {
 
           <dl className="mt-8 grid gap-5 border-t border-zinc-100 pt-6 text-sm sm:grid-cols-3">
             <div><dt className="font-medium text-zinc-500">来源</dt><dd className="mt-1.5 break-words text-zinc-900">{card.sourceFile}</dd></div>
+            {sourceConversationTitle ? (
+              <div>
+                <dt className="font-medium text-zinc-500">来源 Conversation</dt>
+                <dd className="mt-1.5 text-zinc-900">{sourceConversationTitle}</dd>
+              </div>
+            ) : null}
+            {sourceMessageCount ? (
+              <div>
+                <dt className="font-medium text-zinc-500">来源 Messages</dt>
+                <dd className="mt-1.5 text-zinc-900">{sourceMessageCount} 条</dd>
+              </div>
+            ) : null}
             <div><dt className="font-medium text-zinc-500">创建时间</dt><dd className="mt-1.5 text-zinc-900">{formatDate(card.createdAt)}</dd></div>
             <div><dt className="font-medium text-zinc-500">状态</dt><dd className="mt-1.5 text-zinc-900">{draft.status}</dd></div>
           </dl>

@@ -14,6 +14,8 @@ export function createKnowledgeCard(
     title: proposal.title,
     content: proposal.summary,
     sourceFile: proposal.sourceEvidence.sourceName,
+    sourceConversationId: proposal.conversationId,
+    sourceMessageCount: proposal.sourceMessageIds?.length,
     createdAt: new Date().toISOString(),
     status: "Active",
   };

@@ -4,6 +4,8 @@ export type KnowledgeCard = {
   title: string;
   content: string;
   sourceFile: string;
+  sourceConversationId?: string;
+  sourceMessageCount?: number;
   createdAt: string;
   status: "Active" | "Archived";
 };

@@ -4,15 +4,24 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import type { Proposal } from "@/core/entities/proposal";
+import type { Conversation } from "@/core/entities/conversation";
+import type { Message } from "@/core/entities/message";
 import { createKnowledgeCard } from "@/core/services/knowledge-card-creation";
 import { acceptProposal } from "@/core/services/proposal-review";
 import { BrowserKnowledgeCardStorage } from "@/infrastructure/storage/browser-knowledge-card-storage";
+import { BrowserConversationStorage } from "@/infrastructure/storage/browser-conversation-storage";
+import { BrowserMessageStorage } from "@/infrastructure/storage/browser-message-storage";
 import { BrowserProposalStorage } from "@/infrastructure/storage/browser-proposal-storage";
 
 type ReviewState =
   | { status: "loading" }
   | { status: "missing-proposal" }
-  | { status: "ready"; proposal: Proposal };
+  | {
+      status: "ready";
+      proposal: Proposal;
+      conversation: Conversation | null;
+      sourceMessages: Message[];
+    };
 
 export function ReviewProposal({ proposalId }: { proposalId?: string }) {
   const router = useRouter();
@@ -25,9 +34,19 @@ export function ReviewProposal({ proposalId }: { proposalId?: string }) {
         ? storage.getById(proposalId)
         : storage.getCurrent();
 
+      const conversation = proposal?.conversationId
+        ? new BrowserConversationStorage().getById(proposal.conversationId)
+        : null;
+      const sourceMessageIdSet = new Set(proposal?.sourceMessageIds ?? []);
+      const sourceMessages = proposal?.conversationId
+        ? new BrowserMessageStorage()
+            .getByConversationId(proposal.conversationId)
+            .filter((message) => sourceMessageIdSet.has(message.id))
+        : [];
+
       setState(
         proposal
-          ? { status: "ready", proposal }
+          ? { status: "ready", proposal, conversation, sourceMessages }
           : { status: "missing-proposal" },
       );
     }, 0);
@@ -88,6 +107,17 @@ export function ReviewProposal({ proposalId }: { proposalId?: string }) {
         <h2 className="mt-2 text-2xl font-semibold tracking-tight text-zinc-950">
           {state.proposal.title}
         </h2>
+        {state.conversation ? (
+          <p className="mt-2 text-sm text-zinc-500">
+            所属 Conversation：
+            <Link
+              className="font-medium text-zinc-800 hover:underline"
+              href={`/conversation/${state.conversation.id}`}
+            >
+              {state.conversation.title}
+            </Link>
+          </p>
+        ) : null}
       </div>
 
       <section>
@@ -105,9 +135,29 @@ export function ReviewProposal({ proposalId }: { proposalId?: string }) {
             {state.proposal.sourceEvidence.excerpt}
           </blockquote>
           {state.proposal.sourceMessageIds?.length ? (
-            <p className="mt-3 text-xs text-zinc-500">
-              来源 Message IDs：{state.proposal.sourceMessageIds.join("、")}
-            </p>
+            <div className="mt-4 border-t border-zinc-200 pt-4">
+              <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500">
+                来源 Messages · {state.proposal.sourceMessageIds.length} 条
+              </p>
+              {state.sourceMessages.length ? (
+                <ol className="mt-3 space-y-3">
+                  {state.sourceMessages.map((message) => (
+                    <li className="rounded-md border border-zinc-200 bg-white p-3" key={message.id}>
+                      <p className="text-xs font-semibold capitalize text-zinc-500">
+                        {message.role} · #{message.order + 1}
+                      </p>
+                      <p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-zinc-700">
+                        {message.content}
+                      </p>
+                    </li>
+                  ))}
+                </ol>
+              ) : (
+                <p className="mt-2 text-xs text-zinc-500">
+                  原始 Messages 已不可用；Evidence 摘要仍保留。
+                </p>
+              )}
+            </div>
           ) : null}
         </div>
       </section>

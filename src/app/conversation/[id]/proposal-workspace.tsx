@@ -1,0 +1,121 @@
+"use client";
+
+import Link from "next/link";
+import type { Proposal } from "@/core/entities/proposal";
+
+const statusStyles: Record<Proposal["status"], string> = {
+  Pending: "bg-amber-50 text-amber-700",
+  Accepted: "bg-emerald-50 text-emerald-700",
+  Rejected: "bg-red-50 text-red-700",
+  Applied: "bg-sky-50 text-sky-700",
+};
+
+function formatDate(value: string) {
+  return new Intl.DateTimeFormat("zh-CN", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(value));
+}
+
+function proposalSourceType(proposal: Proposal) {
+  return proposal.sourceMessageIds?.length ? "Messages" : "Source";
+}
+
+type ProposalWorkspaceProps = {
+  proposals: Proposal[];
+  onDelete: (proposal: Proposal) => void;
+};
+
+export function ProposalWorkspace({
+  proposals,
+  onDelete,
+}: ProposalWorkspaceProps) {
+  if (proposals.length === 0) {
+    return (
+      <div className="rounded-xl border border-dashed border-zinc-300 bg-zinc-50 p-5 text-sm leading-6 text-zinc-500">
+        尚无 Proposal。可从原始 Source 或选中的 Messages 生成整理建议。
+      </div>
+    );
+  }
+
+  return (
+    <ol className="space-y-4">
+      {proposals.map((proposal) => (
+        <li
+          className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm"
+          key={proposal.id}
+        >
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2 text-xs">
+                <span className="rounded-full bg-zinc-100 px-2.5 py-1 font-semibold text-zinc-700">
+                  {proposalSourceType(proposal)}
+                </span>
+                <span className={`rounded-full px-2.5 py-1 font-semibold ${statusStyles[proposal.status]}`}>
+                  {proposal.status}
+                </span>
+              </div>
+              <h3 className="mt-3 font-semibold leading-6 text-zinc-950">
+                {proposal.title}
+              </h3>
+            </div>
+            <time className="shrink-0 text-xs text-zinc-400" dateTime={proposal.createdAt}>
+              {formatDate(proposal.createdAt)}
+            </time>
+          </div>
+
+          <p className="mt-3 line-clamp-3 text-sm leading-6 text-zinc-600">
+            {proposal.summary}
+          </p>
+
+          <dl className="mt-4 grid gap-3 rounded-lg bg-zinc-50 p-4 text-sm sm:grid-cols-2">
+            <div>
+              <dt className="text-xs font-medium text-zinc-500">生成来源</dt>
+              <dd className="mt-1 text-zinc-800">{proposal.generatedBy}</dd>
+            </div>
+            <div>
+              <dt className="text-xs font-medium text-zinc-500">Evidence 摘要</dt>
+              <dd className="mt-1 line-clamp-2 text-zinc-800">
+                {proposal.sourceEvidence.excerpt}
+              </dd>
+            </div>
+          </dl>
+
+          <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-zinc-100 pt-4">
+            <details className="group">
+              <summary className="cursor-pointer list-none rounded-lg border border-zinc-200 px-3.5 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50">
+                查看详情
+              </summary>
+              <div className="mt-3 rounded-lg border border-zinc-200 bg-zinc-50 p-4 text-sm leading-6 text-zinc-700">
+                <p className="font-medium text-zinc-900">
+                  {proposal.sourceEvidence.sourceName}
+                </p>
+                <p className="mt-2 whitespace-pre-wrap">
+                  {proposal.sourceEvidence.excerpt}
+                </p>
+                {proposal.sourceMessageIds?.length ? (
+                  <p className="mt-3 text-xs text-zinc-500">
+                    来源 Messages：{proposal.sourceMessageIds.length} 条
+                  </p>
+                ) : null}
+              </div>
+            </details>
+            <Link
+              className="rounded-lg bg-zinc-950 px-3.5 py-2 text-sm font-medium text-white hover:bg-zinc-800"
+              href={`/review?proposalId=${encodeURIComponent(proposal.id)}`}
+            >
+              前往 Review
+            </Link>
+            <button
+              className="rounded-lg px-3.5 py-2 text-sm font-medium text-red-600 hover:bg-red-50"
+              onClick={() => onDelete(proposal)}
+              type="button"
+            >
+              删除 Proposal
+            </button>
+          </div>
+        </li>
+      ))}
+    </ol>
+  );
+}

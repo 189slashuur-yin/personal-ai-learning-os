@@ -74,13 +74,21 @@ export class BrowserProposalStorage implements ProposalStorage {
       .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
   }
 
+  remove(id: string) {
+    this.write(this.getAll().filter((proposal) => proposal.id !== id));
+
+    if (this.getCurrent()?.id === id) {
+      window.localStorage.removeItem(CURRENT_PROPOSAL_KEY);
+    }
+  }
+
   removeBySourceIds(sourceIds: string[]) {
     const sourceIdSet = new Set(sourceIds);
     const proposals = this.getAll().filter(
       (proposal) =>
         !proposal.sourceId || !sourceIdSet.has(proposal.sourceId),
     );
-    window.localStorage.setItem(PROPOSALS_KEY, JSON.stringify(proposals));
+    this.write(proposals);
 
     const currentProposal = this.getCurrent();
     if (
@@ -95,11 +103,15 @@ export class BrowserProposalStorage implements ProposalStorage {
     const proposals = this.getAll().filter(
       (proposal) => proposal.conversationId !== conversationId,
     );
-    window.localStorage.setItem(PROPOSALS_KEY, JSON.stringify(proposals));
+    this.write(proposals);
 
     const currentProposal = this.getCurrent();
     if (currentProposal?.conversationId === conversationId) {
       window.localStorage.removeItem(CURRENT_PROPOSAL_KEY);
     }
+  }
+
+  private write(proposals: Proposal[]) {
+    window.localStorage.setItem(PROPOSALS_KEY, JSON.stringify(proposals));
   }
 }

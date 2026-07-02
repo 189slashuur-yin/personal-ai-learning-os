@@ -39,20 +39,23 @@ function loadConversationItems(): ConversationItem[] {
 
   return conversations.map((conversation) => {
     const source = storages.sources.getByConversationId(conversation.id);
-    const conversationProposal = source
+    const proposals = storages.proposals.getByConversationId(conversation.id);
+    const sourceProposal = source
       ? storages.proposals.getBySourceId(source.id)
       : null;
+    const conversationProposals =
+      sourceProposal && !proposals.some((proposal) => proposal.id === sourceProposal.id)
+        ? [sourceProposal, ...proposals]
+        : proposals;
+    const proposalIds = new Set(conversationProposals.map((proposal) => proposal.id));
 
     return {
       conversation,
       messageCount: storages.messages.getByConversationId(conversation.id).length,
-      proposalCount: conversationProposal ? 1 : 0,
-      knowledgeCount: conversationProposal
-        ? storages.knowledgeCards
-            .getAll()
-            .filter((card) => card.proposalId === conversationProposal.id)
-            .length
-        : 0,
+      proposalCount: conversationProposals.length,
+      knowledgeCount: storages.knowledgeCards
+        .getAll()
+        .filter((card) => proposalIds.has(card.proposalId)).length,
     };
   });
 }
