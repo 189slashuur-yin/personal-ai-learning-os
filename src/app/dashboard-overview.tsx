@@ -6,11 +6,13 @@ import type { Conversation } from "@/core/entities/conversation";
 import type { KnowledgeCard } from "@/core/entities/knowledge-card";
 import type { Tag } from "@/core/entities/tag";
 import { ProviderService } from "@/core/services/provider-service";
+import { ProviderConfigurationService } from "@/core/services/provider-configuration-service";
 import { BrowserAIProviderStorage } from "@/infrastructure/storage/browser-ai-provider-storage";
 import { BrowserConversationStorage } from "@/infrastructure/storage/browser-conversation-storage";
 import { BrowserKnowledgeCardStorage } from "@/infrastructure/storage/browser-knowledge-card-storage";
 import { BrowserMessageStorage } from "@/infrastructure/storage/browser-message-storage";
 import { BrowserProposalStorage } from "@/infrastructure/storage/browser-proposal-storage";
+import { BrowserProviderConfigurationStorage } from "@/infrastructure/storage/browser-provider-configuration-storage";
 import { BrowserTagStorage } from "@/infrastructure/storage/browser-tag-storage";
 
 type DashboardData = {
@@ -26,6 +28,7 @@ type DashboardData = {
   latestUpdatedAt: string | null;
   latestOpenedAt: string | null;
   providerName: string;
+  providerLastTest: string;
 };
 
 function formatDashboardTime(timestamp: string | null) {
@@ -68,6 +71,11 @@ export function DashboardOverview() {
         },
         {},
       );
+      const providerConfiguration = new ProviderConfigurationService(
+        new BrowserProviderConfigurationStorage(),
+      )
+        .listConfigurations()
+        .find((configuration) => configuration.providerId === "demo");
 
       setData({
         conversationCount: conversations.length,
@@ -87,6 +95,9 @@ export function DashboardOverview() {
         providerName: new ProviderService(
           new BrowserAIProviderStorage(),
         ).getCurrentProvider().providerInfo.name,
+        providerLastTest: providerConfiguration?.lastTestTime
+          ? `${providerConfiguration.lastTestStatus} · ${formatDashboardTime(providerConfiguration.lastTestTime)}`
+          : (providerConfiguration?.lastTestStatus ?? "Never Tested"),
       });
     }, 0);
 
@@ -103,6 +114,7 @@ export function DashboardOverview() {
 
   const stats = [
     { label: "当前 Provider", value: data.providerName },
+    { label: "Last Test", value: data.providerLastTest },
     { label: "Conversation", value: data.conversationCount },
     { label: "Messages", value: data.messageCount },
     { label: "Knowledge", value: data.knowledgeCount },

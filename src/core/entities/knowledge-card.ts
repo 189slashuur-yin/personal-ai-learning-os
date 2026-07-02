@@ -1,3 +1,5 @@
+import type { ProviderCapability } from "@/core/entities/provider-capability";
+
 export type KnowledgeCard = {
   id: string;
   proposalId: string;
@@ -11,6 +13,7 @@ export type KnowledgeCard = {
   sourceMessageCount?: number;
   sourceEvidenceExcerpt?: string;
   providerName?: string;
+  providerCapabilitySnapshot?: ProviderCapability[];
   generatedAt?: string;
   analysisMode?: "source" | "messages";
   tagIds: string[];

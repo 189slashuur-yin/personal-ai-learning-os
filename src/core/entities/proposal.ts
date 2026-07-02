@@ -2,6 +2,7 @@ import type {
   AnalyzerRiskLevel,
   AnalyzerSuggestedAction,
 } from "@/core/entities/analyzer-output-schema";
+import type { ProviderCapability } from "@/core/entities/provider-capability";
 
 export type Proposal = {
   id: string;
@@ -17,6 +18,7 @@ export type Proposal = {
   generatedBy: "Demo Analyzer Generated";
   providerId?: string;
   providerName?: string;
+  providerCapabilities?: ProviderCapability[];
   generatedAt?: string;
   analysisMode?: "source" | "messages";
   confidence?: number;

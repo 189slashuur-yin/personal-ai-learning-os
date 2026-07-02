@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import type { AnalyzerRun } from "@/core/entities/analyzer-run";
 import type { ImportedSource } from "@/core/entities/imported-source";
 import type { Proposal } from "@/core/entities/proposal";
+import { DEMO_PROVIDER_CAPABILITIES } from "@/core/entities/provider-capability";
 import { AnalyzerExecutionService } from "@/core/services/analyzer-execution";
 import { PromptTemplateService } from "@/core/services/prompt-template-service";
 import { ProviderService } from "@/core/services/provider-service";
@@ -13,6 +14,7 @@ import { BrowserAnalyzerRunStorage } from "@/infrastructure/storage/browser-anal
 import { BrowserPromptTemplateStorage } from "@/infrastructure/storage/browser-prompt-template-storage";
 import { BrowserProposalStorage } from "@/infrastructure/storage/browser-proposal-storage";
 import { BrowserSourceStorage } from "@/infrastructure/storage/browser-source-storage";
+import { CapabilityBadges } from "@/app/capability-badges";
 
 type AnalysisState =
   | { status: "analyzing" }
@@ -127,6 +129,10 @@ export function AnalysisResult() {
         <p className="text-sm font-medium text-zinc-900">
           当前 Provider：{providerName}
         </p>
+        <div className="mt-3">
+          <p className="mb-2 text-xs font-medium text-zinc-500">Capabilities</p>
+          <CapabilityBadges capabilities={DEMO_PROVIDER_CAPABILITIES} />
+        </div>
         <p className="mt-3 text-sm text-zinc-500" role="status">
           Demo Analyzer 正在分析已保存的 TXT Source…
         </p>
@@ -202,6 +208,14 @@ export function AnalysisResult() {
               </dd>
             </div>
           ) : null}
+          <div className="sm:col-span-2">
+            <dt className="text-zinc-500">Capabilities</dt>
+            <dd className="mt-2">
+              <CapabilityBadges
+                capabilities={state.proposal.providerCapabilities}
+              />
+            </dd>
+          </div>
         </dl>
       </div>
 

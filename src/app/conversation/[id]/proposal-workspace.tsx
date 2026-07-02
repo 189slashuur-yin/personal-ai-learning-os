@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import type { Proposal } from "@/core/entities/proposal";
+import { CapabilityBadges } from "@/app/capability-badges";
 
 const statusStyles: Record<Proposal["status"], string> = {
   Pending: "bg-amber-50 text-amber-700",
@@ -83,6 +84,12 @@ export function ProposalWorkspace({
               <dt className="text-xs font-medium text-zinc-500">Provider</dt>
               <dd className="mt-1 text-zinc-800">
                 {proposal.providerName ?? "Unknown Provider (legacy)"}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-xs font-medium text-zinc-500">Capability</dt>
+              <dd className="mt-2">
+                <CapabilityBadges capabilities={proposal.providerCapabilities} />
               </dd>
             </div>
             <div>

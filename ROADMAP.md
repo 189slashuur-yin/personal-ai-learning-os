@@ -1,6 +1,6 @@
 # Roadmap
 
-状态定义：`已完成` 表示能力已在当前 `main` 实现；`未开始` 表示尚无实现承诺。Sprint7–9 的主题是交接建议，开始前需要重新确认范围。
+状态定义：`已完成` 表示能力已在当前工作区实现；`未开始` 表示尚无实现承诺。后续 Sprint 的主题开始前需要重新确认范围。
 
 | Sprint | 状态 | 交付范围 |
 | --- | --- | --- |
@@ -11,7 +11,7 @@
 | Sprint5 | 已完成 | Tag System、Knowledge Tag 筛选、Proposal 生命周期稳定与来源质量提示。 |
 | Sprint6 | 已完成 | AI Provider Interface、Provider Registry/Service、Settings、Analyzer 与 Knowledge 元数据。仅 Demo Provider 可用。 |
 | Sprint7 | 已完成 | Analyzer Prompt Template、Structured Output Schema、Error / Retry / Safety。 |
-| Sprint8 | 未开始 | 建议：自动化测试、可访问性、错误状态、性能与浏览器兼容性。范围待确认。 |
+| Sprint8 | 已完成 | Provider Configuration、离线 Connection Test、Capability System 与生成快照。 |
 | Sprint9 | 未开始 | 建议：生产化决策；评估部署与可选真实 Provider。只有安全和产品方案获批后才接入真实 AI。范围待确认。 |
 
 ## 已完成里程碑
@@ -64,9 +64,17 @@
 - 增加 AnalyzerRun、AnalyzerError、BrowserStorage、状态展示、模拟失败和按原来源 Retry。
 - Provider、模板与 Validator 安全检查失败时不写 ProposalStorage。
 
+### Sprint8 — Provider Configuration and Capability
+
+- 七个 Provider 的默认配置、BrowserStorage 与 enabled 切换。
+- `ProviderService.testConnection()`：Demo 返回 Success，其余返回 Not Implemented，全程离线。
+- Dashboard 显示 Current Provider 与 Last Test。
+- Capability Badge 覆盖 Settings、Analysis、Conversation 与 Review。
+- Proposal 保存生成能力，KnowledgeCard 保存 Provider Capability Snapshot。
+
 ## 下一 Sprint 开始前
 
-1. 由产品负责人确认 Sprint7–9 的实际范围与验收标准。
+1. 由产品负责人确认 Sprint9 的实际范围与验收标准。
 2. 不把建议主题视为已批准需求。
 3. 保持 Demo Provider 为唯一启用项，除非收到明确的真实 AI 接入任务。
 4. 每个 Sprint 完成时同步更新 README、PROJECT、ARCHITECTURE、ROADMAP、CHANGELOG 和 HANDOFF。

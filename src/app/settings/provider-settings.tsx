@@ -3,20 +3,33 @@
 import { useEffect, useState } from "react";
 import type { AIProvider } from "@/core/entities/ai-provider";
 import type { AnalyzerPromptTemplate } from "@/core/entities/analyzer-prompt-template";
+import type { ProviderConfiguration } from "@/core/entities/provider-configuration";
 import {
   getDefaultPromptTemplates,
   PromptTemplateService,
 } from "@/core/services/prompt-template-service";
 import { ProviderService } from "@/core/services/provider-service";
+import { ProviderConfigurationService } from "@/core/services/provider-configuration-service";
 import { BrowserAIProviderStorage } from "@/infrastructure/storage/browser-ai-provider-storage";
 import { BrowserPromptTemplateStorage } from "@/infrastructure/storage/browser-prompt-template-storage";
+import { BrowserProviderConfigurationStorage } from "@/infrastructure/storage/browser-provider-configuration-storage";
+import { CapabilityBadges } from "@/app/capability-badges";
 
 function createProviderService() {
-  return new ProviderService(new BrowserAIProviderStorage());
+  return new ProviderService(
+    new BrowserAIProviderStorage(),
+    new BrowserProviderConfigurationStorage(),
+  );
 }
 
 function createPromptTemplateService() {
   return new PromptTemplateService(new BrowserPromptTemplateStorage());
+}
+
+function createProviderConfigurationService() {
+  return new ProviderConfigurationService(
+    new BrowserProviderConfigurationStorage(),
+  );
 }
 
 export function ProviderSettings() {
@@ -32,10 +45,16 @@ export function ProviderSettings() {
   const [templates, setTemplates] = useState<AnalyzerPromptTemplate[]>(() =>
     getDefaultPromptTemplates(),
   );
+  const [configurations, setConfigurations] = useState<
+    ProviderConfiguration[]
+  >([]);
 
   useEffect(() => {
     const loadTimer = window.setTimeout(() => {
       setTemplates(createPromptTemplateService().listTemplates());
+      setConfigurations(
+        createProviderConfigurationService().listConfigurations(),
+      );
     }, 0);
 
     return () => window.clearTimeout(loadTimer);
@@ -56,6 +75,29 @@ export function ProviderSettings() {
   function resetTemplates() {
     setTemplates(createPromptTemplateService().resetDefaults());
     setMessage("Analyzer templates 已重置为默认值。");
+  }
+
+  function toggleConfiguration(providerId: string, enabled: boolean) {
+    setConfigurations(
+      createProviderConfigurationService().setEnabled(providerId, enabled),
+    );
+    setMessage("Provider configuration 已保存；不会发起网络请求。");
+  }
+
+  function testConnection(providerId: string) {
+    const result = createProviderService().testConnection(providerId);
+    setConfigurations((current) =>
+      current.map((configuration) =>
+        configuration.providerId === providerId
+          ? result.configuration
+          : configuration,
+      ),
+    );
+    setMessage(
+      result.status === "Success"
+        ? "Demo connection test: Success。"
+        : "此 Provider connection test: Not Implemented；未发起网络请求。",
+    );
   }
 
   return (
@@ -100,6 +142,103 @@ export function ProviderSettings() {
             </button>
           );
         })}
+      </div>
+      <div className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm">
+        <div>
+          <h2 className="text-lg font-semibold text-zinc-950">
+            Provider Configuration
+          </h2>
+          <p className="mt-1 text-sm leading-6 text-zinc-500">
+            默认配置只读；enabled 仅保存配置状态，不会启用真实 API。Demo
+            仍是唯一可运行的 Analyzer。
+          </p>
+        </div>
+        <div className="mt-5 space-y-4">
+          {configurations.map((configuration) => (
+            <article
+              className="rounded-lg border border-zinc-200 p-4"
+              key={configuration.providerId}
+            >
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div>
+                  <h3 className="font-semibold text-zinc-950">
+                    {configuration.displayName}
+                  </h3>
+                  <p className="mt-1 text-xs text-zinc-500">
+                    {configuration.providerId}
+                  </p>
+                </div>
+                <label className="flex items-center gap-2 text-sm font-medium text-zinc-700">
+                  <input
+                    checked={configuration.enabled}
+                    className="h-4 w-4 accent-zinc-950"
+                    onChange={(event) =>
+                      toggleConfiguration(
+                        configuration.providerId,
+                        event.target.checked,
+                      )
+                    }
+                    type="checkbox"
+                  />
+                  enabled
+                </label>
+              </div>
+              <dl className="mt-4 grid gap-3 border-t border-zinc-100 pt-4 text-sm sm:grid-cols-2">
+                <div>
+                  <dt className="text-zinc-500">Base URL</dt>
+                  <dd className="mt-1 break-all font-medium text-zinc-800">
+                    {configuration.baseUrl}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-zinc-500">Model</dt>
+                  <dd className="mt-1 font-medium text-zinc-800">
+                    {configuration.model}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-zinc-500">Timeout</dt>
+                  <dd className="mt-1 font-medium text-zinc-800">
+                    {configuration.timeout} ms
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-zinc-500">API key</dt>
+                  <dd className="mt-1 font-medium text-zinc-800">
+                    {configuration.requiresApiKey ? "Required" : "Not required"}
+                  </dd>
+                </div>
+              </dl>
+              <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-zinc-100 pt-4">
+                <p className="text-xs text-zinc-500">
+                  Last test: {configuration.lastTestStatus}
+                  {configuration.lastTestTime
+                    ? ` · ${new Date(configuration.lastTestTime).toLocaleString("zh-CN")}`
+                    : ""}
+                </p>
+                <button
+                  className="rounded-lg border border-zinc-300 px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-50"
+                  onClick={() => testConnection(configuration.providerId)}
+                  type="button"
+                >
+                  Test Connection
+                </button>
+              </div>
+              <p className="mt-3 text-xs text-zinc-500">
+                Streaming {configuration.supportsStreaming ? "Yes" : "No"} ·
+                Vision {configuration.supportsVision ? "Yes" : "No"} · Tool
+                calling {configuration.supportsToolCalling ? "Yes" : "No"} ·
+                JSON mode {configuration.supportsJsonMode ? "Yes" : "No"}
+              </p>
+              <div className="mt-3">
+                <p className="mb-2 text-xs font-medium text-zinc-500">
+                  Capabilities
+                </p>
+                <CapabilityBadges capabilities={configuration.capabilities} />
+              </div>
+            </article>
+          ))}
+        </div>
       </div>
       <div className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-4">

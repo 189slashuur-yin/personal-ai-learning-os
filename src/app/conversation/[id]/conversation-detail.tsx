@@ -8,6 +8,7 @@ import type { ImportedSource } from "@/core/entities/imported-source";
 import type { KnowledgeCard } from "@/core/entities/knowledge-card";
 import type { Message, MessageRole } from "@/core/entities/message";
 import type { Proposal } from "@/core/entities/proposal";
+import { DEMO_PROVIDER_CAPABILITIES } from "@/core/entities/provider-capability";
 import { AnalyzerExecutionService } from "@/core/services/analyzer-execution";
 import { parseMessagesFromRawText } from "@/core/services/message-parser";
 import { PromptTemplateService } from "@/core/services/prompt-template-service";
@@ -22,6 +23,7 @@ import { BrowserProposalStorage } from "@/infrastructure/storage/browser-proposa
 import { BrowserPromptTemplateStorage } from "@/infrastructure/storage/browser-prompt-template-storage";
 import { BrowserSourceStorage } from "@/infrastructure/storage/browser-source-storage";
 import { ProposalWorkspace } from "./proposal-workspace";
+import { CapabilityBadges } from "@/app/capability-badges";
 
 type ConversationDetailProps = {
   conversationId: string;
@@ -660,6 +662,9 @@ export function ConversationDetail({ conversationId }: ConversationDetailProps) 
                   <p className="mb-2 text-xs text-zinc-500">
                     当前 Provider：{providerName}
                   </p>
+                  <div className="mb-3 flex justify-end">
+                    <CapabilityBadges capabilities={DEMO_PROVIDER_CAPABILITIES} />
+                  </div>
                   <button
                     className="rounded-lg bg-zinc-950 px-4 py-2.5 text-sm font-medium text-white hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-300"
                     disabled={selectedMessageIds.size === 0}
@@ -693,6 +698,9 @@ export function ConversationDetail({ conversationId }: ConversationDetailProps) 
             <p className="mb-2 text-xs text-zinc-500">
               当前 Provider：{providerName}
             </p>
+            <div className="mb-3 flex justify-end">
+              <CapabilityBadges capabilities={DEMO_PROVIDER_CAPABILITIES} />
+            </div>
             <button
               className="rounded-lg border border-zinc-200 bg-white px-4 py-2.5 text-sm font-medium text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-40"
               disabled={!source || saveStatus === "editing"}

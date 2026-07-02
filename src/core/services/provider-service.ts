@@ -1,6 +1,12 @@
 import type { AIProviderStorage } from "@/core/contracts/ai-provider-storage";
+import type { ProviderConfigurationStorage } from "@/core/contracts/provider-configuration-storage";
 import type { AIProvider, AIProviderKind } from "@/core/entities/ai-provider";
+import type {
+  ProviderConfiguration,
+  ProviderConnectionTestStatus,
+} from "@/core/entities/provider-configuration";
 import { demoProviderInfo } from "@/core/services/demo-provider";
+import { ProviderConfigurationService } from "@/core/services/provider-configuration-service";
 import { createDefaultProviderRegistry } from "@/core/services/provider-registry";
 
 const PLACEHOLDER_CREATED_AT = "2026-01-01T00:00:00.000Z";
@@ -29,7 +35,10 @@ export const availableProviders: AIProvider[] = [
 ];
 
 export class ProviderService {
-  constructor(private readonly storage: AIProviderStorage) {}
+  constructor(
+    private readonly storage: AIProviderStorage,
+    private readonly configurationStorage?: ProviderConfigurationStorage,
+  ) {}
 
   getProviders(): AIProvider[] {
     return availableProviders;
@@ -59,5 +68,43 @@ export class ProviderService {
     const provider = createDefaultProviderRegistry().switchProvider(providerId);
     this.storage.saveCurrentProviderId(provider.providerInfo.id);
     return { selected: true as const, provider };
+  }
+
+  testConnection(providerId: string): {
+    configuration: ProviderConfiguration;
+    status: ProviderConnectionTestStatus;
+  } {
+    if (!this.configurationStorage) {
+      throw new Error("Provider Configuration Storage 未配置。");
+    }
+
+    const configurationService = new ProviderConfigurationService(
+      this.configurationStorage,
+    );
+    const configurations = configurationService.listConfigurations();
+    const configuration = configurations.find(
+      (item) => item.providerId === providerId,
+    );
+
+    if (!configuration) {
+      throw new Error("Provider Configuration 不存在。");
+    }
+
+    const status: ProviderConnectionTestStatus =
+      providerId === "demo" ? "Success" : "Not Implemented";
+    const testedConfiguration: ProviderConfiguration = {
+      ...configuration,
+      lastTestTime: new Date().toISOString(),
+      lastTestStatus: status,
+      updatedAt: new Date().toISOString(),
+    };
+
+    this.configurationStorage.saveAll(
+      configurations.map((item) =>
+        item.providerId === providerId ? testedConfiguration : item,
+      ),
+    );
+
+    return { configuration: testedConfiguration, status };
   }
 }

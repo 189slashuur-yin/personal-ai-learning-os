@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type FormEvent, useEffect, useState } from "react";
 import type { KnowledgeCard } from "@/core/entities/knowledge-card";
+import { CapabilityBadges } from "@/app/capability-badges";
 import type { Tag } from "@/core/entities/tag";
 import {
   addTagToKnowledgeCard,
@@ -297,6 +298,12 @@ export function KnowledgeDetail({ cardId }: { cardId: string }) {
             {card.providerName ? (
               <div><dt className="font-medium text-zinc-500">来源 Provider</dt><dd className="mt-1.5 text-zinc-900">{card.providerName}</dd></div>
             ) : null}
+            <div>
+              <dt className="font-medium text-zinc-500">Provider Capability Snapshot</dt>
+              <dd className="mt-2">
+                <CapabilityBadges capabilities={card.providerCapabilitySnapshot} />
+              </dd>
+            </div>
             {card.generatedAt ? (
               <div><dt className="font-medium text-zinc-500">Proposal 生成时间</dt><dd className="mt-1.5 text-zinc-900">{formatDate(card.generatedAt)}</dd></div>
             ) : null}

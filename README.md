@@ -12,7 +12,7 @@ Proposal → Review
 KnowledgeCard + Tags
 ```
 
-当前是完成 Sprint7 的浏览器端 MVP：数据保存在当前浏览器的 LocalStorage 中，不需要数据库，也不会调用外部 AI API。内置 Demo Provider 使用确定性的本地逻辑，适合验证产品流程，不代表真实 AI 分析质量。
+当前是完成 Sprint8 的浏览器端 MVP：数据保存在当前浏览器的 LocalStorage 中，不需要数据库，也不会调用外部 AI API。内置 Demo Provider 使用确定性的本地逻辑，适合验证产品流程，不代表真实 AI 分析质量。
 
 ## 当前功能
 
@@ -28,8 +28,10 @@ KnowledgeCard + Tags
 - Analyzer Prompt 默认模板、结构化输出校验、运行状态、错误与可恢复重试。
 - 展示 Provider、生成时间、分析模式、Message 数量与证据摘要等元数据。
 - 展示 Proposal confidence、risk level 与 suggested action；旧数据使用 legacy 默认展示。
+- Provider Configuration 默认目录、只读参数、enabled 状态与离线 Connection Test。
+- Provider Capability Badge，以及 Proposal 和 KnowledgeCard 的生成能力快照。
 
-真实 OpenAI、Claude、Ollama 和 Custom Provider 目前仅显示为 `Coming Soon`，不可选择。
+OpenAI、Claude、Gemini、Ollama、DeepSeek 和 Azure OpenAI 只提供默认配置与能力展示；不会联网，也不能作为 Analyzer 运行。
 
 ## 运行项目
 
@@ -68,7 +70,7 @@ git diff --check
 | `/knowledge/[id]` | Knowledge 编辑、来源追溯与 Tag 关联 |
 | `/tags` | Tag 管理 |
 | `/search` | 全局搜索 |
-| `/settings` | Analyzer Provider 与只读 Prompt Template 设置 |
+| `/settings` | Analyzer Provider、Provider Configuration、Capability 与只读 Prompt Template 设置 |
 
 ## 技术与数据边界
 

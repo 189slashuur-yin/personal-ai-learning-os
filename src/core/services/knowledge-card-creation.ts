@@ -23,6 +23,9 @@ export function createKnowledgeCard(
     sourceMessageCount: proposal.sourceMessageIds?.length,
     sourceEvidenceExcerpt: proposal.sourceEvidence.excerpt,
     providerName: proposal.providerName,
+    providerCapabilitySnapshot: proposal.providerCapabilities
+      ? [...proposal.providerCapabilities]
+      : undefined,
     generatedAt: proposal.generatedAt,
     analysisMode: proposal.analysisMode,
     tagIds: [],

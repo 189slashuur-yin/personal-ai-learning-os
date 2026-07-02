@@ -16,6 +16,7 @@ import { BrowserKnowledgeCardStorage } from "@/infrastructure/storage/browser-kn
 import { BrowserConversationStorage } from "@/infrastructure/storage/browser-conversation-storage";
 import { BrowserMessageStorage } from "@/infrastructure/storage/browser-message-storage";
 import { BrowserProposalStorage } from "@/infrastructure/storage/browser-proposal-storage";
+import { CapabilityBadges } from "@/app/capability-badges";
 
 type ReviewState =
   | { status: "loading" }
@@ -172,6 +173,14 @@ export function ReviewProposal({ proposalId }: { proposalId?: string }) {
           <dt className="text-zinc-500">Provider</dt>
           <dd className="mt-1 font-medium text-zinc-900">
             {state.proposal.providerName ?? "Unknown Provider (legacy)"}
+          </dd>
+        </div>
+        <div className="sm:col-span-2">
+          <dt className="text-zinc-500">Generated using · Capability</dt>
+          <dd className="mt-2">
+            <CapabilityBadges
+              capabilities={state.proposal.providerCapabilities}
+            />
           </dd>
         </div>
         <div>

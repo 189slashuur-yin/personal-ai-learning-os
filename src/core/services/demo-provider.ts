@@ -4,6 +4,7 @@ import type { AnalyzerOutputSchema } from "@/core/entities/analyzer-output-schem
 import type { ImportedSource } from "@/core/entities/imported-source";
 import type { Message, MessageRole } from "@/core/entities/message";
 import type { Proposal } from "@/core/entities/proposal";
+import { DEMO_PROVIDER_CAPABILITIES } from "@/core/entities/provider-capability";
 import { validateAnalyzerOutput } from "@/core/services/analyzer-output-validator";
 
 const SUMMARY_LENGTH = 120;
@@ -65,6 +66,7 @@ export class DemoProvider implements AnalyzerProvider {
       generatedBy: "Demo Analyzer Generated",
       providerId: this.providerInfo.id,
       providerName: this.providerInfo.name,
+      providerCapabilities: [...DEMO_PROVIDER_CAPABILITIES],
       generatedAt,
       analysisMode: "source",
       confidence: validatedOutput.confidence,
@@ -117,6 +119,7 @@ export class DemoProvider implements AnalyzerProvider {
       generatedBy: "Demo Analyzer Generated",
       providerId: this.providerInfo.id,
       providerName: this.providerInfo.name,
+      providerCapabilities: [...DEMO_PROVIDER_CAPABILITIES],
       generatedAt,
       analysisMode: "messages",
       confidence: validatedOutput.confidence,

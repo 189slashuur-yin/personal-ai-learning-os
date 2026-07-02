@@ -2,6 +2,15 @@
 
 本文件记录当前仓库已经完成的 Sprint 与关键提交。日期使用仓库 commit date。
 
+## 2026-07-02 — Sprint8: Provider Configuration / Test / Capability
+
+状态：已完成，尚未创建 Git commit。
+
+- 增加 ProviderConfiguration、ProviderCapability、Contract、BrowserStorage 与 Service。
+- Settings 展示七个默认配置，只有 enabled 可编辑；不启用真实 Analyzer。
+- 增加完全离线的 Test Connection，并在 Dashboard 展示最近结果。
+- Proposal 保存生成能力，Review 展示能力，KnowledgeCard 保存能力快照。
+
 ## 2026-07-02 — Sprint7: Analyzer Templates / Schema / Safety
 
 状态：已完成，尚未创建 Git commit。
