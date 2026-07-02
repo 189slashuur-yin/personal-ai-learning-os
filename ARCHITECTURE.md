@@ -1,247 +1,173 @@
-# AI Learning OS Architecture
+# Architecture
 
-## 1. 架构目标
+## 架构概览
 
-AI Learning OS 是一个 local-first 的个人学习工作区。它把原始对话或文本保存为 Source，经由确定性的分析流程生成 Proposal，再由用户确认并沉淀为 KnowledgeCard。
-
-当前版本的核心目标是：保持业务模型清晰、让数据只存于当前浏览器，并为未来接入 AI、数据库和插件留下可替换边界。
-
-## 2. 总体结构
+项目是一个 local-first 的模块化单体，采用五类清晰职责：Entity、Contract、BrowserStorage、Service、Page。
 
 ```text
-┌──────────────────────────────────────────────────────────────┐
-│ App                                                          │
-│ Next.js App Router、根布局、全局样式、导航与运行时入口       │
-│ src/app/layout.tsx · src/app/globals.css                     │
-└──────────────────────────────┬───────────────────────────────┘
-                               ↓
-┌──────────────────────────────────────────────────────────────┐
-│ Pages                                                        │
-│ Dashboard · Import · Conversation · Analysis · Review        │
-│ Knowledge · Search                                           │
-│ 负责交互、路由、展示，以及把用户操作交给 Service/Storage     │
-└──────────────────────────────┬───────────────────────────────┘
-                               ↓
-┌──────────────────────────────────────────────────────────────┐
-│ Service                                                      │
-│ Demo Analyzer · Proposal Review · Knowledge Creation         │
-│ Conversation Workspace · Global Search · Text Statistics     │
-│ 负责用例编排、转换、搜索和跨实体规则                         │
-└──────────────────────────────┬───────────────────────────────┘
-                               ↓
-┌──────────────────────────────────────────────────────────────┐
-│ Storage                                                      │
-│ Core Contracts                 Infrastructure Adapters        │
-│ ConversationStorage      ←→    BrowserConversationStorage     │
-│ SourceStorage            ←→    BrowserSourceStorage           │
-│ ProposalStorage          ←→    BrowserProposalStorage         │
-│ KnowledgeCardStorage     ←→    BrowserKnowledgeCardStorage    │
-│ 负责持久化边界、序列化、查询和数据兼容                       │
-└──────────────────────────────┬───────────────────────────────┘
-                               ↓
-┌──────────────────────────────────────────────────────────────┐
-│ Entity                                                       │
-│ Conversation · ImportedSource · Proposal · KnowledgeCard     │
-│ 定义领域语言、标识、状态和实体之间的引用                     │
-└──────────────────────────────────────────────────────────────┘
+Page ───────────────→ Service ───────────────→ Contract
+ │                       │                        ↑
+ │                       └────────→ Entity        │ implements
+ │                                                │
+ └── composition / simple CRUD ─────────→ BrowserStorage
+                                          │
+                                          └── LocalStorage
 ```
 
-图中的箭头表示一次典型用户操作的处理方向，不代表所有源码 import 都只能单向向下。具体依赖采用了轻量的依赖倒置：Service 依赖 Entity 和 Storage Contract，浏览器实现位于 Infrastructure；业务规则不需要知道数据最终写入 LocalStorage 还是数据库。
-
-## 3. 目录与职责
+依赖方向的关键点是：Core 中的 Entity、Contract 和 Service 不依赖 Next.js、React 或 LocalStorage。BrowserStorage 位于 Infrastructure 并实现 Contract。Page 是组合入口，可以实例化 BrowserStorage 并调用 Service，但不能直接读写 `window.localStorage`。
 
 ```text
 src/
-├── app/                         # App 与 Pages：路由、组件、交互
-│   ├── conversation/            # Conversation 列表和工作区
-│   ├── import/                  # 文本导入
-│   ├── analysis/                # Demo Analyzer 入口和结果
-│   ├── review/                  # Proposal 审核
-│   ├── knowledge/               # Knowledge 列表和详情
-│   └── search/                  # 全局搜索
 ├── core/
-│   ├── entities/                # 领域实体与状态类型
-│   ├── contracts/               # Storage 抽象接口
-│   └── services/                # 业务用例和领域编排
-└── infrastructure/
-    └── storage/                 # Storage Contract 的浏览器实现
+│   ├── entities/        # Entity
+│   ├── contracts/       # Contract
+│   └── services/        # Service
+├── infrastructure/
+│   └── storage/         # BrowserStorage
+└── app/                 # Page、route 与 UI component
 ```
 
-各层的主要约束：
+## Entity 层
 
-- Pages 可以组织 UI 状态和调用用例，但不应复制跨实体业务规则。
-- Service 接收 Entity 或 Contract，通过明确输入输出完成一个业务动作。
-- Storage Adapter 负责浏览器持久化细节，不决定 Proposal 是否可接受等业务规则。
-- Entity 不依赖 React、Next.js、LocalStorage 或其他基础设施。
+位置：`src/core/entities`
 
-## 4. 核心领域关系
+Entity 定义产品语言、数据形状、状态和实体引用，不包含页面或持久化细节。
+
+| Entity | 作用与主要关系 |
+| --- | --- |
+| `Conversation` | 工作区聚合入口；保存标题、来源类型和时间信息。 |
+| `ImportedSource` | 原始文本；可通过 `conversationId` 归属 Conversation。 |
+| `Message` | 从原始文本解析出的有序消息；通过 `conversationId` 归属 Conversation。 |
+| `Proposal` | 待审核建议；可引用 Source、Conversation 和选中的 Message IDs，并保存 Provider 元数据。 |
+| `KnowledgeCard` | 接受 Proposal 后的知识快照；保留 Proposal、Source、Conversation、Message、Provider 和 Tag 引用。 |
+| `Tag` | 可复用标签；KnowledgeCard 通过 `tagIds` 关联。 |
+| `AIProvider` | Analyzer Provider 的身份、类型和启用状态。 |
+
+主要数据关系：
 
 ```text
 Conversation
-  │ id
-  │
-  ├── 0..* Source
-  │          conversationId → Conversation.id
-  │
-  │          Source
-  │            │ id
-  │            │
-  │            └── 0..* Proposal
-  │                       sourceId → Source.id
-  │
-  │                       Proposal
-  │                         │ id
-  │                         │
-  │                         └── 0..1 KnowledgeCard
-  │                                    proposalId → Proposal.id
-  │
-  └── 工作区删除/复制由 Conversation Workspace Service 统一编排
+├── Source
+├── Message[]
+└── Proposal[]
+    ├── sourceId? / sourceMessageIds[]?
+    └── KnowledgeCard?
+        └── tagIds[] → Tag[]
+
+AIProvider ── metadata ──→ Proposal ── snapshot ──→ KnowledgeCard
 ```
 
-### Conversation
+`ImportedSource.conversationId` 与部分 Proposal 元数据为可选字段，用于兼容 Sprint1 的单流程数据。读取旧数据时不可假定这些字段一定存在。
 
-Conversation 是用户的学习工作区和聚合入口，保存标题、来源类型以及创建、更新、最近打开时间。它不直接内嵌大段原始文本；正文由 Source 独立保存。
+## Contract 层
 
-### Source
+位置：`src/core/contracts`
 
-代码中的实体名为 `ImportedSource`，领域概念简称 Source。它保存原始文本、文件名、导入时间和更新时间，并通过可选的 `conversationId` 归属 Conversation。
+Contract 描述 Core 需要的能力，而不是具体实现。目前包括 Conversation、Source、Message、Proposal、KnowledgeCard、Tag 和 AI Provider 选择的存储契约，以及分析能力契约 `AnalyzerProvider`。
 
-`conversationId` 可选是为了支持“先导入、后进入工作区”的流程。进入正式工作区后，Source 应绑定 Conversation。当前工作区服务已按一对多关系处理 Source。
+`AnalyzerProvider` 暴露：
 
-### Proposal
+- `providerInfo`
+- `analyzeSource(source)`
+- `analyzeMessages(conversationId, selectedMessages)`
 
-Proposal 是从 Source 提炼出的待审核建议，通过 `sourceId` 保留可追溯关系。它包含标题、摘要、来源证据、生成方式和 `Pending / Accepted` 状态。
+真实 AI Provider 若将来获准接入，必须实现此 Contract，并继续返回 Proposal；不得从 Provider 直接写 Storage 或创建 KnowledgeCard。
 
-当前 `Demo Analyzer` 是确定性本地逻辑，不调用 AI。接受 Proposal 是显式的用户动作，不应由持久化层自动完成。
+## BrowserStorage 层
 
-### KnowledgeCard
+位置：`src/infrastructure/storage`
 
-KnowledgeCard 是用户接受 Proposal 后形成的知识成果，通过 `proposalId` 追溯到 Proposal，并间接追溯至 Source 和 Conversation。当前 Storage 会阻止同一 Proposal 重复生成多张知识卡，因此关系为一对零或一。
+BrowserStorage 是 Contract 的 LocalStorage Adapter，负责：
 
-KnowledgeCard 具有 `Active / Archived` 生命周期状态。它保存内容快照和来源文件名，使知识在原始 Source 后续变化时仍有独立语义。
+- LocalStorage key 的集中管理。
+- JSON 序列化与反序列化。
+- 集合查询、保存、更新和删除。
+- 旧数据的默认值与兼容归一化。
+- `current-source`、`current-proposal`、当前 Provider 等页面流程指针。
 
-### 生命周期与一致性
+当前集合 key 使用 `ai-learning-os.*` 命名空间。`current-source` 和 `current-proposal` 只是当前流程指针，不是跨实体关系的唯一事实来源；持续数据应以集合、实体 ID 和引用字段为准。
+
+所有 BrowserStorage 只能在浏览器客户端调用。Page 必须通过 Adapter 使用本地数据，禁止复制 key、JSON 解析或直接 LocalStorage 访问。
+
+## Service 层
+
+位置：`src/core/services`
+
+Service 承担领域转换和跨实体编排：
+
+- `message-parser`：把原始文本按说话人规则解析为 Message。
+- `demo-provider`：以确定性本地逻辑分析 Source 或 Messages。
+- `provider-registry` / `provider-service`：注册、选择、回退和持久化当前 Provider。
+- `proposal-review`：执行 Accepted、Rejected、Applied 状态转换。
+- `knowledge-card-creation`：从 Accepted Proposal 创建可追溯的 KnowledgeCard 快照。
+- `conversation-workspace`：复制或级联删除 Conversation 关联数据，并重建副本 ID 映射。
+- `tag-management`：创建、更新及关联 Tag。
+- `global-search`：统一映射并搜索 Conversation、Proposal 和 Knowledge。
+- `text-statistics`：计算编辑器字数。
+
+Service 不应知道 LocalStorage key，也不应包含 React state 或路由逻辑。涉及业务规则时，Service 面向 Contract；简单页面 CRUD 目前可直接使用 BrowserStorage，但规则不能在多个 Page 中重复扩散。
+
+## Page 层
+
+位置：`src/app`
+
+Page 与 UI component 负责：
+
+- Next.js 路由、布局和导航。
+- 表单、选择、确认框和展示状态。
+- 在客户端组合 BrowserStorage 与 Service。
+- 把实体映射为用户可理解的界面。
+
+Page 不负责：
+
+- 定义 LocalStorage key 或数据迁移。
+- 实现可复用的跨实体业务规则。
+- 让 AI 输出绕过 Proposal Review。
+- 在 Core 中引入 React/Next.js 依赖。
+
+主要路由包括 Dashboard、Import、Conversation、Analysis、Review、Knowledge、Tags、Search 和 Settings。
+
+## 关键数据流
+
+从选中 Messages 生成知识：
 
 ```text
-创建 Conversation
-        ↓
-导入或编辑 Source
-        ↓
-Demo Analyzer 生成 Proposal（Pending）
-        ↓
-用户接受 Proposal（Accepted）
-        ↓
-创建 KnowledgeCard（Active）
+Conversation Page
+  → MessageParser / BrowserMessageStorage
+  → 用户选择 Message[]
+  → ProviderService → AnalyzerProvider.analyzeMessages()
+  → ProposalStorage
+  → Review Page → ProposalReview Service
+  → KnowledgeCardCreation Service
+  → KnowledgeCardStorage
 ```
 
-跨实体操作由 Service 处理。例如删除 Conversation 时，`conversation-workspace` 会按 Source、Proposal、KnowledgeCard 的引用关系清理整个工作区；复制时会创建新 ID 并重建引用映射，避免副本继续指向原工作区。
-
-LocalStorage 中的 `current-source` 和 `current-proposal` 是早期单流程页面的当前项指针，不是实体关系的唯一事实来源。集合数据与实体 ID 才是持续演进时的主数据。
-
-## 5. 为什么当前采用 LocalStorage
-
-LocalStorage 适合当前阶段的产品边界：
-
-- **local-first**：个人学习内容默认留在用户自己的浏览器中。
-- **零后端成本**：无需服务器、数据库、鉴权和部署额外基础设施。
-- **离线可用**：数据读写不依赖网络，适合原型和单设备个人工作区。
-- **迭代速度快**：可以先验证 Conversation → Proposal → Knowledge 的核心流程。
-- **迁移路径清晰**：Pages 和 Service 面向 Storage Contract，后续可以增加数据库 Adapter。
-
-这不是无限期的技术承诺。LocalStorage 容量有限、同步读写、不支持事务与复杂索引，也不能自然解决多设备同步、并发、权限、备份和团队协作。出现大规模数据、跨设备或多用户需求时，应迁移到 IndexedDB 或服务端数据库。
-
-## 6. 为什么采用 Domain 分层
-
-Domain 层让代码围绕产品语言组织，而不是围绕 React 组件或浏览器 API 组织。
-
-- **统一语言**：Conversation、Source、Proposal、KnowledgeCard 在 Entity 中有唯一含义。
-- **规则集中**：接受 Proposal、创建 KnowledgeCard、级联删除和复制映射放在 Service 中。
-- **可测试**：纯 Service 可以使用内存版 Storage Contract 测试，无需浏览器和页面。
-- **可替换**：Next.js、LocalStorage、未来数据库或 AI Provider 都是外围实现。
-- **控制复杂度**：随着 Tag、Message、Version 等能力增加，规则不会散落在多个页面组件里。
-
-当前实现是轻量 Domain 架构，不追求完整 DDD 仪式。只有产生明确业务价值的实体、契约和服务才进入 Core。
-
-## 7. 为什么 Pages 不直接操作浏览器 Storage
-
-页面直接调用 `window.localStorage` 看似更短，但会快速形成隐性耦合：
-
-- 每个页面都需要知道 key、JSON 结构、默认值和兼容规则。
-- 相同读写逻辑会重复，排序、去重、归一化行为容易不一致。
-- Conversation 删除或复制涉及多个集合，页面内操作难以保证引用完整性。
-- 服务端渲染环境没有 `window`，直接读取容易造成运行时错误。
-- 更换 IndexedDB、数据库或测试用内存存储时，需要修改所有页面。
-- 数据结构升级缺少统一的迁移和版本入口。
-
-因此当前路径是：Pages 调用 Service 或 Storage Contract 的 Browser Adapter；Service 在涉及业务规则时依赖 Contract。LocalStorage 的 key 和序列化只存在于 `infrastructure/storage` 中。
-
-## 8. 当前数据流示例
-
-以接受一条 Proposal 为例：
+Provider 选择与元数据：
 
 ```text
-Review Page
-    ↓ 用户点击“接受”
-Proposal Review Service
-    ↓ Pending → Accepted
-ProposalStorage.saveCurrent(...)
-    ↓
-Knowledge Creation Service
-    ↓ Accepted Proposal → KnowledgeCard
-KnowledgeCardStorage.save(...)
-    ↓
-Browser Storage Adapter
-    ↓ JSON serialize
-LocalStorage
+Settings Page
+  → ProviderService
+  → ProviderRegistry
+  → AIProviderStorage（保存当前 providerId）
+
+AnalyzerProvider
+  → Proposal.providerId / providerName / generatedAt / analysisMode
+  → KnowledgeCard 中保存必要快照
 ```
 
-以全局搜索为例：
+目前 Registry 只注册启用的 Demo Provider。OpenAI、Claude、Ollama 和 Custom 只存在于设置页的禁用清单，不包含网络客户端、密钥或真实调用。
 
-```text
-Search Page（300ms debounce）
-    ↓
-Browser Storage Adapters 读取本地实体集合
-    ↓
-Global Search Service
-    ↓ 标题 / 内容 / 来源匹配
-按 Conversation / Proposal / Knowledge 分组展示
-```
+## 一致性与兼容
 
-## 9. 未来扩展
+- 同一 Proposal 只能对应一张 KnowledgeCard。
+- 删除 Conversation 会通过 Service 清理关联 Message、Source、Proposal 和 KnowledgeCard。
+- 复制 Conversation 会为关联实体生成新 ID，并重建 Source、Message、Proposal 引用。
+- 删除 Proposal 不会删除已经生成的 KnowledgeCard；知识卡保留来源快照并可提示引用缺失。
+- 删除 Tag 会从 KnowledgeCard 的 `tagIds` 中解除关联，不会删除知识卡。
+- 新增字段必须为旧 LocalStorage 数据提供安全默认值或显式迁移。
 
-### Tag
+## 当前限制与演进边界
 
-新增 `Tag` Entity 和实体关联表，避免直接把标签字符串复制进每个对象。Service 负责添加、移除、合并和按标签筛选；数据库阶段可使用多对多关系。
+LocalStorage 适合当前单设备 MVP，但容量有限、同步读写、无事务，也不解决备份、跨设备同步和并发。需要更换存储时，应新增或替换 Contract Adapter，而不是让 Page 直接依赖数据库。
 
-### Message
-
-把 Source 中的整段文本解析为有顺序的 Message，记录角色、时间、内容和来源位置。Message 应从 Source 派生并保留定位信息，支持逐条引用与局部提炼。
-
-### Search
-
-当前搜索是浏览器内的小数据量线性匹配。未来可加入分词、相关度排序、模糊匹配、字段权重、过滤器和持久化索引；数据量增大后可替换为 IndexedDB 索引或服务端全文检索，而不改变结果领域模型。
-
-### AI
-
-定义 `Analyzer` 或 `AIProvider` Contract，将当前 Demo Analyzer 与真实模型实现并列。AI 输出必须先映射为 Proposal，保留模型、提示词、来源证据和生成时间；AI 不应绕过用户审核直接写入 KnowledgeCard。
-
-### Database
-
-新增服务端 Storage Adapter，优先保持现有 Contract 的语义。数据库需要补充用户边界、事务、级联策略、索引、备份与同步冲突处理。LocalStorage 可作为离线缓存，但不再充当跨设备事实来源。
-
-### Version
-
-为 Source、Proposal 和 KnowledgeCard 引入不可变 Revision 或 Version Entity。每次重要修改创建版本记录，而不是覆盖历史；支持差异对比、恢复、来源追踪以及 AI 生成结果复现。
-
-### Plugin
-
-定义受控的 Plugin Manifest 与扩展点，例如 Importer、Analyzer、Exporter、Search Provider 和页面动作。插件通过 Contract 交换稳定 DTO，不直接读取内部 LocalStorage key；同时需要权限声明、版本兼容和故障隔离。
-
-## 10. 演进原则
-
-1. Entity ID 和引用关系保持稳定，展示字段可以演进。
-2. 业务规则优先进入 Service，不进入 Storage Adapter。
-3. 新基础设施通过 Contract 接入，避免 Core 依赖具体 Provider。
-4. 数据格式变更必须考虑旧 LocalStorage 数据的归一化或迁移。
-5. AI 生成内容保持可追溯，并继续经过用户审核。
-6. 先扩展现有边界；只有现有边界无法表达真实业务时才新增抽象。
+同理，接入真实 AI 前应先确认安全、密钥、错误处理、成本、重试和隐私方案。Provider 仍只能生成 Proposal，人工 Review 边界保持不变。
