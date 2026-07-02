@@ -222,7 +222,7 @@ export function DashboardOverview() {
                 <div className="min-w-0">
                   <p className="truncate font-medium text-zinc-900">{conversation.title}</p>
                   <p className="mt-1 text-xs text-zinc-500">
-                    {conversation.sourceType} · {source.content.length} 字符 · {messageCount} Messages · 创建 {formatDashboardTime(conversation.createdAt)}
+                    sourceType：{conversation.sourceType} · message count：{messageCount} · {source.content.length} 字符 · 创建 {formatDashboardTime(conversation.createdAt)}
                   </p>
                 </div>
                 <span className="text-sm text-zinc-400">→</span>

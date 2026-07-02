@@ -12,12 +12,14 @@ Proposal → Review
 KnowledgeCard + Tags
 ```
 
-当前是完成 Sprint10 的浏览器端 MVP：数据保存在当前浏览器的 LocalStorage 中，不需要数据库。内置 Demo Provider 使用确定性的本地逻辑；用户也可以显式启用本机 Ollama，通过本地 HTTP 生成待审核 Proposal。
+当前是完成 Sprint11 的浏览器端 MVP：数据保存在当前浏览器的 LocalStorage 中，不需要数据库。内置 Demo Provider 使用确定性的本地逻辑；用户也可以显式启用本机 Ollama，通过本地 HTTP 生成待审核 Proposal。
 
 ## 当前功能
 
 - 导入 TXT，保存原始 Source，并从 Source 生成 Proposal。
 - 直接粘贴 ChatGPT、Claude、DeepSeek、Gemini 或普通对话文本，创建 Conversation 与可追溯 Source。
+- Clipboard Import 使用六种 Import Profile 做纯文本角色预处理，自动建议标题并在导入前展示 Message 解析预览。
+- 导入结果展示来源、Message / Unknown 数量；Conversation Detail 保留 Import Profile 信息。
 - 按中英文发言标记解析 Messages，保护三反引号代码块，并从选中 Messages 进入现有 Analyzer / Review / Knowledge 流程。
 - 创建、重命名、编辑、自动保存、复制和级联删除 Conversation。
 - 将原始文本解析为 Message 时间线，选择多条 Message 生成 Proposal。

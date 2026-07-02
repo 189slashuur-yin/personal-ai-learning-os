@@ -1,6 +1,6 @@
 # Manual QA Checklist
 
-本清单基于 Sprint10、README、PROJECT、ROADMAP、HANDOFF 与当前页面实现整理。它是手工验收基线，不代表测试已经执行，不包含自动化测试。
+本清单基于 Sprint11、README、PROJECT、ROADMAP、HANDOFF 与当前页面实现整理。它是手工验收基线，不代表测试已经执行，不包含自动化测试。
 
 ## 测试准备
 
@@ -14,7 +14,7 @@
 | ID | 操作 | 预期结果 | 是否可能失败 | 失败模块 |
 | --- | --- | --- | --- | --- |
 | IMP-01 | 打开 `/import`。 | 同时显示 TXT File Import 和 Clipboard Import。 | 是：入口缺失或页面报错。 | Import Page |
-| IMP-02 | Clipboard Import 不填写标题，粘贴有效文本后点击导入。 | 显示“请输入 Conversation 标题”，不创建数据、不跳转。 | 是：创建无标题数据。 | Clipboard Import Validation |
+| IMP-02 | Clipboard Import 不手动填写标题，粘贴带 User 消息的有效文本。 | 自动以第一条 User Message 前 30 字建议标题，仍可手动修改。 | 是：标题未更新或覆盖手动输入。 | Clipboard Smart Title |
 | IMP-03 | 填写标题，但只粘贴空格或换行。 | 导入按钮不可用，不创建 Conversation。 | 是：空内容被保存。 | Clipboard Import Validation |
 | IMP-04 | 依次选择 ChatGPT、Claude、DeepSeek、Gemini、Manual、Plain Text。 | 六种来源均可选，选择值正常保留。 | 是：来源缺失或保存错误。 | Import / Conversation Entity |
 | IMP-05 | 粘贴超过 1000 字的多行文本，核对字符数、行数和 Preview。 | 字符数与原文一致，行数正确，Preview 最多显示前 1000 字。 | 是：统计或截断错误。 | Clipboard Import UI |
@@ -25,6 +25,20 @@
 | IMP-10 | 选择空 TXT 文件。 | 显示无可分析文字的错误，不创建 Source。 | 是：空 Source 被保存。 | TXT Import Validation |
 | IMP-11 | 将 TXT 保存为新 Conversation。 | 使用文件名作为标题，来源为 TXT，并跳转详情页。 | 是：Conversation 或 Source 未创建。 | TXT Import / Storage |
 | IMP-12 | 将 TXT 保存到已有 Conversation。 | 不创建重复 Conversation；目标 Conversation 更新时间变化并关联 Source。 | 是：关联错误。 | TXT Import / Conversation Storage |
+
+## Sprint11 Smoke Test
+
+| ID | 操作 | 预期结果 | 是否可能失败 | 失败模块 |
+| --- | --- | --- | --- | --- |
+| S11-01 | 依次选择 ChatGPT、Claude、DeepSeek、Gemini、Manual、Plain Text Profile。 | 六种 Profile 均显示来源说明，选择后使用对应角色别名重新计算预览。 | 是：Profile 映射或别名错误。 | Import Profile Service |
+| S11-02 | 粘贴有首条 User Message 的文本，再粘贴无法识别角色的文本。 | 标题先取 User 内容前 30 字；无法解析时取原文首个非空行。 | 是：回退顺序或截断错误。 | Smart Title |
+| S11-03 | 自动标题出现后手动修改，再继续编辑原文。 | 手动标题保持不变，不被后续自动建议覆盖。 | 是：用户输入被重置。 | Clipboard Import UI |
+| S11-04 | 粘贴可识别的多轮对话。 | 导入前显示预计 Message 总数、User / Assistant / Unknown 数量及前三条 Message。 | 是：统计或预览与落盘不一致。 | Import Preview |
+| S11-05 | 使用 Plain Text 或让 Unknown 超过总数一半。 | 显示“当前文本可能无法准确识别对话轮次，但仍会保留原文。” | 是：阈值或提示缺失。 | Import Preview QA |
+| S11-06 | 完成 Clipboard Import。 | 成功摘要显示 title、sourceType、message count、unknown count 和“进入 Conversation”按钮。 | 是：结果摘要缺字段。 | Import Result |
+| S11-07 | 进入新导入的 Conversation Detail。 | 显示 Import Profile 名称与说明；重新生成 Messages 仍使用该 Profile。 | 是：Profile 未持久化或重解析漂移。 | Conversation Detail |
+| S11-08 | 返回 Dashboard 查看 Recent Imports。 | 新记录明确显示 sourceType 与 message count，数量与详情一致。 | 是：Dashboard 统计不同步。 | Dashboard |
+| S11-09 | 粘贴 JSON 字符串或普通无标记文本。 | 只按纯文本处理，不读取 JSON 结构；原文完整保留。 | 是：越界实现 JSON 导入或丢失原文。 | Import Boundary |
 
 ## Conversation
 
@@ -213,4 +227,3 @@
 | EDGE-16 | 禁用当前 Ollama 后立即分析。 | 使用 Demo 回退，不继续请求 Ollama。 | 是。 | Provider Registry |
 | EDGE-17 | 打开不存在的 Conversation/Knowledge ID。 | 显示 Not Found 和返回入口。 | 是。 | Routing |
 | EDGE-18 | 浏览器禁用或写满 LocalStorage。 | Import 显示保存失败，已有数据不被静默清空。 | 是。 | BrowserStorage |
-

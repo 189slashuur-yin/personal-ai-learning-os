@@ -14,6 +14,7 @@
 | Sprint8 | 已完成 | Provider Configuration、离线 Connection Test、Capability System 与生成快照。 |
 | Sprint9 | 已完成 | Ollama 本地 Provider Adapter、Settings/Connection Test、Source 与 selected Messages Analyzer 集成，以及 Stabilization 用户说明和失败兜底。 |
 | Sprint10 | 已完成 | Clipboard Import UI、Conversation Text Parser、Messages → Analyzer 流程、Recent Imports 与导入统计。 |
+| Sprint11 | 已完成 | Import Profiles、Smart Title、解析 Preview、导入成功摘要与 Import QA Polish。 |
 
 ## 已完成里程碑
 
@@ -93,6 +94,14 @@
 - Parser 支持 ChatGPT、Claude、DeepSeek、Gemini、中英文用户标记与冒号，保护三反引号代码块，未识别文本保留为 Unknown Message。
 - Conversation Detail 串联原始文本、Messages、选中 Messages、Proposal、Review 与 KnowledgeCard，继续复用 Demo / Ollama 安全链路。
 - Dashboard 增加 Recent Imports；Conversation 列表和详情展示来源与关联内容统计。
+
+### Sprint11 — Clipboard Import Profiles / Preview / QA
+
+- 增加 `ImportProfile` Entity 与 `ImportProfileService`，内置 ChatGPT、Claude、DeepSeek、Gemini、Manual、Plain Text 六种纯文本 Profile。
+- Profile 角色别名驱动 Message Parser；Clipboard 导入保存 Source 与解析后的 Messages，不读取 JSON 导出文件。
+- 优先使用首条 User Message 前 30 字建议标题，无法识别时回退原文首个非空行，且允许用户修改。
+- 导入前显示 Message 总数、User / Assistant / Unknown 数量、前三条预览与高 Unknown 比例提示。
+- 导入成功摘要、Conversation Detail Import Profile 信息与 Dashboard Recent Imports 统计形成 QA 闭环。
 
 ## 下一 Sprint 开始前
 

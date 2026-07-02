@@ -2,6 +2,16 @@
 
 本文件记录当前仓库已经完成的 Sprint 与关键提交。日期使用仓库 commit date。
 
+## 2026-07-03 — Sprint11: Clipboard Import Profiles / Preview / QA
+
+状态：已完成，未创建 Git commit。
+
+- 增加 ImportProfile Entity、ImportProfileService 与六种默认纯文本导入 Profile。
+- Clipboard Import 按来源别名解析 Messages，自动建议可编辑标题，并展示角色统计与前三条预览。
+- Unknown 比例超过一半时显示保留原文提示；不解析平台 JSON 导出文件。
+- 导入成功后展示标题、来源、Message / Unknown 数量与 Conversation 入口。
+- Conversation Detail 展示 Import Profile，Dashboard Recent Imports 明确展示 sourceType 与 message count。
+
 ## 2026-07-03 — Sprint10: Clipboard Import Engine
 
 状态：已完成，未创建 Git commit。

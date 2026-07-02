@@ -1,25 +1,56 @@
 import type { Message, MessageRole } from "@/core/entities/message";
+import type { ImportRoleAliases } from "@/core/entities/import-profile";
 
 type MessageDraft = Pick<Message, "role" | "content">;
 
-type MessageParserOptions = {
+export type MessageParserOptions = {
   createdAt?: string;
   createId?: () => string;
+  roleAliases?: ImportRoleAliases;
 };
 
-const SPEAKER_PATTERN =
-  /^\s*(我|用户|User|You|ChatGPT|GPT|Assistant|Claude|AI|Gemini|DeepSeek)\s*[：:]\s*(.*)$/i;
+const DEFAULT_ROLE_ALIASES: ImportRoleAliases = {
+  user: ["我", "用户", "User", "You", "Human"],
+  assistant: [
+    "ChatGPT",
+    "GPT",
+    "Assistant",
+    "Claude",
+    "AI",
+    "Gemini",
+    "DeepSeek",
+  ],
+  system: ["System"],
+};
 
-const USER_SPEAKERS = new Set(["我", "用户", "user", "you"]);
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 
-function roleForSpeaker(speaker: string): MessageRole {
-  const normalizedSpeaker = speaker.toLowerCase();
+function createSpeakerMatcher(roleAliases: ImportRoleAliases) {
+  const roleByAlias = new Map<string, MessageRole>();
 
-  if (USER_SPEAKERS.has(normalizedSpeaker)) {
-    return "user";
+  Object.entries(roleAliases).forEach(([role, aliases]) => {
+    aliases.forEach((alias) => roleByAlias.set(alias.toLowerCase(), role as MessageRole));
+  });
+
+  const aliases = [...roleByAlias.keys()].sort(
+    (left, right) => right.length - left.length,
+  );
+
+  if (aliases.length === 0) {
+    return null;
   }
 
-  return "assistant";
+  const pattern = new RegExp(
+    `^\\s*(${aliases.map(escapeRegExp).join("|")})\\s*(?:said\\s*)?[：:]\\s*(.*)$`,
+    "i",
+  );
+
+  return {
+    pattern,
+    roleByAlias,
+  };
 }
 
 function appendDraft(
@@ -46,6 +77,9 @@ export function parseMessagesFromRawText(
   }
 
   const drafts: MessageDraft[] = [];
+  const speakerMatcher = createSpeakerMatcher(
+    options.roleAliases ?? DEFAULT_ROLE_ALIASES,
+  );
   let currentRole: MessageRole = "unknown";
   let currentLines: string[] = [];
   let isInsideCodeBlock = false;
@@ -59,15 +93,19 @@ export function parseMessagesFromRawText(
       return;
     }
 
-    const speakerMatch = isInsideCodeBlock ? null : line.match(SPEAKER_PATTERN);
+    const speakerMatch =
+      isInsideCodeBlock || !speakerMatcher
+        ? null
+        : line.match(speakerMatcher.pattern);
 
-    if (!speakerMatch) {
+    if (!speakerMatch || !speakerMatcher) {
       currentLines.push(line);
       return;
     }
 
     appendDraft(drafts, currentRole, currentLines);
-    currentRole = roleForSpeaker(speakerMatch[1]);
+    currentRole =
+      speakerMatcher.roleByAlias.get(speakerMatch[1].toLowerCase()) ?? "unknown";
     currentLines = [speakerMatch[2]];
   });
 

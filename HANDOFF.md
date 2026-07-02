@@ -1,91 +1,65 @@
-# Sprint10 Clipboard Import Engine Handoff
+# Sprint11 Clipboard Import Profiles / Preview / QA Handoff
 
 ## 当前状态
 
-截至 2026-07-03，Sprint10A、10B、10C、10D 已连续完成。现有 TXT 导入、Demo Provider、Ollama Provider、Source → Proposal 与人工 Review 边界保持不变；未新增数据库、云 Provider、API Key 或 Git commit。
+截至 2026-07-03，Sprint11A、11B、11C 已连续完成。Clipboard Import 现在使用来源 Profile 做本地纯文本预处理，导入前提供标题建议与解析预览，导入后提供可核对的统计和 Conversation 入口。未实现 JSON 文件导入、真实云 AI、Tag 自动推荐、数据库、RAG 或 Message 编辑；未创建 Git commit。
 
-## Part 1 — Sprint10A Clipboard Import UI
+## Part 1 — Sprint11A Import Profiles
 
-- Import 页面提供 TXT File Import 与 Clipboard Import 两个入口。
-- Clipboard Import 支持 Conversation 标题、ChatGPT / Claude / DeepSeek / Gemini / Manual / Plain Text 来源选择、大文本粘贴、字符数、行数与前 1000 字预览。
-- 导入只创建 Conversation 并保存原始 Source，随后跳转 Conversation Detail；不生成 Proposal、不调用 AI。
+- 新增 `ImportProfile` Entity，包含 id、name、sourceType、description、roleAliases、createdAt、updatedAt。
+- 新增 `ImportProfileService`，提供 ChatGPT、Claude、DeepSeek、Gemini、Manual、Plain Text 六种默认 Profile。
+- Message Parser 接受 Profile 角色别名，并继续保护三反引号代码块。
+- Clipboard 导入持久化 `importProfileId`、原始 Source 与按 Profile 解析的 Messages；只处理粘贴文本。
 - checkpoint：lint、build、diff-check 通过。
 
-## Part 2 — Sprint10B Conversation Text Parser
+## Part 2 — Sprint11B Smart Title & Preview
 
-- Parser 支持我、用户、User、You、ChatGPT、GPT、Assistant、Claude、AI、Gemini、DeepSeek，以及中英文冒号。
-- 三反引号代码块内的发言标记不会触发错误切分。
-- 无可识别角色时生成一条 Unknown Message 并保留完整内容；生成结果保持 conversationId、role、content 与 order。
-- Conversation Detail 一键生成 Messages；已有 Messages 时必须确认才覆盖。
+- 标题优先取第一条 User Message 前 30 字，无法解析时回退原文首个非空行；用户手动修改后不再被自动建议覆盖。
+- 导入前展示预计 Message 总数、User / Assistant / Unknown 数量与前三条 Message。
+- Unknown 超过 Message 总数一半时显示原文仍会保留的风险提示。
 - checkpoint：lint、build、diff-check 通过。
 
-## Part 3 — Sprint10C Clipboard Import → Analyze Flow
+## Part 3 — Sprint11C Import QA Polish
 
-- Conversation Detail 展示原始文本 → Messages → 选择 Messages → Proposal → Review → KnowledgeCard 六步流程。
-- 无 Messages 时提示先解析；已有 Messages 时可选择并生成 Proposal。
-- 继续复用 Demo / Ollama Provider、AnalyzerRun、Validator、Retry、Provider metadata 和失败不写 Proposal 的安全边界。
-- Source → Proposal 老流程保持可用，未新增 Analyzer。
-- checkpoint：lint、build、diff-check 通过。
-
-## Part 4 — Sprint10D Import History / UX polish
-
-- Dashboard 增加 Recent Imports，展示来源类型、字符数、Message 数量与创建时间。
-- Conversation Card 继续展示 sourceType、Message / Proposal / Knowledge 数量与更新时间。
-- Conversation Detail 展示原始文本字符/行数、Message、Proposal 与 Knowledge 统计。
-- Clipboard 导入限制空文本，展示友好错误，并在跳转后的详情页显示成功提示。
-- README、ROADMAP、CHANGELOG 与 HANDOFF 已同步。
+- 导入成功摘要展示 Conversation title、sourceType、message count、unknown count 与“进入 Conversation”按钮。
+- Conversation Detail 展示 Import Profile 名称和说明，重新生成 Messages 继续使用保存的 Profile。
+- Dashboard Recent Imports 明确展示 sourceType 与 message count。
+- README、PROJECT、ARCHITECTURE、ROADMAP、CHANGELOG 与 QA Checklist 已同步。
 
 ## 新增文件
 
-- `src/app/import/clipboard-import-form.tsx`
+- `src/core/entities/import-profile.ts`
+- `src/core/services/import-profile-service.ts`
 
 ## 修改文件
 
 - Entity / Service：`src/core/entities/conversation.ts`、`src/core/services/message-parser.ts`
-- UI：`src/app/import/page.tsx`、`src/app/conversation/[id]/page.tsx`、`src/app/conversation/[id]/conversation-detail.tsx`、`src/app/dashboard-overview.tsx`
-- 文档：`README.md`、`ROADMAP.md`、`CHANGELOG.md`、`HANDOFF.md`
-- 工作区中原有 Sprint9 Stabilization 未提交修改已保留。
+- UI：`src/app/import/clipboard-import-form.tsx`、`src/app/conversation/[id]/conversation-detail.tsx`、`src/app/dashboard-overview.tsx`
+- 文档：`README.md`、`PROJECT.md`、`ARCHITECTURE.md`、`ROADMAP.md`、`CHANGELOG.md`、`HANDOFF.md`、`docs/QA_CHECKLIST.md`
 
 ## 手动验收步骤
 
-1. 打开 `/import`，确认 TXT File Import 仍可选择文件并保存。
-2. 在 Clipboard Import 输入标题，依次确认六种来源可选；粘贴多行文本，核对字符数、行数与 1000 字预览。
-3. 验证空文本按钮不可用；导入有效文本后确认跳转详情、显示成功提示，并能在 Dashboard / Conversation List 找到记录。
-4. 使用中英文冒号及全部发言标记生成 Messages，核对 role、顺序和内容。
-5. 在三反引号代码块中放入 `User:` 或 `Assistant:`，确认不会错误切分；使用无标记文本确认生成一条 Unknown Message 且全文保留。
-6. 再次生成 Messages，取消覆盖确认后核对原 Messages 不变；确认覆盖后核对新结果。
-7. 选择 Messages，分别用 Demo 与已配置的 Ollama 生成 Proposal；核对 AnalyzerRun、metadata、Validator 与 Retry 行为。
-8. 制造 Ollama 失败，确认显示原因、不新增 Proposal，并提示可切回 Demo；完成 Review 后确认 KnowledgeCard 可追溯。
-9. 打开 Dashboard，核对 Recent Imports 的来源、字符数、Message 数与创建时间，以及 Conversation Card / Detail 的各项统计。
+1. 打开 `/import`，确认 TXT Import 保持可用，Clipboard Import 有六种 Profile 和对应说明。
+2. 分别粘贴 ChatGPT、Claude、DeepSeek、Gemini 角色文本，核对标题建议、Message 总数、三类角色统计和前三条预览。
+3. 修改自动标题后继续编辑原文，确认手动标题不被覆盖；使用无角色文本确认回退首行标题。
+4. 选择 Plain Text 或构造高 Unknown 比例文本，确认出现指定风险提示且原文预览完整。
+5. 完成导入，核对成功摘要的 title、sourceType、message count、unknown count，并点击进入 Conversation。
+6. 在 Conversation Detail 核对 Import Profile 信息与 Message Timeline；重新生成 Messages 后确认角色结果仍符合原 Profile。
+7. 打开 Dashboard，核对 Recent Imports 的 sourceType 与 message count 和详情一致。
+8. 输入 JSON 字符串，确认它仅作为普通文本保留，不按 JSON 导出结构解析。
+9. 回归 Source / Messages → Demo 或 Ollama → Proposal → Review → KnowledgeCard 流程。
 
 ## 已知限制
 
-- 只解析纯文本发言标记，不支持平台导出 JSON、嵌套引用或消息编辑。
-- 三反引号保护按 fence 行切换，不实现完整 Markdown 语法树；未闭合代码块会保护其后的剩余文本。
-- LocalStorage 仍受浏览器容量、单设备和无事务限制；大文本可能受浏览器配额影响。
-- 项目不管理 Ollama 安装、进程或模型；云 Provider 仍为禁用占位。
-- 当前没有自动化测试套件，验收边界为每 Part 的 lint、production build、diff-check 与上述手动流程。
-
-## 是否建议拆分 commit
-
-建议后续由维护者拆为两个 commit：`Sprint10A/B Clipboard Import + Parser` 与 `Sprint10C/D Analyze Flow + UX/docs`。本轮按要求未创建 commit。
+- 只处理粘贴纯文本的行首角色标记，不解析 ChatGPT、Claude、DeepSeek、Gemini 的 JSON 导出文件。
+- Profile 是内置只读默认值，不提供自定义 Profile 管理界面。
+- 角色识别是确定性规则，不处理复杂嵌套引用、平台 DOM、附件或 Message 编辑。
+- Unknown 比例提示阈值为超过 50%；无角色文本完整保留为一条 Unknown Message。
+- LocalStorage 仍受单浏览器、容量与无事务限制；项目没有自动化测试套件。
 
 ## 质量检查
 
-- Sprint10A：lint、build、diff-check 通过。
-- Sprint10B：lint、build、diff-check 通过。
-- Sprint10C：lint、build、diff-check 通过。
-- Sprint10D / 最终检查：lint、build、diff-check 通过。
-- 本地 UI smoke test：Import 双入口、64 字符/6 行统计、成功跳转、六步流程、详情统计与代码块保护均通过。
-
-## Manual QA Checklist 文档交接
-
-- 新增 `docs/QA_CHECKLIST.md`，覆盖 Sprint10 新功能与 Sprint1-Sprint9 回归范围。
-- 清单重点覆盖 Import、Conversation、Messages、Proposal、Review、Knowledge、Tag、Provider 和 Ollama。
-- 每个用例均记录操作、预期结果、失败可能性与失败模块。
-- 文档保留独立的 Smoke Test、Regression Test 和 Edge Case Checklist。
-- `README.md` 已增加 Manual QA Checklist 入口。
-- 本次仅修改文档，未修改业务代码，未创建 Git commit。
-- 本次文档交付检查：`npm run lint`、`npm run build`、`git diff --check` 通过。
-- 限制：该文件是待执行的手工验收基线，不表示所有 UI 或 Ollama 场景已在本次实际执行。
-- 下一步：由 QA 按 Smoke Test 起步，再执行完整 Regression 与 Edge Case；Ollama 成功链路需准备本地服务和模型。
+- Sprint11A：lint、build、diff-check 通过。
+- Sprint11B：lint、build、diff-check 通过。
+- Sprint11C：lint、build、diff-check 通过。
+- 最终检查：lint、build、diff-check 通过。

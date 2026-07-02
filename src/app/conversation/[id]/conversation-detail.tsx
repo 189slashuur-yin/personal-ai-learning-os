@@ -10,6 +10,7 @@ import type { Message, MessageRole } from "@/core/entities/message";
 import type { Proposal } from "@/core/entities/proposal";
 import type { ProviderCapability } from "@/core/entities/provider-capability";
 import { AnalyzerExecutionService } from "@/core/services/analyzer-execution";
+import { ImportProfileService } from "@/core/services/import-profile-service";
 import { parseMessagesFromRawText } from "@/core/services/message-parser";
 import { PromptTemplateService } from "@/core/services/prompt-template-service";
 import { ProviderConfigurationService } from "@/core/services/provider-configuration-service";
@@ -262,6 +263,10 @@ export function ConversationDetail({
   }
 
   const { conversation, source, proposals, knowledgeCard } = state;
+  const importProfileService = new ImportProfileService();
+  const importProfile = conversation.importProfileId
+    ? importProfileService.getById(conversation.importProfileId)
+    : null;
   const updatedAt = new Intl.DateTimeFormat("zh-CN", {
     dateStyle: "medium",
     timeStyle: "short",
@@ -425,7 +430,12 @@ export function ConversationDetail({
       return;
     }
 
-    const messages = parseMessagesFromRawText(draft, state.conversation.id);
+    const profile = state.conversation.importProfileId
+      ? importProfileService.getById(state.conversation.importProfileId)
+      : null;
+    const messages = profile
+      ? importProfileService.parse(draft, state.conversation.id, profile)
+      : parseMessagesFromRawText(draft, state.conversation.id);
     new BrowserMessageStorage().replaceByConversationId(
       state.conversation.id,
       messages,
@@ -533,7 +543,7 @@ export function ConversationDetail({
           className="mt-6 rounded-xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm font-medium text-emerald-800"
           role="status"
         >
-          Clipboard 导入成功。原始文本已保存；下一步请生成 Messages。
+          Clipboard 导入成功：{conversation.title} · {conversation.sourceType} · {state.messages.length} Messages · {state.messages.filter((message) => message.role === "unknown").length} Unknown。
         </p>
       ) : null}
 
@@ -561,7 +571,7 @@ export function ConversationDetail({
           <p className="detail-kicker">01 · Context</p>
           <h2 className="detail-title">Conversation 信息</h2>
         </div>
-        <dl className="grid gap-4 rounded-xl border border-zinc-200 bg-white p-5 text-sm sm:grid-cols-3 lg:grid-cols-6">
+        <dl className="grid gap-4 rounded-xl border border-zinc-200 bg-white p-5 text-sm sm:grid-cols-3 lg:grid-cols-7">
           <div>
             <dt className="text-zinc-500">来源</dt>
             <dd className="mt-1 font-medium text-zinc-900">
@@ -571,6 +581,17 @@ export function ConversationDetail({
           <div>
             <dt className="text-zinc-500">更新时间</dt>
             <dd className="mt-1 font-medium text-zinc-900">{updatedAt}</dd>
+          </div>
+          <div>
+            <dt className="text-zinc-500">Import Profile</dt>
+            <dd className="mt-1 font-medium text-zinc-900">
+              {importProfile?.name ?? "—"}
+            </dd>
+            {importProfile ? (
+              <p className="mt-1 text-xs leading-5 text-zinc-500">
+                {importProfile.description}
+              </p>
+            ) : null}
           </div>
           <div>
             <dt className="text-zinc-500">原始文本</dt>

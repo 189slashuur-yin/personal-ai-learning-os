@@ -15,6 +15,7 @@ export type Conversation = {
   id: string;
   title: string;
   sourceType: ConversationSourceType;
+  importProfileId?: string;
   createdAt: string;
   updatedAt: string;
   lastOpenedAt: string;
