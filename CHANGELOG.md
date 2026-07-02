@@ -2,6 +2,16 @@
 
 本文件记录当前仓库已经完成的 Sprint 与关键提交。日期使用仓库 commit date。
 
+## 2026-07-02 — Sprint7: Analyzer Templates / Schema / Safety
+
+状态：已完成，尚未创建 Git commit。
+
+- 增加 Source / Messages Analyzer Prompt Template、Contract、BrowserStorage、Service 与 Settings 只读展示。
+- 增加结构化输出类型和 Validator；Demo Provider 校验通过后才转换为 Proposal。
+- Proposal 增加 confidence、risk level、suggested action，并兼容 Sprint1–6 旧数据。
+- 增加 AnalyzerError、AnalyzerRun、运行存储、失败隔离、模拟错误与按原来源 Retry。
+- Provider 不可用、模板缺失或 Validator 失败时禁止写入 ProposalStorage。
+
 ## 2026-07-02 — Sprint6: AI Provider Interface / Settings / Metadata
 
 状态：已完成。

@@ -9,6 +9,7 @@ import {
   type ConversationWorkspaceStorages,
 } from "@/core/services/conversation-workspace";
 import { BrowserConversationStorage } from "@/infrastructure/storage/browser-conversation-storage";
+import { BrowserAnalyzerRunStorage } from "@/infrastructure/storage/browser-analyzer-run-storage";
 import { BrowserKnowledgeCardStorage } from "@/infrastructure/storage/browser-knowledge-card-storage";
 import { BrowserMessageStorage } from "@/infrastructure/storage/browser-message-storage";
 import { BrowserProposalStorage } from "@/infrastructure/storage/browser-proposal-storage";
@@ -30,6 +31,7 @@ function createWorkspaceStorages(): ConversationWorkspaceStorages {
     proposals: new BrowserProposalStorage(),
     knowledgeCards: new BrowserKnowledgeCardStorage(),
     messages: new BrowserMessageStorage(),
+    analyzerRuns: new BrowserAnalyzerRunStorage(),
   };
 }
 
@@ -74,7 +76,7 @@ export function ConversationList() {
 
   function handleDelete(conversation: Conversation) {
     const confirmed = window.confirm(
-      `确定删除「${conversation.title}」吗？关联的 Messages、Source、Proposal 与 KnowledgeCard 也会删除。`,
+      `确定删除「${conversation.title}」吗？关联的 Messages、Source、Proposal、KnowledgeCard 与 AnalyzerRun 也会删除。`,
     );
 
     if (!confirmed) {

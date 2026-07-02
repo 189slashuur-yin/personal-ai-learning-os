@@ -1,3 +1,8 @@
+import type {
+  AnalyzerRiskLevel,
+  AnalyzerSuggestedAction,
+} from "@/core/entities/analyzer-output-schema";
+
 export type Proposal = {
   id: string;
   sourceId?: string;
@@ -14,6 +19,9 @@ export type Proposal = {
   providerName?: string;
   generatedAt?: string;
   analysisMode?: "source" | "messages";
+  confidence?: number;
+  suggestedAction?: AnalyzerSuggestedAction;
+  riskLevel?: AnalyzerRiskLevel;
   status: "Pending" | "Accepted" | "Rejected" | "Applied";
   createdAt: string;
 };

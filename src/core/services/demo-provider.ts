@@ -1,8 +1,10 @@
 import type { AnalyzerProvider } from "@/core/contracts/analyzer-provider";
 import type { AIProvider } from "@/core/entities/ai-provider";
+import type { AnalyzerOutputSchema } from "@/core/entities/analyzer-output-schema";
 import type { ImportedSource } from "@/core/entities/imported-source";
 import type { Message, MessageRole } from "@/core/entities/message";
 import type { Proposal } from "@/core/entities/proposal";
+import { validateAnalyzerOutput } from "@/core/services/analyzer-output-validator";
 
 const SUMMARY_LENGTH = 120;
 const EVIDENCE_LENGTH = 200;
@@ -40,21 +42,34 @@ export class DemoProvider implements AnalyzerProvider {
     const sourceTitle = source.name.replace(/\.txt$/i, "");
     const generatedAt = new Date().toISOString();
 
+    const output: AnalyzerOutputSchema = {
+      title: `关于「${sourceTitle}」的内容提炼`,
+      summary: excerpt(content, SUMMARY_LENGTH),
+      evidence: excerpt(content, EVIDENCE_LENGTH),
+      confidence: 0.82,
+      suggestedAction: "create",
+      riskLevel: "low",
+    };
+    const validatedOutput = validateAnalyzerOutput(output);
+
     return {
       id: `source-proposal-${crypto.randomUUID()}`,
       sourceId: source.id,
       conversationId: source.conversationId,
-      title: `关于「${sourceTitle}」的内容提炼`,
-      summary: excerpt(content, SUMMARY_LENGTH),
+      title: validatedOutput.title,
+      summary: validatedOutput.summary,
       sourceEvidence: {
         sourceName: source.name,
-        excerpt: excerpt(content, EVIDENCE_LENGTH),
+        excerpt: validatedOutput.evidence,
       },
       generatedBy: "Demo Analyzer Generated",
       providerId: this.providerInfo.id,
       providerName: this.providerInfo.name,
       generatedAt,
       analysisMode: "source",
+      confidence: validatedOutput.confidence,
+      suggestedAction: validatedOutput.suggestedAction,
+      riskLevel: validatedOutput.riskLevel,
       status: "Pending",
       createdAt: generatedAt,
     };
@@ -79,22 +94,34 @@ export class DemoProvider implements AnalyzerProvider {
       .join("\n\n");
     const normalizedEvidence = normalizeText(evidence);
     const generatedAt = new Date().toISOString();
+    const output: AnalyzerOutputSchema = {
+      title: `基于 ${orderedMessages.length} 条 Message 的内容提炼`,
+      summary: excerpt(normalizedEvidence, SUMMARY_LENGTH),
+      evidence,
+      confidence: 0.78,
+      suggestedAction: "create",
+      riskLevel: "low",
+    };
+    const validatedOutput = validateAnalyzerOutput(output);
 
     return {
       id: `message-proposal-${crypto.randomUUID()}`,
       conversationId,
       sourceMessageIds: orderedMessages.map((message) => message.id),
-      title: `基于 ${orderedMessages.length} 条 Message 的内容提炼`,
-      summary: excerpt(normalizedEvidence, SUMMARY_LENGTH),
+      title: validatedOutput.title,
+      summary: validatedOutput.summary,
       sourceEvidence: {
         sourceName: `Conversation Messages（${orderedMessages.length} 条）`,
-        excerpt: evidence,
+        excerpt: validatedOutput.evidence,
       },
       generatedBy: "Demo Analyzer Generated",
       providerId: this.providerInfo.id,
       providerName: this.providerInfo.name,
       generatedAt,
       analysisMode: "messages",
+      confidence: validatedOutput.confidence,
+      suggestedAction: validatedOutput.suggestedAction,
+      riskLevel: validatedOutput.riskLevel,
       status: "Pending",
       createdAt: generatedAt,
     };

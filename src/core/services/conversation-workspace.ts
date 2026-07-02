@@ -1,3 +1,4 @@
+import type { AnalyzerRunStorage } from "@/core/contracts/analyzer-run-storage";
 import type { ConversationStorage } from "@/core/contracts/conversation-storage";
 import type { KnowledgeCardStorage } from "@/core/contracts/knowledge-card-storage";
 import type { MessageStorage } from "@/core/contracts/message-storage";
@@ -11,6 +12,7 @@ export type ConversationWorkspaceStorages = {
   proposals: ProposalStorage;
   knowledgeCards: KnowledgeCardStorage;
   messages: MessageStorage;
+  analyzerRuns?: AnalyzerRunStorage;
 };
 
 export function deleteConversationWorkspace(
@@ -35,6 +37,7 @@ export function deleteConversationWorkspace(
   storages.proposals.removeByConversationId(conversationId);
   storages.sources.removeByConversationId(conversationId);
   storages.messages.removeByConversationId(conversationId);
+  storages.analyzerRuns?.removeByConversationId(conversationId);
   storages.conversations.remove(conversationId);
 }
 

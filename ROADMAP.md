@@ -10,7 +10,7 @@
 | Sprint4 | 已完成 | Message Engine、原始文本解析、Message 选择 → Proposal、Conversation Proposal Workspace。 |
 | Sprint5 | 已完成 | Tag System、Knowledge Tag 筛选、Proposal 生命周期稳定与来源质量提示。 |
 | Sprint6 | 已完成 | AI Provider Interface、Provider Registry/Service、Settings、Analyzer 与 Knowledge 元数据。仅 Demo Provider 可用。 |
-| Sprint7 | 未开始 | 建议：存储版本、数据导出/导入、备份恢复与迁移验证。范围待确认。 |
+| Sprint7 | 已完成 | Analyzer Prompt Template、Structured Output Schema、Error / Retry / Safety。 |
 | Sprint8 | 未开始 | 建议：自动化测试、可访问性、错误状态、性能与浏览器兼容性。范围待确认。 |
 | Sprint9 | 未开始 | 建议：生产化决策；评估部署与可选真实 Provider。只有安全和产品方案获批后才接入真实 AI。范围待确认。 |
 
@@ -55,6 +55,14 @@
 - Demo Provider、Provider Registry、Provider Service 和当前 Provider 存储。
 - Settings 页面展示 Provider 状态；未实现 Provider 保持禁用。
 - Proposal 与 Knowledge 增加 Provider、生成时间、分析模式、来源数量和证据元数据。
+
+### Sprint7 — Analyzer Readiness and Safety
+
+- 增加 Source / Messages 默认 Prompt Template、Storage Contract、BrowserStorage 与只读 Settings 展示。
+- 增加 AnalyzerOutputSchema 与手写 Validator；Demo Provider 校验后才转换为 Proposal。
+- Proposal 展示 confidence、risk level 与 suggested action，并兼容旧数据。
+- 增加 AnalyzerRun、AnalyzerError、BrowserStorage、状态展示、模拟失败和按原来源 Retry。
+- Provider、模板与 Validator 安全检查失败时不写 ProposalStorage。
 
 ## 下一 Sprint 开始前
 

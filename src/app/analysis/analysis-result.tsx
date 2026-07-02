@@ -2,15 +2,22 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import type { AnalyzerRun } from "@/core/entities/analyzer-run";
+import type { ImportedSource } from "@/core/entities/imported-source";
 import type { Proposal } from "@/core/entities/proposal";
+import { AnalyzerExecutionService } from "@/core/services/analyzer-execution";
+import { PromptTemplateService } from "@/core/services/prompt-template-service";
 import { ProviderService } from "@/core/services/provider-service";
 import { BrowserAIProviderStorage } from "@/infrastructure/storage/browser-ai-provider-storage";
+import { BrowserAnalyzerRunStorage } from "@/infrastructure/storage/browser-analyzer-run-storage";
+import { BrowserPromptTemplateStorage } from "@/infrastructure/storage/browser-prompt-template-storage";
 import { BrowserProposalStorage } from "@/infrastructure/storage/browser-proposal-storage";
 import { BrowserSourceStorage } from "@/infrastructure/storage/browser-source-storage";
 
 type AnalysisState =
   | { status: "analyzing" }
   | { status: "complete"; proposal: Proposal }
+  | { status: "error"; message: string }
   | { status: "missing-source" };
 
 function formatDate(value: string) {
@@ -20,8 +27,20 @@ function formatDate(value: string) {
   }).format(new Date(value));
 }
 
+function runSourceAnalysis(source: ImportedSource, simulateFailure = false) {
+  const provider = new ProviderService(
+    new BrowserAIProviderStorage(),
+  ).getCurrentProvider();
+  return new AnalyzerExecutionService(
+    provider,
+    new PromptTemplateService(new BrowserPromptTemplateStorage()),
+    new BrowserAnalyzerRunStorage(),
+  ).runSource(source, { simulateRecoverableError: simulateFailure });
+}
+
 export function AnalysisResult() {
   const [state, setState] = useState<AnalysisState>({ status: "analyzing" });
+  const [latestRun, setLatestRun] = useState<AnalyzerRun | null>(null);
   const [providerName] = useState(() =>
     typeof window === "undefined"
       ? "Demo Provider"
@@ -39,16 +58,51 @@ export function AnalysisResult() {
         return;
       }
 
-      const provider = new ProviderService(
-        new BrowserAIProviderStorage(),
-      ).getCurrentProvider();
-      const proposal = provider.analyzeSource(source);
-      new BrowserProposalStorage().saveCurrent(proposal);
-      setState({ status: "complete", proposal });
+      const result = runSourceAnalysis(source);
+      setLatestRun(result.run);
+
+      if (result.proposal) {
+        const proposal = result.proposal;
+        new BrowserProposalStorage().saveCurrent(proposal);
+        setState({ status: "complete", proposal });
+      } else {
+        setState({
+          status: "error",
+          message: result.run.error?.message ?? "Analyzer 运行失败。",
+        });
+      }
     }, 0);
 
     return () => window.clearTimeout(analysisTimer);
   }, []);
+
+  function retryOrSimulate(simulateFailure = false) {
+    const sourceStorage = new BrowserSourceStorage();
+    const sourceId = latestRun?.sourceId;
+    const source = sourceId
+      ? sourceStorage.getAll().find((item) => item.id === sourceId) ?? null
+      : sourceStorage.getCurrent();
+
+    if (!source) {
+      setState({ status: "missing-source" });
+      return;
+    }
+
+    setState({ status: "analyzing" });
+    const result = runSourceAnalysis(source, simulateFailure);
+    setLatestRun(result.run);
+
+    if (!result.proposal) {
+      setState({
+        status: "error",
+        message: result.run.error?.message ?? "Analyzer 运行失败。",
+      });
+      return;
+    }
+
+    new BrowserProposalStorage().saveCurrent(result.proposal);
+    setState({ status: "complete", proposal: result.proposal });
+  }
 
   if (state.status === "missing-source") {
     return (
@@ -80,12 +134,37 @@ export function AnalysisResult() {
     );
   }
 
+  if (state.status === "error") {
+    return (
+      <section className="mt-8 max-w-2xl rounded-xl border border-red-200 bg-red-50 p-6">
+        <p className="font-medium text-red-950">未生成 Proposal</p>
+        <p className="mt-2 text-sm leading-6 text-red-800">{state.message}</p>
+        <p className="mt-3 text-xs font-medium uppercase tracking-wider text-red-700">
+          最近运行：{latestRun?.status ?? "failed"}
+          {latestRun?.error ? ` · ${latestRun.error.code}` : ""}
+        </p>
+        {latestRun?.error?.recoverable ? (
+          <button
+            className="mt-5 rounded-lg bg-red-900 px-4 py-2.5 text-sm font-medium text-white"
+            onClick={() => retryOrSimulate(false)}
+            type="button"
+          >
+            Retry
+          </button>
+        ) : null}
+      </section>
+    );
+  }
+
   return (
     <section className="mt-8 max-w-2xl space-y-5 rounded-xl border border-zinc-200 bg-white p-6">
       <div>
         <p className="text-sm font-medium text-zinc-500">分析完成</p>
         <p className="mt-2 text-2xl font-semibold text-zinc-950">
           新增 Proposal：1
+        </p>
+        <p className="mt-2 text-xs font-medium uppercase tracking-wider text-emerald-700">
+          最近 AnalyzerRun：{latestRun?.status ?? "success"}
         </p>
       </div>
 
@@ -126,12 +205,21 @@ export function AnalysisResult() {
         </dl>
       </div>
 
-      <Link
-        className="inline-block rounded-lg bg-zinc-950 px-5 py-3 text-sm font-medium text-white"
-        href="/review"
-      >
-        前往 Review 页面
-      </Link>
+      <div className="flex flex-wrap gap-3">
+        <Link
+          className="inline-block rounded-lg bg-zinc-950 px-5 py-3 text-sm font-medium text-white"
+          href="/review"
+        >
+          前往 Review 页面
+        </Link>
+        <button
+          className="rounded-lg border border-zinc-300 px-5 py-3 text-sm font-medium text-zinc-700"
+          onClick={() => retryOrSimulate(true)}
+          type="button"
+        >
+          模拟可恢复失败
+        </button>
+      </div>
     </section>
   );
 }

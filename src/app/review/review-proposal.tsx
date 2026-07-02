@@ -188,6 +188,26 @@ export function ReviewProposal({ proposalId }: { proposalId?: string }) {
             {analysisMode}
           </dd>
         </div>
+        <div>
+          <dt className="text-zinc-500">Confidence</dt>
+          <dd className="mt-1 font-medium text-zinc-900">
+            {state.proposal.confidence === undefined
+              ? "unknown"
+              : `${Math.round(state.proposal.confidence * 100)}%`}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-zinc-500">Risk level</dt>
+          <dd className="mt-1 font-medium text-zinc-900">
+            {state.proposal.riskLevel ?? "legacy"}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-zinc-500">Suggested action</dt>
+          <dd className="mt-1 font-medium text-zinc-900">
+            {state.proposal.suggestedAction ?? "legacy"}
+          </dd>
+        </div>
         {analysisMode === "messages" ? (
           <div>
             <dt className="text-zinc-500">Selected message count</dt>

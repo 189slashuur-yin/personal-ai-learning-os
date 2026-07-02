@@ -2,19 +2,24 @@
 
 import Link from "next/link";
 import { type KeyboardEvent, useEffect, useRef, useState } from "react";
+import type { AnalyzerRun } from "@/core/entities/analyzer-run";
 import type { Conversation } from "@/core/entities/conversation";
 import type { ImportedSource } from "@/core/entities/imported-source";
 import type { KnowledgeCard } from "@/core/entities/knowledge-card";
 import type { Message, MessageRole } from "@/core/entities/message";
 import type { Proposal } from "@/core/entities/proposal";
+import { AnalyzerExecutionService } from "@/core/services/analyzer-execution";
 import { parseMessagesFromRawText } from "@/core/services/message-parser";
+import { PromptTemplateService } from "@/core/services/prompt-template-service";
 import { ProviderService } from "@/core/services/provider-service";
 import { countWords } from "@/core/services/text-statistics";
 import { BrowserConversationStorage } from "@/infrastructure/storage/browser-conversation-storage";
 import { BrowserAIProviderStorage } from "@/infrastructure/storage/browser-ai-provider-storage";
+import { BrowserAnalyzerRunStorage } from "@/infrastructure/storage/browser-analyzer-run-storage";
 import { BrowserKnowledgeCardStorage } from "@/infrastructure/storage/browser-knowledge-card-storage";
 import { BrowserMessageStorage } from "@/infrastructure/storage/browser-message-storage";
 import { BrowserProposalStorage } from "@/infrastructure/storage/browser-proposal-storage";
+import { BrowserPromptTemplateStorage } from "@/infrastructure/storage/browser-prompt-template-storage";
 import { BrowserSourceStorage } from "@/infrastructure/storage/browser-source-storage";
 import { ProposalWorkspace } from "./proposal-workspace";
 
@@ -55,6 +60,17 @@ function messageStyle(role: MessageRole) {
   return "mx-auto border-zinc-200 bg-zinc-50";
 }
 
+function createAnalyzerExecutionService() {
+  const provider = new ProviderService(
+    new BrowserAIProviderStorage(),
+  ).getCurrentProvider();
+  return new AnalyzerExecutionService(
+    provider,
+    new PromptTemplateService(new BrowserPromptTemplateStorage()),
+    new BrowserAnalyzerRunStorage(),
+  );
+}
+
 export function ConversationDetail({ conversationId }: ConversationDetailProps) {
   const [state, setState] = useState<DetailState>({ status: "loading" });
   const [draft, setDraft] = useState("");
@@ -65,6 +81,9 @@ export function ConversationDetail({ conversationId }: ConversationDetailProps) 
   const [selectedMessageIds, setSelectedMessageIds] = useState<Set<string>>(
     new Set(),
   );
+  const [analyzerError, setAnalyzerError] = useState<string | null>(null);
+  const [latestAnalyzerRun, setLatestAnalyzerRun] =
+    useState<AnalyzerRun | null>(null);
   const [providerName] = useState(() =>
     typeof window === "undefined"
       ? "Demo Provider"
@@ -113,6 +132,11 @@ export function ConversationDetail({ conversationId }: ConversationDetailProps) 
         .find((card) => card !== null) ?? null;
       const messages = new BrowserMessageStorage().getByConversationId(
         conversationId,
+      );
+      setLatestAnalyzerRun(
+        new BrowserAnalyzerRunStorage().getLatestByConversationId(
+          conversationId,
+        ),
       );
 
       const sourceContent = source?.content ?? "";
@@ -208,19 +232,26 @@ export function ConversationDetail({ conversationId }: ConversationDetailProps) 
     timeStyle: "short",
   }).format(new Date(conversation.updatedAt));
 
-  function runDemoAnalyzer() {
+  function runDemoAnalyzer(simulateFailure = false) {
     if (state.status !== "ready" || !state.source) {
       return;
     }
 
-    const provider = new ProviderService(
-      new BrowserAIProviderStorage(),
-    ).getCurrentProvider();
-    const nextProposal = provider.analyzeSource(state.source);
-    new BrowserProposalStorage().saveCurrent(nextProposal);
+    const result = createAnalyzerExecutionService().runSource(state.source, {
+      simulateRecoverableError: simulateFailure,
+    });
+    setLatestAnalyzerRun(result.run);
+
+    if (!result.proposal) {
+      setAnalyzerError(result.run.error?.message ?? "Analyzer 运行失败。");
+      return;
+    }
+
+    new BrowserProposalStorage().saveCurrent(result.proposal);
+    setAnalyzerError(null);
     setState({
       ...state,
-      proposals: [nextProposal, ...state.proposals],
+      proposals: [result.proposal, ...state.proposals],
     });
   }
 
@@ -232,19 +263,92 @@ export function ConversationDetail({ conversationId }: ConversationDetailProps) 
     const selectedMessages = state.messages.filter((message) =>
       selectedMessageIds.has(message.id),
     );
-    const provider = new ProviderService(
-      new BrowserAIProviderStorage(),
-    ).getCurrentProvider();
-    const nextProposal = provider.analyzeMessages(
+    const result = createAnalyzerExecutionService().runMessages(
       state.conversation.id,
       selectedMessages,
     );
+    setLatestAnalyzerRun(result.run);
+
+    if (!result.proposal) {
+      setAnalyzerError(result.run.error?.message ?? "Analyzer 运行失败。");
+      return;
+    }
+
     const proposalStorage = new BrowserProposalStorage();
-    proposalStorage.saveFromMessages(nextProposal);
-    proposalStorage.saveCurrent(nextProposal);
+    proposalStorage.saveFromMessages(result.proposal);
+    proposalStorage.saveCurrent(result.proposal);
+    setAnalyzerError(null);
     setState({
       ...state,
-      proposals: [nextProposal, ...state.proposals],
+      proposals: [result.proposal, ...state.proposals],
+    });
+  }
+
+  function retryAnalyzer() {
+    if (
+      state.status !== "ready" ||
+      latestAnalyzerRun?.status !== "failed" ||
+      !latestAnalyzerRun.error?.recoverable
+    ) {
+      return;
+    }
+
+    if (latestAnalyzerRun.sourceId) {
+      const retrySource = new BrowserSourceStorage()
+        .getAll()
+        .find((item) => item.id === latestAnalyzerRun.sourceId);
+
+      if (!retrySource) {
+        setAnalyzerError("原始 Source 已不可用，无法重试同一来源。");
+        return;
+      }
+
+      const result = createAnalyzerExecutionService().runSource(retrySource);
+      setLatestAnalyzerRun(result.run);
+
+      if (!result.proposal) {
+        setAnalyzerError(result.run.error?.message ?? "Analyzer 运行失败。");
+        return;
+      }
+
+      new BrowserProposalStorage().saveCurrent(result.proposal);
+      setAnalyzerError(null);
+      setState({
+        ...state,
+        proposals: [result.proposal, ...state.proposals],
+      });
+      return;
+    }
+
+    const retryMessageIds = latestAnalyzerRun.messageIds ?? [];
+    const retryMessageIdSet = new Set(retryMessageIds);
+    const retryMessages = state.messages.filter((message) =>
+      retryMessageIdSet.has(message.id),
+    );
+
+    if (retryMessages.length !== retryMessageIds.length) {
+      setAnalyzerError("部分原始 Messages 已不可用，无法重试同一来源。");
+      return;
+    }
+
+    const result = createAnalyzerExecutionService().runMessages(
+      state.conversation.id,
+      retryMessages,
+    );
+    setLatestAnalyzerRun(result.run);
+
+    if (!result.proposal) {
+      setAnalyzerError(result.run.error?.message ?? "Analyzer 运行失败。");
+      return;
+    }
+
+    const proposalStorage = new BrowserProposalStorage();
+    proposalStorage.saveFromMessages(result.proposal);
+    proposalStorage.saveCurrent(result.proposal);
+    setAnalyzerError(null);
+    setState({
+      ...state,
+      proposals: [result.proposal, ...state.proposals],
     });
   }
 
@@ -592,13 +696,51 @@ export function ConversationDetail({ conversationId }: ConversationDetailProps) 
             <button
               className="rounded-lg border border-zinc-200 bg-white px-4 py-2.5 text-sm font-medium text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-40"
               disabled={!source || saveStatus === "editing"}
-              onClick={runDemoAnalyzer}
+              onClick={() => runDemoAnalyzer(false)}
               type="button"
             >
               从 Source 生成 Proposal
             </button>
+            <button
+              className="ml-2 rounded-lg border border-zinc-200 bg-white px-4 py-2.5 text-sm font-medium text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-40"
+              disabled={!source || saveStatus === "editing"}
+              onClick={() => runDemoAnalyzer(true)}
+              type="button"
+            >
+              模拟失败
+            </button>
           </div>
         </div>
+        {latestAnalyzerRun ? (
+          <div className="mb-5 rounded-lg border border-zinc-200 bg-zinc-50 p-4 text-sm">
+            <p className="font-medium text-zinc-900">
+              最近 AnalyzerRun：{latestAnalyzerRun.status}
+            </p>
+            <p className="mt-1 text-xs text-zinc-500">
+              {latestAnalyzerRun.providerName} · {latestAnalyzerRun.startedAt}
+            </p>
+            {latestAnalyzerRun.error ? (
+              <p className="mt-2 text-red-700">
+                {latestAnalyzerRun.error.code}：{latestAnalyzerRun.error.message}
+              </p>
+            ) : null}
+            {latestAnalyzerRun.status === "failed" &&
+            latestAnalyzerRun.error?.recoverable ? (
+              <button
+                className="mt-3 rounded-lg bg-zinc-950 px-3.5 py-2 text-sm font-medium text-white"
+                onClick={retryAnalyzer}
+                type="button"
+              >
+                Retry
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+        {analyzerError ? (
+          <p className="mb-5 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800">
+            未生成 Proposal：{analyzerError}
+          </p>
+        ) : null}
         <ProposalWorkspace proposals={proposals} onDelete={deleteProposal} />
       </section>
 
