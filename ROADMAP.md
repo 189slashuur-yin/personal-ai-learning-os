@@ -2,12 +2,40 @@
 
 状态定义：`已完成` 表示能力已在当前工作区实现；`未开始` 表示尚无实现承诺。后续 Sprint 的主题开始前需要重新确认范围。
 
+## Current release
+
+- Version：v0.6
+- Phase：Phase2
+- Current Epic：Epic D / D0 Architecture Frozen
+- Release theme：v0.6 仍是当前运行时；Architecture Pack v1 只冻结 Epic D 设计，不新增功能或修改业务代码。
+
 ## Product phases
 
 - Phase1 / MVP：已完成，覆盖本地 Import、Conversation、Analyzer、Review、Knowledge 与 Provider 边界。
-- Phase2：进行中，范围为 Workspace、Conversation Editing 与 Knowledge Editing；Epic B 已完成。
-- Phase3：进行中；Epic C Search 2.0 已完成。Real AI 与 RAG 仍未开始，必须独立评审。
+- Phase2：当前阶段；Workspace、Conversation Editing、Knowledge Editing 与 Epic C Search 2.0 已形成 v0.6 基线。
+- Phase3：未开始。Real AI、RAG 与其它候选能力必须独立评审，不能从 Epic C 完成推定为已批准。
 - Phase4：未开始，候选范围为 Memory 与 Agent，当前不实现。
+
+## Future epics
+
+| Epic | 状态 | 范围 |
+| --- | --- | --- |
+| Epic D | D0 已完成；D1–D5 未开始 | Task / Productivity Layer 架构已冻结；运行时尚未实现。 |
+| Epic E | 未开始 | 待产品负责人确认范围与验收标准。 |
+| Epic F | 未开始 | 待产品负责人确认范围与验收标准。 |
+
+## Epic D — Task / Productivity Layer（D0 已完成）
+
+- D0 — RFC / Domain Model：Architecture Pack v1 已冻结，包含 Task RFC、Domain Model、Domain Boundaries、Data Lifecycle 与 Epic D Design；仅文档，无运行时改动。
+- D1 — Task Domain：计划新增 Task、TaskType、SourceRef、Contract、BrowserStorage 与 Service，以及独立生命周期和跨域删除规则。
+- D2 — Today / Task UI：计划提供 Inbox、Today、Upcoming、Completed 派生视图。
+- D3 — Source-linked Task：计划关联 Conversation / Knowledge；源删除后 Task 保留并显示 `deleted`。
+- D4 — Activity：planned / not immediate；开始前必须另行冻结事件、隐私、保留与失败语义。
+- D5 — Release v0.7：在已实现范围通过兼容、回归、手工 QA 与发布门禁后再发布。
+- 第一阶段只做 Task，不做 Agent、Calendar、RAG、Reminder、Recurring Task、Pomodoro、Habit 或 Workflow。
+- AI 只能建议 Task；不能直接 Create / Complete / Delete Task。
+
+正式范围和验收序列见 [docs/design/Epic-D-Design.md](./docs/design/Epic-D-Design.md)，领域决策见 [RFC-003](./docs/rfc/RFC-003-task-domain.md)。
 
 ## Epic C — Search 2.0（已完成）
 

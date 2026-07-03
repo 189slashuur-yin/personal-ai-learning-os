@@ -9,6 +9,23 @@
 - 使用独立浏览器配置或预先备份站点数据，避免误删真实 LocalStorage 数据。
 - Ollama 成功链路需要本机服务已启动且目标模型已下载；不具备该环境时至少执行失败链路。
 
+## Release Smoke Test
+
+适用版本：v0.6（Phase2，Epic C Completed）。建议在发布前使用全新浏览器数据执行一遍，再使用保留 Sprint1–Sprint6 数据的浏览器执行兼容回归。
+
+| ID | 操作 | 预期结果 | 是否可能失败 | 失败模块 |
+| --- | --- | --- | --- | --- |
+| REL-01 | 打开 Dashboard、Import、Conversation、Workspace、Search、Review、Knowledge、Tags、Settings。 | 所有主页面可加载，无白屏或阻塞错误。 | 是。 | Routing / App |
+| REL-02 | 通过 Clipboard Import 导入一段对话并打开 Conversation。 | Conversation、Source 与解析后的 Messages 正确保存。 | 是。 | Import / Storage |
+| REL-03 | 编辑 Message，创建并恢复 Conversation Snapshot。 | 编辑可保存；恢复只替换 Conversation 与 Messages，Snapshot 保留。 | 是。 | Conversation / Version |
+| REL-04 | 使用 Demo 从选中 Messages 生成 Proposal。 | 生成 Pending Proposal，来源、Evidence 与 Provider 元数据完整。 | 是。 | Analyzer / Proposal |
+| REL-05 | Review 并接受 Proposal。 | 只生成一张可追溯 KnowledgeCard，Proposal 变为 Applied。 | 是。 | Review / Knowledge |
+| REL-06 | 编辑 KnowledgeCard、关联 Tag 并刷新。 | 内容、状态与 Tag 关联持久化。 | 是。 | Knowledge / Tag |
+| REL-07 | 创建 Workspace 并移动 Conversation，再执行全局搜索。 | Workspace 归属正确；Search 可按关键词与结构化条件找到相关实体。 | 是。 | Workspace / Search |
+| REL-08 | 对 Demo 执行 Connection Test，并确认云 Provider 不可启用。 | Demo 返回 Success；云 Provider 不请求 API Key、不发起真实调用。 | 是。 | Provider Safety |
+| REL-09 | 在 Ollama 默认关闭或服务不可达时检查设置与分析失败路径。 | 默认不访问网络；失败时不写 Proposal，并显示恢复或回退提示。 | 是。 | Ollama / Analyzer Safety |
+| REL-10 | 刷新页面并复核本次创建的数据。 | Conversation、Messages、Version、Proposal、Knowledge、Tag 与 Workspace 均保留。 | 是。 | BrowserStorage |
+
 ## Import
 
 | ID | 操作 | 预期结果 | 是否可能失败 | 失败模块 |

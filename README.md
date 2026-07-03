@@ -2,6 +2,28 @@
 
 Personal AI Learning OS 是一个本地优先的个人学习与知识整理工作区。它把聊天记录或 TXT 文本保留为可追溯来源，将内容整理成待审核的 Proposal，再由用户确认并沉淀为 KnowledgeCard。
 
+## Project Status
+
+- Current Version：v0.6
+- Current Phase：Phase2
+- Current Epic：Epic C Completed
+
+### Feature Matrix
+
+| Feature | Status | Notes |
+| --- | --- | --- |
+| Conversation | ✅ | 创建、编辑、复制、删除与 Message Timeline。 |
+| Workspace | ✅ | 单层 Workspace 与默认 Inbox。 |
+| Search | ✅ | 五类实体的本地结构化搜索。 |
+| Knowledge | ✅ | Review 后生成、编辑、归档与来源追溯。 |
+| Provider | ✅ | Demo Provider 与可选本地 Ollama；云 Provider 未启用。 |
+| Version | ✅ | Conversation Snapshot 与 Restore。 |
+| Import | ✅ | TXT 与 Clipboard Import。 |
+| Tag | ✅ | Tag 管理、关联与筛选。 |
+| Proposal | ✅ | Source / Messages 分析、证据与生成元数据。 |
+| Review | ✅ | 人工接受或拒绝 Proposal。 |
+| Ollama | ✅ | 默认关闭，用户显式配置后仅访问本地服务。 |
+
 ```text
 Import / Conversation
         ↓
@@ -12,7 +34,7 @@ Proposal → Review
 KnowledgeCard + Tags
 ```
 
-Phase1 / MVP、Epic A、Epic B 与 Epic C Search 2.0 已完成。Conversation 可归属单层 Workspace；全局搜索可在当前浏览器中按关键词、类型、Workspace、Tag、Provider 和状态检索 Conversation、Proposal、Knowledge、Tag 与 Workspace。数据仍保存在 LocalStorage 中，不需要数据库。内置 Demo Provider 使用确定性的本地逻辑；用户也可以显式启用本机 Ollama，通过本地 HTTP 生成待审核 Proposal。
+Release v0.6 处于 Phase2，Epic A、Epic B 与 Epic C Search 2.0 已完成。Conversation 可归属单层 Workspace；全局搜索可在当前浏览器中按关键词、类型、Workspace、Tag、Provider 和状态检索 Conversation、Proposal、Knowledge、Tag 与 Workspace。数据仍保存在 LocalStorage 中，不需要数据库。内置 Demo Provider 使用确定性的本地逻辑；用户也可以显式启用本机 Ollama，通过本地 HTTP 生成待审核 Proposal。
 
 ## 当前功能
 
@@ -100,6 +122,8 @@ git diff --check
 - 清除浏览器站点数据会删除本地内容；当前尚无正式备份恢复流程。
 
 更详细的产品边界见 [PROJECT.md](./PROJECT.md)，分层与数据流见 [ARCHITECTURE.md](./ARCHITECTURE.md)，后续计划见 [ROADMAP.md](./ROADMAP.md)。
+
+当前工程统计见 [Project Status](./docs/project-status.md)，本版本变更与限制见 [Release v0.6](./docs/releases/v0.6.md)。
 
 架构图与决策记录见 [Architecture Diagram](./docs/architecture/architecture-diagram.md)、[Product Roadmap Review](./docs/architecture/product-roadmap-review.md)、[RFC-001](./docs/rfc/RFC-001-architecture.md)、[RFC-002](./docs/rfc/RFC-002-workspace.md)、[ADR-001](./docs/adr/ADR-001-localstorage-first.md) 与 [ADR-002](./docs/adr/ADR-002-human-review-required.md)。
 

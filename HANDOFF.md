@@ -1,4 +1,101 @@
-# Epic C — Search 2.0 Handoff
+# Epic D D0 — Architecture Pack v1 Handoff
+
+## 当前状态
+
+Epic D（Task / Productivity Layer）的 Architecture Pack v1 已冻结。本次是纯文档任务：没有修改 `src/`、package、依赖、运行时存储或业务行为，也没有创建 Git commit。D0 已完成；D1–D5 尚未实现。
+
+## 新增文件
+
+- `docs/rfc/RFC-003-task-domain.md`
+- `docs/architecture/DOMAIN_MODEL.md`
+- `docs/architecture/DOMAIN_BOUNDARIES.md`
+- `docs/architecture/DATA_LIFECYCLE.md`
+- `docs/design/Epic-D-Design.md`
+
+## 修改文件
+
+- `ARCHITECTURE.md`
+- `ROADMAP.md`
+- `HANDOFF.md`
+- `PROJECT.md`
+- `CHANGELOG.md`
+
+## 冻结结果
+
+- 使用通用 `Task`，不使用 `LearningTask`；Knowledge Review 表达为 `TaskType = knowledge_review`，不新增独立实体。
+- Task 与 Conversation / Knowledge 通过可失效 `SourceRef` 关联，与 Workspace 通过单层归属关联。
+- Inbox、Today、Upcoming、Completed 是一个 Task 集合上的派生视图，不是独立实体或 Calendar。
+- Conversation / Knowledge 删除时 Task 保留且 Source 显示 `deleted`；Workspace 删除时 Task 回迁 Inbox。
+- AI 只能建议 Task，不能直接 Create / Complete / Delete Task。
+- Epic D 第一阶段只做 Task；Activity planned / not immediate；Agent、Calendar 与 RAG 不在范围。
+
+## 限制
+
+- 本文档没有新增 Task Entity、Contract、BrowserStorage、Service、Page 或 LocalStorage key。
+- D1 开发前仍需把 RFC 字段落为精确 TypeScript 模型，并针对旧浏览器数据设计安全归一化。
+- D4 Activity 在独立事件、隐私、保留、顺序与失败语义获批前不得开始。
+
+## 下一步建议
+
+1. 以 RFC-003 和 Epic D Design 为 D1 唯一范围基线，先实现 Task Domain，不提前做完整 UI。
+2. 在 D1 同一交付中覆盖 Conversation / Knowledge 删除后的 degraded SourceRef，以及 Workspace 删除回迁 Inbox。
+3. D1 完成后再进入 D2 Today / Task UI；不要顺延 Agent、Calendar、RAG 或 Activity。
+
+## 质量检查
+
+- `npm run lint`：通过。
+- `npm run build`：通过；Next.js production build 成功生成 13 个页面。
+- `git diff --check`：通过。
+
+---
+
+# Previous Handoff — Release v0.6 / Project Stabilization
+
+## 当前状态
+
+Release v0.6 文档已整理，当前阶段为 Phase2，Epic C 已完成。本次只修改文档，没有修改 `src/`、业务逻辑、存储结构或依赖，也没有创建 Git commit。
+
+## Release 结果
+
+- README 增加 Current Version、Current Phase、Current Epic 与 Feature Matrix。
+- 新增 `docs/releases/v0.6.md`，记录 What's New、Architecture、Completed Epics、Known Limitations、Breaking Changes 与 Next Version。
+- 新增 `docs/project-status.md`，记录 Entity、Service、Storage、Page 与 Documentation 的近似数量，以及 Epic A–F 状态。
+- QA Checklist 增加 v0.6 Release Smoke Test。
+- ROADMAP、CHANGELOG、HANDOFF、ARCHITECTURE 与 README 已同步 Release 口径。
+
+## 关键文件
+
+- `README.md`
+- `docs/releases/v0.6.md`
+- `docs/project-status.md`
+- `docs/QA_CHECKLIST.md`
+- `ROADMAP.md`
+- `CHANGELOG.md`
+- `ARCHITECTURE.md`
+- `HANDOFF.md`
+
+## 限制
+
+- v0.6 没有业务功能变化或存储迁移，Breaking Changes 为 None。
+- 当前仍是单人、单浏览器、单设备的 LocalStorage MVP，没有正式备份、云同步、数据库或多人协作。
+- 云 Provider 未实现；Ollama 默认关闭且只支持用户显式配置的本地非流式调用。
+- Epic D、E、F 尚未开始，范围与验收标准待产品负责人确认。
+
+## 下一步
+
+1. 按 `docs/QA_CHECKLIST.md` 执行 Release Smoke Test，尤其复核旧浏览器数据兼容。
+2. 由产品负责人确认 v0.7 及 Epic D 的范围与验收标准后再开始开发。
+3. 不从本次 Release 文档整理顺延真实 AI、RAG、数据库或其它新功能。
+
+## 质量检查
+
+- `npm run lint`：通过。
+- `npm run build`：通过；Next.js production build 成功生成 13 个页面。
+- `git diff --check`：通过。
+
+---
+
+# Previous Handoff — Epic C / Search 2.0
 
 ## 当前状态
 

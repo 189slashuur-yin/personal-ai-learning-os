@@ -2,6 +2,26 @@
 
 本文件记录当前仓库已经完成的 Sprint 与关键提交。日期使用仓库 commit date。
 
+## 2026-07-03 — Epic D D0: Architecture Pack v1
+
+状态：架构设计已冻结；Task、Activity 与 UI 尚未实现；未修改业务代码，未创建 Git commit。
+
+- 新增 RFC-003，冻结 Task 命名、TaskType、SourceRef、派生视图、删除策略与 AI suggestion-only 边界。
+- 新增 Domain Model、Domain Boundaries 与 Data Lifecycle，区分 Knowledge、Task、Activity、Provider 与 Search 的责任。
+- 新增 Epic D Design，冻结 D0–D5 交付顺序；第一阶段只做 Task。
+- 明确 Activity 为 planned / not immediate，Memory 与 Agent 为 future；不做 Calendar、Reminder、Recurrence、Pomodoro、Habit、Workflow、Agent 或 RAG。
+- 同步 PROJECT、ARCHITECTURE、ROADMAP 与 HANDOFF；没有修改 `src/`、package 或运行时存储。
+
+## 2026-07-03 — Release v0.6: Project Stabilization
+
+状态：Release 文档已整理，未修改业务代码，未创建 Git commit。
+
+- 将当前版本标记为 v0.6，当前阶段标记为 Phase2，Epic C 标记为 Completed。
+- README 增加 Feature Matrix；新增正式 Release Notes 与 Engineering Summary。
+- ROADMAP 明确 Epic D、E、F 尚未开始且范围待确认。
+- QA Checklist 增加 Release Smoke Test；同步 ARCHITECTURE 与 HANDOFF。
+- Breaking Changes：None。
+
 ## 2026-07-03 — Epic C: Search 2.0
 
 状态：已完成，未创建 Git commit。
