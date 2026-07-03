@@ -1,4 +1,5 @@
 import type { ConversationStorage } from "@/core/contracts/conversation-storage";
+import type { TaskStorage } from "@/core/contracts/task-storage";
 import type { WorkspaceStorage } from "@/core/contracts/workspace-storage";
 import {
   DEFAULT_WORKSPACE_ID,
@@ -18,6 +19,7 @@ export class WorkspaceService {
   constructor(
     private readonly workspaces: WorkspaceStorage,
     private readonly conversations: ConversationStorage,
+    private readonly tasks?: TaskStorage,
   ) {}
 
   listWorkspaces() {
@@ -109,11 +111,26 @@ export class WorkspaceService {
       return false;
     }
 
+    if (!this.tasks) {
+      throw new Error("Task storage is required to delete a Workspace safely.");
+    }
+
+    const taskStorage = this.tasks;
+
     const timestamp = new Date().toISOString();
     this.conversations.getAll().forEach((conversation) => {
       if (conversation.workspaceId === id) {
         this.conversations.save({
           ...conversation,
+          workspaceId: DEFAULT_WORKSPACE_ID,
+          updatedAt: timestamp,
+        });
+      }
+    });
+    taskStorage.getAll().forEach((task) => {
+      if (task.workspaceId === id) {
+        taskStorage.save({
+          ...task,
           workspaceId: DEFAULT_WORKSPACE_ID,
           updatedAt: timestamp,
         });

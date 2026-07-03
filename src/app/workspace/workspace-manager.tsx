@@ -13,18 +13,21 @@ import { WorkspaceService } from "@/core/services/workspace-service";
 import { BrowserConversationStorage } from "@/infrastructure/storage/browser-conversation-storage";
 import { BrowserKnowledgeCardStorage } from "@/infrastructure/storage/browser-knowledge-card-storage";
 import { BrowserProposalStorage } from "@/infrastructure/storage/browser-proposal-storage";
+import { BrowserTaskStorage } from "@/infrastructure/storage/browser-task-storage";
 import { BrowserWorkspaceStorage } from "@/infrastructure/storage/browser-workspace-storage";
 
 type WorkspaceItem = {
   workspace: Workspace;
   conversationCount: number;
   knowledgeCount: number;
+  taskCount: number;
 };
 
 function createWorkspaceService() {
   return new WorkspaceService(
     new BrowserWorkspaceStorage(),
     new BrowserConversationStorage(),
+    new BrowserTaskStorage(),
   );
 }
 
@@ -45,6 +48,7 @@ function loadWorkspaceItems(): WorkspaceItem[] {
   const conversations = new BrowserConversationStorage().getAll();
   const proposals = new BrowserProposalStorage().getAll();
   const knowledgeCards = new BrowserKnowledgeCardStorage().getAll();
+  const tasks = new BrowserTaskStorage().getAll();
   const conversationById = new Map(
     conversations.map((conversation) => [conversation.id, conversation]),
   );
@@ -66,6 +70,9 @@ function loadWorkspaceItems(): WorkspaceItem[] {
           conversationById,
         ) === workspace.id,
     ).length,
+    taskCount: tasks.filter(
+      (task) => (task.workspaceId ?? DEFAULT_WORKSPACE_ID) === workspace.id,
+    ).length,
   }));
 }
 
@@ -83,7 +90,7 @@ function WorkspaceCard({
   item: WorkspaceItem;
   onChange: () => void;
 }) {
-  const { workspace, conversationCount, knowledgeCount } = item;
+  const { workspace, conversationCount, knowledgeCount, taskCount } = item;
   const [name, setName] = useState(workspace.name);
   const [description, setDescription] = useState(workspace.description ?? "");
   const [color, setColor] = useState(workspace.color ?? "#71717a");
@@ -118,7 +125,7 @@ function WorkspaceCard({
 
   function deleteWorkspace() {
     const firstConfirmed = window.confirm(
-      `删除「${workspace.name}」？其中 ${conversationCount} 个 Conversation 不会删除，会自动回到 Inbox。`,
+      `删除「${workspace.name}」？其中 ${conversationCount} 个 Conversation 和 ${taskCount} 个 Task 不会删除，会自动回到 Inbox。`,
     );
 
     if (!firstConfirmed) {
@@ -170,6 +177,7 @@ function WorkspaceCard({
           <div className="flex gap-4">
             <span><strong className="text-zinc-950">{conversationCount}</strong> Conversation</span>
             <span><strong className="text-zinc-950">{knowledgeCount}</strong> Knowledge</span>
+            <span><strong className="text-zinc-950">{taskCount}</strong> Task</span>
           </div>
           <Link
             className="mt-2 inline-block text-xs font-semibold text-zinc-600 hover:text-zinc-950"

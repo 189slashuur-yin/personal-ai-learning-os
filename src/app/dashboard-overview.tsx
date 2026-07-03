@@ -10,6 +10,7 @@ import type { Workspace } from "@/core/entities/workspace";
 import { ProviderService } from "@/core/services/provider-service";
 import { ProviderConfigurationService } from "@/core/services/provider-configuration-service";
 import { WorkspaceService } from "@/core/services/workspace-service";
+import { TaskService } from "@/core/services/task-service";
 import { BrowserAIProviderStorage } from "@/infrastructure/storage/browser-ai-provider-storage";
 import { BrowserConversationStorage } from "@/infrastructure/storage/browser-conversation-storage";
 import { BrowserKnowledgeCardStorage } from "@/infrastructure/storage/browser-knowledge-card-storage";
@@ -19,6 +20,7 @@ import { BrowserPromptTemplateStorage } from "@/infrastructure/storage/browser-p
 import { BrowserProviderConfigurationStorage } from "@/infrastructure/storage/browser-provider-configuration-storage";
 import { BrowserSourceStorage } from "@/infrastructure/storage/browser-source-storage";
 import { BrowserTagStorage } from "@/infrastructure/storage/browser-tag-storage";
+import { BrowserTaskStorage } from "@/infrastructure/storage/browser-task-storage";
 import { BrowserWorkspaceStorage } from "@/infrastructure/storage/browser-workspace-storage";
 
 type DashboardData = {
@@ -28,6 +30,8 @@ type DashboardData = {
   messageCountsByConversation: Record<string, number>;
   proposalCount: number;
   tagCount: number;
+  taskCount: number;
+  todayTaskCount: number;
   workspaceCount: number;
   recentWorkspaces: Array<{ workspace: Workspace; conversationCount: number }>;
   recentConversations: Conversation[];
@@ -63,6 +67,10 @@ export function DashboardOverview() {
   useEffect(() => {
     const loadTimer = window.setTimeout(() => {
       const conversations = new BrowserConversationStorage().getAll();
+      const taskService = new TaskService(
+        new BrowserTaskStorage(),
+        new BrowserWorkspaceStorage(),
+      );
       const workspaces = new WorkspaceService(
         new BrowserWorkspaceStorage(),
         new BrowserConversationStorage(),
@@ -128,6 +136,8 @@ export function DashboardOverview() {
         messageCountsByConversation,
         proposalCount: new BrowserProposalStorage().getAll().length,
         tagCount: tags.length,
+        taskCount: taskService.listTasks().length,
+        todayTaskCount: taskService.listToday().length,
         workspaceCount: workspaces.length,
         recentWorkspaces: workspaces
           .filter((workspace) => !workspace.archivedAt)
@@ -175,6 +185,8 @@ export function DashboardOverview() {
     { label: "Knowledge", value: data.knowledgeCount },
     { label: "Proposal", value: data.proposalCount },
     { label: "Tags", value: data.tagCount },
+    { label: "Tasks", value: data.taskCount },
+    { label: "Today Tasks", value: data.todayTaskCount },
     { label: "最近更新时间", value: formatDashboardTime(data.latestUpdatedAt) },
     { label: "最后打开时间", value: formatDashboardTime(data.latestOpenedAt) },
   ];

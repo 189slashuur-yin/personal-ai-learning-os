@@ -109,7 +109,7 @@ export function ConversationList() {
 
   function handleDelete(conversation: Conversation) {
     const confirmed = window.confirm(
-      `确定删除「${conversation.title}」吗？关联的 Messages、Source、Proposal、KnowledgeCard、AnalyzerRun 与 Conversation Snapshot 也会删除。`,
+      `确定删除「${conversation.title}」吗？关联的 Messages、Source、Proposal、KnowledgeCard、AnalyzerRun 与 Conversation Snapshot 也会删除；关联 Task 会保留，并显示 source missing。`,
     );
 
     if (!confirmed) {

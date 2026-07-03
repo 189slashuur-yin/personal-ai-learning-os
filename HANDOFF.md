@@ -1,4 +1,70 @@
-# Epic D D0 — Architecture Pack v1 Handoff
+# Epic D D1 — Task Domain Foundation Handoff
+
+## 当前状态
+
+Epic D D1 的 Task Domain 基础已实现；本轮未创建 Git commit。交付包含 Core Entity / Contract / Service、BrowserStorage、跨域删除兼容、`/tasks` 最小调试页、导航与 Dashboard 统计。正式 Today UI、Activity、Calendar、Reminder、RAG 和 Agent 均未实现。
+
+## Part 完成情况
+
+- Part 1：完成 Task Entity、五类状态、七类 Task Type、优先级与六类 SourceRef 快照；未修改 Conversation / KnowledgeCard Entity。
+- Part 2：完成 TaskStorage、BrowserTaskStorage 与 TaskService 全部指定方法；旧字段安全归一化，解析或写入失败不会静默清空旧值。
+- Part 3：完成 Workspace 删除前 Task 回迁 Inbox、Source missing Service 判断；Conversation / Knowledge 删除保留 Task，复制 Conversation 不复制 Task。
+- Part 4：完成 `/tasks` 调试页、导航、五分区、生命周期操作、Workspace / SourceRef 展示与 Dashboard Task 统计。
+
+## 新增文件
+
+- `src/core/entities/task.ts`
+- `src/core/contracts/task-storage.ts`
+- `src/core/services/task-service.ts`
+- `src/infrastructure/storage/browser-task-storage.ts`
+- `src/app/tasks/page.tsx`
+- `src/app/tasks/task-manager.tsx`
+
+## 修改文件
+
+- `src/core/services/workspace-service.ts`
+- `src/app/workspace/workspace-manager.tsx`
+- `src/app/layout.tsx`
+- `src/app/dashboard-overview.tsx`
+- `ROADMAP.md`
+- `CHANGELOG.md`
+- `HANDOFF.md`
+- `docs/QA_CHECKLIST.md`
+
+## 手动验收步骤
+
+1. 打开 `/tasks`，分别创建无日期、今天/过去日期、未来日期的 Task，刷新后核对 Inbox、Today、Upcoming 与 Dashboard 数量。
+2. 依次执行 Complete、Reopen、Archive、Restore；确认时间字段和分区变化，随后取消一次 Delete，再确认删除测试 Task。
+3. 创建普通 Workspace 与其中的 Task，删除 Workspace；确认 Task 保留、Workspace 显示 Inbox、日期和状态不变。
+4. 用调试数据建立 Conversation / Knowledge SourceRef 后删除来源；确认 Task 保留、快照仍显示且标记 `source missing`。
+5. 复制带关联 Task 的 Conversation；确认副本未新增 Task。删除原 Conversation；确认 Task 不被级联删除。
+6. 使用缺失 priority/workspace、旧 `notes`/`scheduledDate`/`action`/`knowledge_review` 形状的数据验证读取归一化；使用损坏 JSON 验证读取安全降级且后续写入不覆盖原值。
+7. 回归 Conversation → Proposal → Review → Knowledge、Workspace 与 Dashboard 旧流程。
+
+## 已知限制
+
+- `/tasks` 是生命周期调试入口，不是 D2 正式 Today 产品页；没有批量操作、复杂筛选或来源创建入口。
+- Task 使用当前浏览器 LocalStorage 单集合线性读取，适合单设备小数据量；没有同步、备份或数据库。
+- SourceRef 快照可显示与判断 missing，但本轮未增加从 Conversation / Knowledge 页面创建关联 Task 的 D3 入口。
+- 恢复 Archived Task 按 dueDate 回到 Inbox / Today / Upcoming，不保留归档前的独立状态历史。
+- 不包含 Activity、Recurring Task、Calendar、Reminder、AI Suggest Task、RAG、Agent 或批量操作。
+
+## Architecture Impact
+
+- Entity：新增独立 Task 与 SourceRef；KnowledgeCard / Conversation 领域模型不变。
+- Contract / Infrastructure：新增 TaskStorage 和唯一 Task key 的 BrowserTaskStorage；key、JSON 与兼容归一化集中在 Adapter。
+- Service：TaskService 拥有 Task 生命周期、日期视图、Workspace 回退与 source missing 判断；WorkspaceService 负责删除前回迁 Task。
+- UI：Page 只组合 Service / BrowserStorage；`/tasks` 不直接访问 LocalStorage，Dashboard 只读取 TaskService 统计。
+- Deletion：Task 不属于 Conversation / Knowledge 删除聚合；Workspace 删除是唯一会修改相关 Task 的跨域删除操作。
+- AI boundary：Provider / Analyzer 未接入 TaskStorage，未增加自动创建或状态变更能力。
+
+## 质量检查说明
+
+Part 1、Part 2、Part 4 已直接通过三项检查；Part 3 首次 build 遇到局部 TypeScript 收窄错误，做一次最小修复后通过。最终检查再次通过 `npm run lint`、`npm run build` 与 `git diff --check`。
+
+---
+
+# Previous Handoff — Epic D D0 Architecture Pack v1
 
 ## 当前状态
 

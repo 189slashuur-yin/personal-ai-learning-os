@@ -1,6 +1,6 @@
 # Manual QA Checklist
 
-本清单基于 Epic A Feature Set 2、Feature Set 1、Sprint11、README、PROJECT、ROADMAP、HANDOFF 与当前页面实现整理。它是手工验收基线，不代表测试已经执行，不包含自动化测试。
+本清单基于 Epic D D1、Epic A Feature Set 2、Feature Set 1、Sprint11、README、PROJECT、ROADMAP、HANDOFF 与当前页面实现整理。它是手工验收基线，不代表测试已经执行，不包含自动化测试。
 
 ## 测试准备
 
@@ -107,16 +107,33 @@
 | --- | --- | --- | --- | --- |
 | WSP-01 | 清除测试站点数据后打开 `/workspace`。 | 自动创建并显示 Inbox；Inbox 不显示 Archive 或 Delete。 | 是：默认空间缺失。 | Workspace Service / Storage |
 | WSP-02 | 使用包含旧 Conversation 且无 `workspaceId` 的数据打开页面。 | 旧 Conversation 计入 Inbox，不清空或报错。 | 是：兼容失败。 | Conversation Storage |
-| WSP-03 | 创建带名称、描述和颜色的 Workspace。 | 新 Workspace 持久化并显示 0 Conversation / 0 Knowledge。 | 是：字段未保存。 | Workspace UI / Storage |
+| WSP-03 | 创建带名称、描述和颜色的 Workspace。 | 新 Workspace 持久化并显示 0 Conversation / 0 Knowledge / 0 Task。 | 是：字段未保存。 | Workspace UI / Storage |
 | WSP-04 | 重命名并修改描述、颜色后刷新。 | 修改保留，更新时间变化。 | 是：更新未持久化。 | Workspace Service |
 | WSP-05 | Archive 普通 Workspace，切换 Active / Archived / All，再 Restore。 | 三种筛选结果正确；恢复后回到 Active。 | 是：状态或筛选错误。 | Workspace UI |
 | WSP-06 | 尝试删除普通 Workspace，分别在第一次和第二次确认取消。 | 两次取消都不删除 Workspace 或 Conversation。 | 是：确认失效。 | Workspace Delete |
-| WSP-07 | 完成两次删除确认。 | Workspace 删除；其中 Conversation 回到 Inbox；Message、Source、Proposal、Knowledge 保留。 | 是：误删或孤儿归属。 | Workspace Service |
+| WSP-07 | 完成两次删除确认。 | Workspace 删除；其中 Conversation 和 Task 回到 Inbox；Message、Source、Proposal、Knowledge 保留。 | 是：误删或孤儿归属。 | Workspace Service |
 | WSP-08 | 在 Clipboard Import 与 TXT Import 中选择 Workspace。 | 默认 Inbox；选择后新建或目标 Conversation 归属正确。 | 是：导入归属错误。 | Import Integration |
 | WSP-09 | 在 Conversation 列表使用下拉和快捷按钮筛选。 | Card 显示 Workspace；筛选数量和列表一致。 | 是：筛选错误。 | Conversation List |
 | WSP-10 | 在 Conversation Detail 切换 Workspace 并刷新。 | 新归属保留；Source、Proposal、Knowledge 内容不被改写。 | 是：归属未保存或越界修改。 | Conversation Detail |
 | WSP-11 | 检查 Dashboard 与 Search。 | Dashboard 显示 Workspace 总数、最近 Workspace 和 Conversation 数；搜索结果显示 Workspace。 | 是：统计或追溯错误。 | Dashboard / Search |
 | WSP-12 | 打开 Knowledge 列表，分别检查可追溯和不可追溯来源。 | 可追溯时显示 Workspace；无法追溯时显示 `unknown`，页面不报错。 | 是：来源链路异常。 | Knowledge Workspace Trace |
+
+## Task Domain Foundation Smoke Test
+
+| ID | 操作 | 预期结果 | 是否可能失败 | 失败模块 |
+| --- | --- | --- | --- | --- |
+| TSK-01 | 打开 `/tasks` 并刷新。 | 页面和导航正常；无数据时五个分区显示空状态，Dashboard Task 数为 0。 | 是：路由或 Storage 初始化失败。 | Task UI / Storage |
+| TSK-02 | 快速创建无日期的手动 Task。 | Task 出现在 Inbox；title、type、priority、Workspace 与 manual SourceRef 快照正确，刷新后保留。 | 是：字段或持久化缺失。 | Task Service / Storage |
+| TSK-03 | 分别创建今天、过去和未来 dueDate 的 Task。 | 今天和过去日期出现在 Today；未来日期出现在 Upcoming，并按日期排序。 | 是：本地日期或视图规则错误。 | Task Date Views |
+| TSK-04 | 对活动 Task 执行 Complete，再执行 Reopen。 | Complete 后只出现在 Completed 并设置 completedAt；Reopen 清除 completedAt 并按 dueDate 回到对应活动分区。 | 是：状态或时间戳错误。 | Task Lifecycle |
+| TSK-05 | 执行 Archive 和 Restore。 | Archive 后只出现在 Archived 并设置 archivedAt；Restore 清除 archivedAt 并恢复活动分区。 | 是：归档状态错误。 | Task Lifecycle |
+| TSK-06 | 删除 Task 时分别取消和确认。 | 取消不变；确认只删除 Task，不修改 Source、Conversation、Knowledge 或 Workspace。 | 是：确认失效或越界删除。 | Task Delete |
+| TSK-07 | 在普通 Workspace 创建 Task 后删除 Workspace。 | Workspace 删除前 Task 回迁 Inbox workspace；Task 的 dueDate、status、sourceRef 与内容不变。 | 是：Task 被删除或仍引用已删 Workspace。 | Workspace / Task Service |
+| TSK-08 | 删除 Task SourceRef 指向的 Conversation 或 KnowledgeCard。 | Task 保留；SourceRef identity 与快照保留；页面显示 `source missing`。 | 是：Task 被级联删除或快照丢失。 | Task Source Compatibility |
+| TSK-09 | 复制带关联 Task 的 Conversation。 | Conversation 关联数据按旧规则复制，但 Task 数不变。 | 是：Task 被意外复制。 | Conversation Duplicate Boundary |
+| TSK-10 | 读取缺失新字段或使用旧 `notes`、`scheduledDate`、旧 type/status 的 Task 数据。 | 安全归一化为当前字段与默认值，不修改其它 Sprint 数据。 | 是：兼容读取崩溃或误清数据。 | Task Storage Compatibility |
+| TSK-11 | 将 Task key 置为损坏 JSON 后读取，再尝试创建或删除。 | 读取安全降级；写操作失败且不覆盖、清空损坏的原值。 | 是：旧值被静默覆盖。 | Task Storage Safety |
+| TSK-12 | 核对 Dashboard。 | Task 总数与 `/tasks` 一致；Today Tasks 包含今天及逾期未完成 Task。 | 是：统计口径不同步。 | Dashboard / Task Service |
 
 ## Messages
 

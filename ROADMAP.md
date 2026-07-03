@@ -6,8 +6,8 @@
 
 - Version：v0.6
 - Phase：Phase2
-- Current Epic：Epic D / D0 Architecture Frozen
-- Release theme：v0.6 仍是当前运行时；Architecture Pack v1 只冻结 Epic D 设计，不新增功能或修改业务代码。
+- Current Epic：Epic D / D1 Task Domain Foundation Completed
+- Release theme：v0.6 仍是发布基线；当前工作区已实现 D1 Task Domain Foundation 与最小调试入口，尚未进入正式 Today 产品页。
 
 ## Product phases
 
@@ -20,20 +20,21 @@
 
 | Epic | 状态 | 范围 |
 | --- | --- | --- |
-| Epic D | D0 已完成；D1–D5 未开始 | Task / Productivity Layer 架构已冻结；运行时尚未实现。 |
+| Epic D | D0–D1 已完成；D2–D5 未开始 | Task Domain 基础、跨域删除兼容与最小调试入口已实现。 |
 | Epic E | 未开始 | 待产品负责人确认范围与验收标准。 |
 | Epic F | 未开始 | 待产品负责人确认范围与验收标准。 |
 
-## Epic D — Task / Productivity Layer（D0 已完成）
+## Epic D — Task / Productivity Layer（D1 已完成）
 
 - D0 — RFC / Domain Model：Architecture Pack v1 已冻结，包含 Task RFC、Domain Model、Domain Boundaries、Data Lifecycle 与 Epic D Design；仅文档，无运行时改动。
-- D1 — Task Domain：计划新增 Task、TaskType、SourceRef、Contract、BrowserStorage 与 Service，以及独立生命周期和跨域删除规则。
+- D1 — Task Domain：已新增 Task、SourceRef、TaskStorage、BrowserTaskStorage 与 TaskService；支持生命周期、日期查询、Workspace 回迁、Source missing 判断、Dashboard 统计和 `/tasks` 最小调试入口。
 - D2 — Today / Task UI：计划提供 Inbox、Today、Upcoming、Completed 派生视图。
 - D3 — Source-linked Task：计划关联 Conversation / Knowledge；源删除后 Task 保留并显示 `deleted`。
 - D4 — Activity：planned / not immediate；开始前必须另行冻结事件、隐私、保留与失败语义。
 - D5 — Release v0.7：在已实现范围通过兼容、回归、手工 QA 与发布门禁后再发布。
 - 第一阶段只做 Task，不做 Agent、Calendar、RAG、Reminder、Recurring Task、Pomodoro、Habit 或 Workflow。
 - AI 只能建议 Task；不能直接 Create / Complete / Delete Task。
+- `/tasks` 仅用于 D1 调试和验收；其五分区展示不代表 D2 正式 Today UX 已完成。
 
 正式范围和验收序列见 [docs/design/Epic-D-Design.md](./docs/design/Epic-D-Design.md)，领域决策见 [RFC-003](./docs/rfc/RFC-003-task-domain.md)。
 

@@ -126,7 +126,13 @@ export function KnowledgeDetail({ cardId }: { cardId: string }) {
   }
 
   function deleteKnowledge() {
-    if (!window.confirm("彻底删除这条知识？此操作无法撤销。")) return;
+    if (
+      !window.confirm(
+        "彻底删除这条知识？此操作无法撤销；关联 Task 会保留，并显示 source missing。",
+      )
+    ) {
+      return;
+    }
     new BrowserKnowledgeCardStorage().remove(cardId);
     router.push("/knowledge");
   }

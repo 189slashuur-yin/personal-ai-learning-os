@@ -2,6 +2,17 @@
 
 本文件记录当前仓库已经完成的 Sprint 与关键提交。日期使用仓库 commit date。
 
+## 2026-07-03 — Epic D D1: Task Domain Foundation
+
+状态：Task Domain 基础已实现，未创建 Git commit。
+
+- 新增独立 Task Entity 与 SourceRef 快照，不修改 Conversation 或 KnowledgeCard Entity。
+- 新增 TaskStorage、BrowserTaskStorage 与 TaskService，覆盖创建、编辑、完成、重开、归档、恢复、删除、Workspace/状态/日期查询。
+- 新 Task key 支持旧形状字段归一化；损坏或失败的存储不会被静默清空或覆盖。
+- Workspace 删除前把相关 Task 回迁 Inbox；Conversation / Knowledge 删除不级联 Task；Conversation 复制不复制 Task。
+- 新增 `/tasks` 最小调试入口、导航和 Dashboard Task / Today Task 统计；这不是正式 Today UI。
+- 未实现 Activity、Recurring Task、Calendar、Reminder、AI Suggest Task、RAG、Agent 或批量操作。
+
 ## 2026-07-03 — Epic D D0: Architecture Pack v1
 
 状态：架构设计已冻结；Task、Activity 与 UI 尚未实现；未修改业务代码，未创建 Git commit。
