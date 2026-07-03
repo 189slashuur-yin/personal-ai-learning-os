@@ -121,5 +121,6 @@ export function parseMessagesFromRawText(
     content: draft.content,
     order,
     createdAt,
+    updatedAt: createdAt,
   }));
 }

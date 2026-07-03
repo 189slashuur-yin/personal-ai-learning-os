@@ -44,7 +44,10 @@ export class BrowserMessageStorage implements MessageStorage {
       return [];
     }
 
-    return JSON.parse(storedMessages) as Message[];
+    return (JSON.parse(storedMessages) as Message[]).map((message) => ({
+      ...message,
+      updatedAt: message.updatedAt ?? message.createdAt,
+    }));
   }
 
   getByConversationId(conversationId: string) {

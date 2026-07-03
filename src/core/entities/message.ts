@@ -14,4 +14,5 @@ export type Message = {
   content: string;
   order: number;
   createdAt: string;
+  updatedAt: string;
 };

@@ -1,7 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { type KeyboardEvent, useEffect, useRef, useState } from "react";
+import {
+  type KeyboardEvent,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type { AnalyzerRun } from "@/core/entities/analyzer-run";
 import type { Conversation } from "@/core/entities/conversation";
 import type { ImportedSource } from "@/core/entities/imported-source";
@@ -11,6 +17,7 @@ import type { Proposal } from "@/core/entities/proposal";
 import type { ProviderCapability } from "@/core/entities/provider-capability";
 import { AnalyzerExecutionService } from "@/core/services/analyzer-execution";
 import { ImportProfileService } from "@/core/services/import-profile-service";
+import { editMessage } from "@/core/services/message-editing";
 import { parseMessagesFromRawText } from "@/core/services/message-parser";
 import { PromptTemplateService } from "@/core/services/prompt-template-service";
 import { ProviderConfigurationService } from "@/core/services/provider-configuration-service";
@@ -67,6 +74,36 @@ function messageStyle(role: MessageRole) {
   return "mx-auto border-zinc-200 bg-zinc-50";
 }
 
+function highlightMessageContent(
+  content: string,
+  query: string,
+  isCurrentMatch: boolean,
+) {
+  if (!query) {
+    return content;
+  }
+
+  const escapedQuery = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const parts = content.split(new RegExp(`(${escapedQuery})`, "gi"));
+
+  return parts.map((part, index) =>
+    part.toLocaleLowerCase().includes(query.toLocaleLowerCase()) ? (
+      <mark
+        className={
+          isCurrentMatch
+            ? "rounded bg-amber-400 px-0.5 text-zinc-950"
+            : "rounded bg-amber-200 px-0.5 text-zinc-950"
+        }
+        key={`${part}-${index}`}
+      >
+        {part}
+      </mark>
+    ) : (
+      part
+    ),
+  );
+}
+
 function createAnalyzerExecutionService() {
   const provider = new ProviderService(
     new BrowserAIProviderStorage(),
@@ -93,6 +130,14 @@ export function ConversationDetail({
   const [selectedMessageIds, setSelectedMessageIds] = useState<Set<string>>(
     new Set(),
   );
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
+  const [messageDraft, setMessageDraft] = useState("");
+  const [savedMessageId, setSavedMessageId] = useState<string | null>(null);
+  const [collapsedMessageIds, setCollapsedMessageIds] = useState<Set<string>>(
+    new Set(),
+  );
+  const [messageSearchQuery, setMessageSearchQuery] = useState("");
+  const [activeSearchIndex, setActiveSearchIndex] = useState(0);
   const [analyzerError, setAnalyzerError] = useState<string | null>(null);
   const [latestAnalyzerRun, setLatestAnalyzerRun] =
     useState<AnalyzerRun | null>(null);
@@ -123,6 +168,37 @@ export function ConversationDetail({
     };
   });
   const lastSavedContent = useRef("");
+  const messageElements = useRef(new Map<string, HTMLLIElement>());
+  const normalizedMessageSearch = messageSearchQuery.trim().toLocaleLowerCase();
+  const searchMatchIds = useMemo(() => {
+    if (state.status !== "ready" || !normalizedMessageSearch) {
+      return [];
+    }
+
+    return state.messages
+      .filter((message) =>
+        message.content.toLocaleLowerCase().includes(normalizedMessageSearch),
+      )
+      .map((message) => message.id);
+  }, [normalizedMessageSearch, state]);
+  const currentSearchIndex = Math.min(
+    activeSearchIndex,
+    Math.max(searchMatchIds.length - 1, 0),
+  );
+  const activeSearchMessageId = searchMatchIds[currentSearchIndex] ?? null;
+
+  useEffect(() => {
+    if (!activeSearchMessageId) {
+      return;
+    }
+
+    window.requestAnimationFrame(() => {
+      messageElements.current.get(activeSearchMessageId)?.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+      });
+    });
+  }, [activeSearchMessageId]);
 
   useEffect(() => {
     const loadTimer = window.setTimeout(() => {
@@ -458,6 +534,97 @@ export function ConversationDetail({
     });
   }
 
+  function toggleMessageCollapse(messageId: string) {
+    setCollapsedMessageIds((currentIds) => {
+      const nextIds = new Set(currentIds);
+
+      if (nextIds.has(messageId)) {
+        nextIds.delete(messageId);
+      } else {
+        nextIds.add(messageId);
+      }
+
+      return nextIds;
+    });
+  }
+
+  function moveToSearchResult(direction: -1 | 1) {
+    if (searchMatchIds.length === 0) {
+      return;
+    }
+
+    const nextIndex =
+      (currentSearchIndex + direction + searchMatchIds.length) %
+      searchMatchIds.length;
+    const nextMessageId = searchMatchIds[nextIndex];
+
+    setActiveSearchIndex(nextIndex);
+    setCollapsedMessageIds((currentIds) => {
+      const nextIds = new Set(currentIds);
+      nextIds.delete(nextMessageId);
+      return nextIds;
+    });
+  }
+
+  function updateMessageSearch(query: string) {
+    setMessageSearchQuery(query);
+    setActiveSearchIndex(0);
+
+    const normalizedQuery = query.trim().toLocaleLowerCase();
+    const firstMatch = normalizedQuery
+      ? state.status === "ready"
+        ? state.messages.find((message) =>
+            message.content.toLocaleLowerCase().includes(normalizedQuery),
+          )
+        : null
+      : null;
+
+    if (firstMatch) {
+      setCollapsedMessageIds((currentIds) => {
+        const nextIds = new Set(currentIds);
+        nextIds.delete(firstMatch.id);
+        return nextIds;
+      });
+    }
+  }
+
+  function startEditingMessage(message: Message) {
+    setEditingMessageId(message.id);
+    setMessageDraft(message.content);
+    setSavedMessageId(null);
+  }
+
+  function cancelMessageEditing() {
+    setEditingMessageId(null);
+    setMessageDraft("");
+  }
+
+  function saveMessageEditing(messageId: string) {
+    if (state.status !== "ready") {
+      return;
+    }
+
+    const result = editMessage(messageId, messageDraft, {
+      conversations: new BrowserConversationStorage(),
+      messages: new BrowserMessageStorage(),
+    });
+
+    if (!result) {
+      return;
+    }
+
+    setState({
+      ...state,
+      conversation: result.conversation,
+      messages: state.messages.map((message) =>
+        message.id === result.message.id ? result.message : message,
+      ),
+    });
+    setEditingMessageId(null);
+    setMessageDraft("");
+    setSavedMessageId(messageId);
+  }
+
   function saveTitle() {
     if (state.status !== "ready") {
       return;
@@ -720,12 +887,84 @@ export function ConversationDetail({
                   </button>
                 </div>
               </div>
-              <ol className="mt-4 space-y-4">
-                {state.messages.map((message) => (
-                  <li
-                    className={`flex max-w-[90%] gap-3 rounded-xl border p-4 sm:max-w-[82%] ${messageStyle(message.role)} ${selectedMessageIds.has(message.id) ? "ring-2 ring-zinc-400 ring-offset-2" : ""}`}
-                    key={message.id}
+              <div className="mt-4 rounded-lg border border-zinc-200 bg-white p-4">
+                <div className="flex flex-wrap items-end gap-3">
+                  <label className="min-w-64 flex-1 text-xs font-medium text-zinc-600">
+                    Search Messages
+                    <input
+                      className="mt-1.5 w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm text-zinc-900 outline-none focus:border-zinc-400 focus:ring-2 focus:ring-zinc-100"
+                      onChange={(event) => updateMessageSearch(event.target.value)}
+                      placeholder="搜索 Message 内容"
+                      type="search"
+                      value={messageSearchQuery}
+                    />
+                  </label>
+                  <p className="pb-2 text-xs text-zinc-500" role="status">
+                    {normalizedMessageSearch
+                      ? searchMatchIds.length > 0
+                        ? `${currentSearchIndex + 1} / ${searchMatchIds.length}`
+                        : "没有匹配项"
+                      : "输入关键词开始搜索"}
+                  </p>
+                  <div className="flex gap-2 pb-0.5">
+                    <button
+                      className="rounded-md border border-zinc-200 px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-40"
+                      disabled={searchMatchIds.length === 0}
+                      onClick={() => moveToSearchResult(-1)}
+                      type="button"
+                    >
+                      上一条
+                    </button>
+                    <button
+                      className="rounded-md border border-zinc-200 px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-40"
+                      disabled={searchMatchIds.length === 0}
+                      onClick={() => moveToSearchResult(1)}
+                      type="button"
+                    >
+                      下一条
+                    </button>
+                  </div>
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2 border-t border-zinc-100 pt-3">
+                  <button
+                    className="rounded-md border border-zinc-200 px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-50"
+                    onClick={() => setCollapsedMessageIds(new Set())}
+                    type="button"
                   >
+                    全部展开
+                  </button>
+                  <button
+                    className="rounded-md border border-zinc-200 px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-40"
+                    disabled={editingMessageId !== null}
+                    onClick={() =>
+                      setCollapsedMessageIds(
+                        new Set(state.messages.map((message) => message.id)),
+                      )
+                    }
+                    type="button"
+                  >
+                    全部折叠
+                  </button>
+                </div>
+              </div>
+              <ol className="mt-4 space-y-4">
+                {state.messages.map((message) => {
+                  const isCollapsed = collapsedMessageIds.has(message.id);
+                  const isCurrentSearchMatch =
+                    activeSearchMessageId === message.id;
+
+                  return (
+                    <li
+                      className={`flex max-w-[90%] scroll-mt-8 gap-3 rounded-xl border p-4 sm:max-w-[82%] ${messageStyle(message.role)} ${selectedMessageIds.has(message.id) ? "ring-2 ring-zinc-400 ring-offset-2" : ""} ${isCurrentSearchMatch ? "outline-2 outline-offset-2 outline-amber-400" : ""}`}
+                      key={message.id}
+                      ref={(element) => {
+                        if (element) {
+                          messageElements.current.set(message.id, element);
+                        } else {
+                          messageElements.current.delete(message.id);
+                        }
+                      }}
+                    >
                     <input
                       aria-label={`选择第 ${message.order + 1} 条 Message`}
                       checked={selectedMessageIds.has(message.id)}
@@ -734,18 +973,95 @@ export function ConversationDetail({
                       type="checkbox"
                     />
                     <div className="min-w-0 flex-1">
-                      <div className="flex items-center justify-between gap-4 text-xs">
-                        <span className="font-semibold uppercase tracking-[0.12em] text-zinc-600">
-                          {messageRoleLabels[message.role]}
-                        </span>
-                        <span className="text-zinc-400">#{message.order + 1}</span>
+                      <div className="flex flex-wrap items-center justify-between gap-3 text-xs">
+                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                          <span className="font-semibold uppercase tracking-[0.12em] text-zinc-600">
+                            {messageRoleLabels[message.role]}
+                          </span>
+                          <time className="text-zinc-400" dateTime={message.updatedAt}>
+                            {new Intl.DateTimeFormat("zh-CN", {
+                              dateStyle: "short",
+                              timeStyle: "short",
+                            }).format(new Date(message.updatedAt))}
+                          </time>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <span className="text-zinc-400">#{message.order + 1}</span>
+                          <button
+                            aria-expanded={!isCollapsed}
+                            className="font-medium text-zinc-600 hover:text-zinc-950 disabled:cursor-not-allowed disabled:opacity-40"
+                            disabled={editingMessageId === message.id}
+                            onClick={() => toggleMessageCollapse(message.id)}
+                            type="button"
+                          >
+                            {isCollapsed ? "Expand" : "Collapse"}
+                          </button>
+                        </div>
                       </div>
-                      <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-zinc-800">
-                        {message.content}
-                      </p>
+                      {isCollapsed ? (
+                        <p className="mt-2 truncate text-xs text-zinc-500">
+                          {message.content}
+                        </p>
+                      ) : editingMessageId === message.id ? (
+                        <div className="mt-3">
+                          <textarea
+                            aria-label={`编辑第 ${message.order + 1} 条 Message`}
+                            autoFocus
+                            className="min-h-32 w-full resize-y rounded-lg border border-zinc-300 bg-white p-3 text-sm leading-6 text-zinc-800 outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-100"
+                            onChange={(event) => setMessageDraft(event.target.value)}
+                            value={messageDraft}
+                          />
+                          <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+                            <span className="text-xs font-medium text-amber-700" role="status">
+                              Editing
+                            </span>
+                            <div className="flex gap-2">
+                              <button
+                                className="rounded-md border border-zinc-200 bg-white px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-50"
+                                onClick={cancelMessageEditing}
+                                type="button"
+                              >
+                                Cancel
+                              </button>
+                              <button
+                                className="rounded-md bg-zinc-950 px-3 py-1.5 text-xs font-medium text-white hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-300"
+                                disabled={!messageDraft.trim()}
+                                onClick={() => saveMessageEditing(message.id)}
+                                type="button"
+                              >
+                                Save
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-zinc-800">
+                            {highlightMessageContent(
+                              message.content,
+                              messageSearchQuery.trim(),
+                              isCurrentSearchMatch,
+                            )}
+                          </p>
+                          <div className="mt-3 flex items-center justify-between gap-3">
+                            <span className="text-xs font-medium text-emerald-700" role="status">
+                              {savedMessageId === message.id ? "Saved" : ""}
+                            </span>
+                            <button
+                              className="rounded-md border border-zinc-200 bg-white px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-40"
+                              disabled={editingMessageId !== null}
+                              onClick={() => startEditingMessage(message)}
+                              type="button"
+                            >
+                              Edit
+                            </button>
+                          </div>
+                        </>
+                      )}
                     </div>
-                  </li>
-                ))}
+                    </li>
+                  );
+                })}
               </ol>
               <div className="mt-5 flex justify-end">
                 <div className="text-right">

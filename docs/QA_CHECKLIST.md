@@ -1,6 +1,6 @@
 # Manual QA Checklist
 
-本清单基于 Sprint11、README、PROJECT、ROADMAP、HANDOFF 与当前页面实现整理。它是手工验收基线，不代表测试已经执行，不包含自动化测试。
+本清单基于 Epic A Feature Set 1、Sprint11、README、PROJECT、ROADMAP、HANDOFF 与当前页面实现整理。它是手工验收基线，不代表测试已经执行，不包含自动化测试。
 
 ## 测试准备
 
@@ -53,6 +53,21 @@
 | CON-07 | 确认删除测试 Conversation。 | 提示影响 Source、Messages、Proposal、KnowledgeCard、AnalyzerRun；确认后全部级联删除。 | 是：残留孤儿数据或误删其他数据。 | Conversation Workspace Service |
 | CON-08 | 查看 Conversation Card 和详情统计。 | 来源、Message、Proposal、Knowledge 数量与实际一致。 | 是：计数遗漏。 | Conversation Statistics |
 | CON-09 | 打开不存在的 Conversation URL。 | 显示“不存在”页面和返回入口，不崩溃。 | 是：空引用异常。 | Conversation Routing |
+
+## Conversation Editing
+
+| ID | 操作 | 预期结果 | 是否可能失败 | 失败模块 |
+| --- | --- | --- | --- | --- |
+| CED-01 | 点击一条 Message 的 Edit，修改内容并 Save。 | 显示 Editing，保存后显示 Saved；刷新后内容保留。 | 是：只更新 UI 或状态错误。 | Message Editing |
+| CED-02 | 编辑 Message 后点击 Cancel。 | 恢复展示原内容，不写入 Storage，不更新时间。 | 是：取消仍保存。 | Message Editing |
+| CED-03 | 将 Message 改为空白。 | Save 不可用，原 Message 保留。 | 是：保存空 Message。 | Message Validation |
+| CED-04 | 保存 Message 后核对时间。 | Message `updatedAt` 和 Conversation Last Updated 同时变化。 | 是：聚合时间不同步。 | Message Editing Service |
+| CED-05 | 先生成 Proposal / Knowledge，再编辑来源 Message。 | Proposal Evidence 与 Knowledge Snapshot 保持生成时内容，不自动更新。 | 是：历史证据被回写。 | Snapshot Integrity |
+| CED-06 | 打开 Timeline 并逐条/全部折叠、展开。 | 默认展开；Collapse / Expand 正常，不改变选择或持久化内容。 | 是：折叠状态或内容异常。 | Timeline UX |
+| CED-07 | 搜索存在于多条 Message 的关键词。 | 所有匹配词高亮，当前项更醒目，计数正确。 | 是：大小写、计数或高亮错误。 | Timeline Search |
+| CED-08 | 连续点击上一条、下一条。 | 循环跳转并滚动到匹配 Message；折叠命中项自动展开。 | 是：索引越界或 Jump 失败。 | Timeline Jump |
+| CED-09 | 核对每条 Timeline Header。 | 编号、角色、更新时间显示正确。 | 是：元数据缺失。 | Timeline Metadata |
+| CED-10 | 使用旧数据中没有 `updatedAt` 的 Message。 | 页面安全使用 `createdAt`，不清空或改写其它数据。 | 是：旧数据崩溃。 | Storage Compatibility |
 
 ## Messages
 
@@ -181,6 +196,8 @@
 | SMK-10 | 测试 Demo Connection。 | 返回 Success。 | 是。 | Provider |
 | SMK-11 | Ollama 不可达时执行测试或分析。 | 显示错误，不新增 Proposal。 | 是。 | Ollama |
 | SMK-12 | 刷新浏览器并复核全链路数据。 | Conversation、Messages、Proposal、Knowledge、Tag 均持久化。 | 是。 | BrowserStorage |
+| SMK-13 | 编辑并保存一条 Message，再刷新 Conversation。 | 修改保留，Message 与 Conversation 时间更新，Proposal / Knowledge Snapshot 不变。 | 是。 | Conversation Editing |
+| SMK-14 | 搜索 Timeline 并执行上一条、下一条、折叠和展开。 | 当前命中高亮并可跳转，折叠展开正常。 | 是。 | Timeline UX |
 
 ## Regression Test Checklist
 

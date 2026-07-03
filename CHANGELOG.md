@@ -2,6 +2,16 @@
 
 本文件记录当前仓库已经完成的 Sprint 与关键提交。日期使用仓库 commit date。
 
+## 2026-07-03 — Epic A / Feature Set 1: Conversation Editing
+
+状态：已完成，未创建 Git commit。
+
+- Message Timeline 增加 Edit、Save、Cancel 与 Editing / Saved 状态。
+- Message 保存更新 `updatedAt` 和 Conversation Last Updated；旧 Message 自动以 `createdAt` 兼容。
+- Timeline 增加默认展开、单条/全部折叠展开、搜索、当前命中高亮、上一条/下一条跳转。
+- Message 显示编号、角色与更新时间。
+- Proposal Evidence 与 Knowledge 来源快照保持不变；未实现 Conversation Version、Merge、Split 或 Export。
+
 ## 2026-07-03 — Sprint11: Clipboard Import Profiles / Preview / QA
 
 状态：已完成，未创建 Git commit。

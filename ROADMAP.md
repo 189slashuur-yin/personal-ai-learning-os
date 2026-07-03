@@ -16,6 +16,15 @@
 | Sprint10 | 已完成 | Clipboard Import UI、Conversation Text Parser、Messages → Analyzer 流程、Recent Imports 与导入统计。 |
 | Sprint11 | 已完成 | Import Profiles、Smart Title、解析 Preview、导入成功摘要与 Import QA Polish。 |
 
+## Epic A — Feature Set 1（已完成）
+
+- Conversation Message 支持 Edit、Save、Cancel，并展示 Editing / Saved 状态。
+- Message 保存后更新自身 `updatedAt` 与 Conversation `updatedAt`；旧 Message 缺少 `updatedAt` 时安全回退 `createdAt`。
+- Timeline 默认展开，支持单条/全部 Collapse 与 Expand、内容搜索、当前命中高亮、上一条/下一条循环跳转。
+- Timeline 显示 Message 编号、时间和角色。
+- Proposal Evidence 与 Knowledge 来源内容继续使用生成时 Snapshot；Message 编辑不回写 Proposal 或 Knowledge。
+- 本 Feature Set 不包含 Conversation Version、Merge、Split 或 Export。
+
 ## 已完成里程碑
 
 ### Sprint1 — Core Knowledge Flow

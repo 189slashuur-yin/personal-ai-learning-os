@@ -71,10 +71,11 @@ export function duplicateConversationWorkspace(
       messageIdMap.set(message.id, duplicatedMessageId);
 
       return {
-      ...message,
-      id: duplicatedMessageId,
-      conversationId: duplicatedConversation.id,
-      createdAt: timestamp,
+        ...message,
+        id: duplicatedMessageId,
+        conversationId: duplicatedConversation.id,
+        createdAt: timestamp,
+        updatedAt: timestamp,
       };
     });
   storages.messages.saveMany(duplicatedMessages);
