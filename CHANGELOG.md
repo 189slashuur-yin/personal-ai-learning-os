@@ -2,6 +2,16 @@
 
 本文件记录当前仓库已经完成的 Sprint 与关键提交。日期使用仓库 commit date。
 
+## 2026-07-03 — Epic A / Feature Set 2: Conversation Versioning
+
+状态：已完成，未创建 Git commit。
+
+- 新增 `ConversationVersion` Entity、Storage Contract、BrowserStorage 与 Service。
+- Conversation Detail 可创建命名 Snapshot，并展示数量、时间、Message 数和备注。
+- Snapshot 只保存 Conversation 与 Messages，不包含 Proposal、Knowledge、AnalyzerRun、Tag 或 Provider。
+- Restore 经确认后覆盖 Conversation、使用新 ID 重建 Messages，并显示 `Restored successfully`。
+- Restore 保留全部 Snapshots，不修改 Proposal / Knowledge 逻辑；未实现 Merge、Split 或 Export。
+
 ## 2026-07-03 — Epic A / Feature Set 1: Conversation Editing
 
 状态：已完成，未创建 Git commit。

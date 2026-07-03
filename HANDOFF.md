@@ -1,4 +1,76 @@
-# Epic A / Feature Set 1 — Conversation Editing Handoff
+# Epic A / Feature Set 2 — Conversation Versioning Handoff
+
+## 当前状态
+
+Conversation 已支持创建不可变 Snapshot，并可在明确确认后恢复任意 Snapshot。Snapshot 与当前 Conversation 使用独立生命周期；恢复只覆盖 Conversation 和 Messages，不恢复或修改 Proposal、Knowledge、AnalyzerRun、Tag、Provider，也不删除 Snapshot。未实现 Merge、Split 或 Export，未创建 Git commit。
+
+## Architecture Impact
+
+- Entity：新增 `ConversationVersion`，保存版本身份、名称、备注、创建时间、版本序号、Message 数和 `snapshotData`。
+- Storage：新增 `ConversationVersionStorage` 与 `BrowserConversationVersionStorage`，使用独立集合并只追加 Snapshot；旧浏览器没有该 key 时安全返回空集合。
+- Service：新增 `ConversationVersionService`，集中编排创建与恢复；恢复时更新 Conversation `updatedAt` 并以新 ID 重建 Messages。
+- Conversation：当前 `Conversation` Entity 未新增版本字段；Workspace Service 仅在删除 Conversation 时清理其 Snapshots，复制时不复制历史版本。
+- UI：Conversation Detail 增加 Snapshot 创建、数量、列表、Restore 确认与成功提示。
+- Documentation：更新 ROADMAP、CHANGELOG、HANDOFF 与 QA Checklist。
+
+新增 `ConversationVersion` 而不复用 `Conversation`，因为 Conversation 表示持续变化的当前工作区；Version 需要独立 ID、版本元数据和不可变的 Conversation + Messages 副本。复用 Conversation 会混淆当前态与历史态，并诱导直接修改历史记录。
+
+## Part 3 — Conversation Snapshot
+
+- Snapshot 名称必填，备注可选。
+- `snapshotData` 深度复制当前 Conversation 与 Messages；不读取或保存 Proposal、Knowledge、AnalyzerRun、Tag 或 Provider。
+- BrowserStorage 对同 ID 的 Snapshot 不执行覆盖，历史记录保持不可变。
+- Conversation Detail 展示 Snapshot 数量、名称、备注、创建时间和 Message 数。
+- checkpoint：lint、build、diff-check 通过。
+
+## Part 4 — Restore Conversation
+
+- 每个 Snapshot 提供 Restore；执行前明确提示当前 Conversation 与 Messages 会被替换，以及不受影响的实体。
+- 恢复 Conversation 的快照字段，保持当前 Conversation ID，并将 `updatedAt` / `lastOpenedAt` 更新为恢复时间。
+- 删除当前 Messages 后按快照内容重建，所有 Message 使用新 ID 和恢复时间。
+- Restore 不写入 Proposal、Knowledge、AnalyzerRun、Tag、Provider 或 Version Storage；所有 Snapshots 原样保留。
+- 恢复成功显示 `Restored successfully`。
+- checkpoint：lint、build、diff-check 通过。
+
+## 新增文件
+
+- `src/core/entities/conversation-version.ts`
+- `src/core/contracts/conversation-version-storage.ts`
+- `src/infrastructure/storage/browser-conversation-version-storage.ts`
+- `src/core/services/conversation-version-service.ts`
+
+## 修改文件
+
+- Service：`src/core/services/conversation-workspace.ts`
+- UI：`src/app/conversation/[id]/conversation-detail.tsx`、`src/app/conversation/conversation-list.tsx`
+- Documentation：`ROADMAP.md`、`CHANGELOG.md`、`HANDOFF.md`、`docs/QA_CHECKLIST.md`
+
+## 手动验收
+
+1. 在 Conversation Detail 输入名称与备注，创建 Snapshot，核对数量、时间、Message 数、名称与备注，刷新后仍存在。
+2. 创建 Snapshot 后重命名 Conversation、编辑/覆盖 Messages，再取消 Restore，确认当前数据不变。
+3. 确认 Restore，核对标题、来源类型和 Messages 恢复，Conversation 更新时间变化，Messages 获得新 ID，并显示成功提示。
+4. Restore 前后核对 Proposal、Knowledge、AnalyzerRun、Tag、Provider 和 Snapshot 数量及内容均未改变。
+5. 连续恢复不同 Snapshot，确认历史 Snapshot 不被覆盖或删除。
+6. 复制 Conversation，确认副本不继承原历史 Snapshot；删除测试 Conversation，确认关联 Snapshot 随 Workspace 级联删除。
+7. 回归 Source / Messages → Proposal → Review → Knowledge，以及 Message Editing / Timeline 流程。
+
+## 已知限制
+
+- Snapshot 不包含原始 Source；Restore 不改变 Source 编辑器内容。
+- Restore 为 LocalStorage 顺序写入，不具备数据库事务；浏览器配额或写入中断可能造成部分写入。
+- 恢复后 Message ID 会变化，因此旧 Proposal / Knowledge 的实时 Message 引用可能显示缺失，但其生成时 Evidence Snapshot 保持可读。
+- Snapshot 不支持单独删除、重命名、比较或导出；仅在删除所属 Conversation 时级联清理。
+- LocalStorage 仍受单浏览器、容量与无事务限制；项目没有自动化测试套件。
+
+## 下一步建议
+
+- 先执行本 Handoff 与 QA Checklist 的 Conversation Version Smoke Test。
+- 后续如需 Merge、Split 或 Export，必须单独确认范围与验收，不从 Versioning 自动延伸。
+
+---
+
+# Previous Handoff — Epic A / Feature Set 1 Conversation Editing
 
 ## 当前状态
 

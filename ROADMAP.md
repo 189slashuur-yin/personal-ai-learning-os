@@ -25,6 +25,15 @@
 - Proposal Evidence 与 Knowledge 来源内容继续使用生成时 Snapshot；Message 编辑不回写 Proposal 或 Knowledge。
 - 本 Feature Set 不包含 Conversation Version、Merge、Split 或 Export。
 
+## Epic A — Feature Set 2（已完成）
+
+- Conversation Detail 支持创建命名 Snapshot，并展示数量、创建时间、Message 数和备注。
+- `ConversationVersion` 使用独立追加式存储，保存 Conversation 与 Messages 的不可变副本；不保存 Proposal、Knowledge、AnalyzerRun、Tag 或 Provider。
+- Restore 在明确确认后只恢复 Conversation 与 Messages；Conversation `updatedAt` 更新，Messages 使用新 ID 重建。
+- Restore 不修改或删除 Snapshot，也不恢复 Proposal、Knowledge、AnalyzerRun、Tag 或 Provider。
+- 删除 Conversation 时通过 Workspace Service 一并删除其 Snapshots；复制 Conversation 不复制原 Conversation 的历史版本。
+- 本 Feature Set 不包含 Merge、Split 或 Export。
+
 ## 已完成里程碑
 
 ### Sprint1 — Core Knowledge Flow

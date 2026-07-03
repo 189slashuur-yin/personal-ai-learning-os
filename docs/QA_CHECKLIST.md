@@ -1,6 +1,6 @@
 # Manual QA Checklist
 
-本清单基于 Epic A Feature Set 1、Sprint11、README、PROJECT、ROADMAP、HANDOFF 与当前页面实现整理。它是手工验收基线，不代表测试已经执行，不包含自动化测试。
+本清单基于 Epic A Feature Set 2、Feature Set 1、Sprint11、README、PROJECT、ROADMAP、HANDOFF 与当前页面实现整理。它是手工验收基线，不代表测试已经执行，不包含自动化测试。
 
 ## 测试准备
 
@@ -68,6 +68,21 @@
 | CED-08 | 连续点击上一条、下一条。 | 循环跳转并滚动到匹配 Message；折叠命中项自动展开。 | 是：索引越界或 Jump 失败。 | Timeline Jump |
 | CED-09 | 核对每条 Timeline Header。 | 编号、角色、更新时间显示正确。 | 是：元数据缺失。 | Timeline Metadata |
 | CED-10 | 使用旧数据中没有 `updatedAt` 的 Message。 | 页面安全使用 `createdAt`，不清空或改写其它数据。 | 是：旧数据崩溃。 | Storage Compatibility |
+
+## Conversation Version Smoke Test
+
+| ID | 操作 | 预期结果 | 是否可能失败 | 失败模块 |
+| --- | --- | --- | --- | --- |
+| CVR-01 | 打开旧 Conversation，尚未创建任何 Snapshot。 | Snapshot 数量为 0，页面正常加载，不迁移或清空已有数据。 | 是：新 key 缺失导致崩溃。 | Version Storage Compatibility |
+| CVR-02 | 不填写名称尝试创建 Snapshot。 | Create Snapshot 不可用，不写入空名称版本。 | 是：空版本被保存。 | Version Validation |
+| CVR-03 | 填写名称和备注并创建 Snapshot。 | 数量增加；列表显示名称、备注、创建时间和准确 Message 数，刷新后仍存在。 | 是：字段或持久化缺失。 | Snapshot Creation |
+| CVR-04 | 创建 Snapshot 后修改 Conversation 标题和 Messages。 | 已有 Snapshot 展示内容和元数据不被当前修改覆盖。 | 是：历史记录被修改。 | Snapshot Immutability |
+| CVR-05 | 点击 Restore 后取消确认。 | 当前 Conversation、Messages 及所有 Snapshot 均不变。 | 是：取消后仍恢复。 | Restore Confirmation |
+| CVR-06 | 确认恢复 Snapshot。 | Conversation 恢复快照字段且 `updatedAt` 更新；旧 Messages 被替换，新 Messages 使用新 ID；显示 `Restored successfully`。 | 是：恢复不完整或 ID 复用。 | Version Service / UI |
+| CVR-07 | Restore 前后核对 Proposal、Knowledge、AnalyzerRun、Tag 和 Provider。 | 这些独立生命周期实体与设置均不被恢复、删除或改写。 | 是：恢复越界。 | Restore Boundary |
+| CVR-08 | 连续创建并恢复多个 Snapshot。 | 可恢复任意版本；Snapshot 数量、名称、备注和内容始终保留。 | 是：恢复删除或覆盖历史。 | Snapshot Immutability |
+| CVR-09 | 复制带 Snapshot 的 Conversation。 | 副本不继承原 Conversation 的历史 Snapshot。 | 是：历史归属被伪造。 | Conversation Duplicate |
+| CVR-10 | 删除测试 Conversation 并确认影响提示。 | Conversation 与其 Snapshot 通过 Workspace Service 一并删除，不影响其它 Conversation。 | 是：孤儿 Snapshot 或误删。 | Conversation Delete |
 
 ## Messages
 
@@ -198,6 +213,9 @@
 | SMK-12 | 刷新浏览器并复核全链路数据。 | Conversation、Messages、Proposal、Knowledge、Tag 均持久化。 | 是。 | BrowserStorage |
 | SMK-13 | 编辑并保存一条 Message，再刷新 Conversation。 | 修改保留，Message 与 Conversation 时间更新，Proposal / Knowledge Snapshot 不变。 | 是。 | Conversation Editing |
 | SMK-14 | 搜索 Timeline 并执行上一条、下一条、折叠和展开。 | 当前命中高亮并可跳转，折叠展开正常。 | 是。 | Timeline UX |
+| SMK-15 | 创建命名 Conversation Snapshot 并刷新。 | Snapshot 数量、名称、备注、时间和 Message 数保持。 | 是。 | Conversation Version |
+| SMK-16 | 修改 Conversation / Messages 后恢复 Snapshot。 | 确认后只恢复 Conversation 与新 ID Messages，并显示成功提示。 | 是。 | Conversation Restore |
+| SMK-17 | Restore 前后核对其它实体与 Snapshots。 | Proposal、Knowledge、AnalyzerRun、Tag、Provider 和所有 Snapshots 均不变。 | 是。 | Restore Boundary |
 
 ## Regression Test Checklist
 
@@ -221,6 +239,7 @@
 | REG-16 | 检查 Proposal/Knowledge Capability 快照。 | 后续配置变化不破坏历史快照。 | 是。 | Capability |
 | REG-17 | 测试 Ollama 配置、连接、Source/Messages 分析。 | Sprint9 功能正常。 | 是。 | Ollama |
 | REG-18 | 刷新页面和重启浏览器。 | 本地数据及当前 Provider 保留。 | 是。 | BrowserStorage |
+| REG-19 | 创建和恢复 Conversation Snapshot。 | Feature Set 2 Versioning 可用，Source / Proposal / Knowledge 旧流程不被改写。 | 是。 | Conversation Version |
 
 ## Edge Case Checklist
 
@@ -244,3 +263,5 @@
 | EDGE-16 | 禁用当前 Ollama 后立即分析。 | 使用 Demo 回退，不继续请求 Ollama。 | 是。 | Provider Registry |
 | EDGE-17 | 打开不存在的 Conversation/Knowledge ID。 | 显示 Not Found 和返回入口。 | 是。 | Routing |
 | EDGE-18 | 浏览器禁用或写满 LocalStorage。 | Import 显示保存失败，已有数据不被静默清空。 | 是。 | BrowserStorage |
+| EDGE-19 | 从 0 Messages 的 Snapshot 恢复。 | 当前 Messages 被清空，Conversation 正常恢复，Snapshot 保留。 | 是。 | Empty Snapshot Restore |
+| EDGE-20 | 恢复后打开引用旧 Message ID 的 Proposal / Knowledge。 | 实时引用可提示缺失，生成时 Evidence Snapshot 仍可读。 | 是。 | Source Integrity |

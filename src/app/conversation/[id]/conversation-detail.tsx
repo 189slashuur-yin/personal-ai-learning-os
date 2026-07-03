@@ -10,6 +10,7 @@ import {
 } from "react";
 import type { AnalyzerRun } from "@/core/entities/analyzer-run";
 import type { Conversation } from "@/core/entities/conversation";
+import type { ConversationVersion } from "@/core/entities/conversation-version";
 import type { ImportedSource } from "@/core/entities/imported-source";
 import type { KnowledgeCard } from "@/core/entities/knowledge-card";
 import type { Message, MessageRole } from "@/core/entities/message";
@@ -17,6 +18,7 @@ import type { Proposal } from "@/core/entities/proposal";
 import type { ProviderCapability } from "@/core/entities/provider-capability";
 import { AnalyzerExecutionService } from "@/core/services/analyzer-execution";
 import { ImportProfileService } from "@/core/services/import-profile-service";
+import { ConversationVersionService } from "@/core/services/conversation-version-service";
 import { editMessage } from "@/core/services/message-editing";
 import { parseMessagesFromRawText } from "@/core/services/message-parser";
 import { PromptTemplateService } from "@/core/services/prompt-template-service";
@@ -24,6 +26,7 @@ import { ProviderConfigurationService } from "@/core/services/provider-configura
 import { ProviderService } from "@/core/services/provider-service";
 import { countWords } from "@/core/services/text-statistics";
 import { BrowserConversationStorage } from "@/infrastructure/storage/browser-conversation-storage";
+import { BrowserConversationVersionStorage } from "@/infrastructure/storage/browser-conversation-version-storage";
 import { BrowserAIProviderStorage } from "@/infrastructure/storage/browser-ai-provider-storage";
 import { BrowserAnalyzerRunStorage } from "@/infrastructure/storage/browser-analyzer-run-storage";
 import { BrowserKnowledgeCardStorage } from "@/infrastructure/storage/browser-knowledge-card-storage";
@@ -51,6 +54,7 @@ type DetailState =
       proposals: Proposal[];
       knowledgeCard: KnowledgeCard | null;
       knowledgeCount: number;
+      versions: ConversationVersion[];
     };
 
 type SaveStatus = "saved" | "editing";
@@ -133,6 +137,9 @@ export function ConversationDetail({
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [messageDraft, setMessageDraft] = useState("");
   const [savedMessageId, setSavedMessageId] = useState<string | null>(null);
+  const [snapshotName, setSnapshotName] = useState("");
+  const [snapshotDescription, setSnapshotDescription] = useState("");
+  const [restoreStatus, setRestoreStatus] = useState<string | null>(null);
   const [collapsedMessageIds, setCollapsedMessageIds] = useState<Set<string>>(
     new Set(),
   );
@@ -244,6 +251,10 @@ export function ConversationDetail({
       const messages = new BrowserMessageStorage().getByConversationId(
         conversationId,
       );
+      const versions =
+        new BrowserConversationVersionStorage().getByConversationId(
+          conversationId,
+        );
       setLatestAnalyzerRun(
         new BrowserAnalyzerRunStorage().getLatestByConversationId(
           conversationId,
@@ -263,6 +274,7 @@ export function ConversationDetail({
         proposals,
         knowledgeCard,
         knowledgeCount,
+        versions,
       });
     }, 0);
 
@@ -625,6 +637,73 @@ export function ConversationDetail({
     setSavedMessageId(messageId);
   }
 
+  function createSnapshot() {
+    if (state.status !== "ready") {
+      return;
+    }
+
+    const versionStorage = new BrowserConversationVersionStorage();
+    const version = new ConversationVersionService({
+      conversations: new BrowserConversationStorage(),
+      messages: new BrowserMessageStorage(),
+      versions: versionStorage,
+    }).createSnapshot(
+      state.conversation.id,
+      snapshotName,
+      snapshotDescription,
+    );
+
+    if (!version) {
+      return;
+    }
+
+    setState({
+      ...state,
+      versions: versionStorage.getByConversationId(state.conversation.id),
+    });
+    setSnapshotName("");
+    setSnapshotDescription("");
+  }
+
+  function restoreSnapshot(version: ConversationVersion) {
+    if (state.status !== "ready") {
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Restore Snapshot「${version.name}」？当前 Conversation 与 ${state.messages.length} 条 Messages 将被替换，恢复后的 Messages 会生成新 ID。Proposal、Knowledge、AnalyzerRun、Tag、Provider 与所有 Snapshots 不会改变。`,
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    const result = new ConversationVersionService({
+      conversations: new BrowserConversationStorage(),
+      messages: new BrowserMessageStorage(),
+      versions: new BrowserConversationVersionStorage(),
+    }).restoreSnapshot(state.conversation.id, version.id);
+
+    if (!result) {
+      return;
+    }
+
+    setState({
+      ...state,
+      conversation: result.conversation,
+      messages: result.messages,
+    });
+    setTitleDraft(result.conversation.title);
+    setSelectedMessageIds(new Set());
+    setEditingMessageId(null);
+    setMessageDraft("");
+    setSavedMessageId(null);
+    setCollapsedMessageIds(new Set());
+    setMessageSearchQuery("");
+    setActiveSearchIndex(0);
+    setRestoreStatus("Restored successfully");
+  }
+
   function saveTitle() {
     if (state.status !== "ready") {
       return;
@@ -738,7 +817,7 @@ export function ConversationDetail({
           <p className="detail-kicker">01 · Context</p>
           <h2 className="detail-title">Conversation 信息</h2>
         </div>
-        <dl className="grid gap-4 rounded-xl border border-zinc-200 bg-white p-5 text-sm sm:grid-cols-3 lg:grid-cols-7">
+        <dl className="grid gap-4 rounded-xl border border-zinc-200 bg-white p-5 text-sm sm:grid-cols-3 lg:grid-cols-8">
           <div>
             <dt className="text-zinc-500">来源</dt>
             <dd className="mt-1 font-medium text-zinc-900">
@@ -786,12 +865,111 @@ export function ConversationDetail({
               {state.knowledgeCount} 条
             </dd>
           </div>
+          <div>
+            <dt className="text-zinc-500">Snapshots</dt>
+            <dd className="mt-1 font-medium text-zinc-900">
+              {state.versions.length} 个
+            </dd>
+          </div>
         </dl>
       </section>
 
       <section className="detail-section">
         <div className="detail-section-heading">
-          <p className="detail-kicker">02 · Source</p>
+          <p className="detail-kicker">02 · Conversation Version</p>
+          <h2 className="detail-title">Conversation Snapshots</h2>
+          <p className="detail-description">
+            保存当前 Conversation 与 Messages；不包含 Proposal、Knowledge、AnalyzerRun、Tag 或 Provider。
+          </p>
+        </div>
+        <div>
+          {restoreStatus ? (
+            <p
+              className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-800"
+              role="status"
+            >
+              {restoreStatus}
+            </p>
+          ) : null}
+          <div className="grid gap-3 rounded-xl border border-zinc-200 bg-white p-5 sm:grid-cols-2">
+            <label className="text-xs font-medium text-zinc-600">
+              Snapshot 名称
+              <input
+                className="mt-1.5 w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm text-zinc-900 outline-none focus:border-zinc-400 focus:ring-2 focus:ring-zinc-100"
+                onChange={(event) => setSnapshotName(event.target.value)}
+                placeholder="例如：整理前"
+                value={snapshotName}
+              />
+            </label>
+            <label className="text-xs font-medium text-zinc-600">
+              备注
+              <input
+                className="mt-1.5 w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm text-zinc-900 outline-none focus:border-zinc-400 focus:ring-2 focus:ring-zinc-100"
+                onChange={(event) => setSnapshotDescription(event.target.value)}
+                placeholder="可选"
+                value={snapshotDescription}
+              />
+            </label>
+            <div className="sm:col-span-2 sm:text-right">
+              <button
+                className="rounded-lg bg-zinc-950 px-4 py-2.5 text-sm font-medium text-white hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-300"
+                disabled={!snapshotName.trim()}
+                onClick={createSnapshot}
+                type="button"
+              >
+                Create Snapshot
+              </button>
+            </div>
+          </div>
+          {state.versions.length > 0 ? (
+            <ol className="mt-4 space-y-3">
+              {state.versions.map((version) => (
+                <li
+                  className="rounded-xl border border-zinc-200 bg-white p-4"
+                  key={version.id}
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <h3 className="font-semibold text-zinc-950">
+                        {version.name}
+                      </h3>
+                      <p className="mt-1 text-xs text-zinc-500">
+                        {new Intl.DateTimeFormat("zh-CN", {
+                          dateStyle: "medium",
+                          timeStyle: "short",
+                        }).format(new Date(version.createdAt))}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="rounded-full bg-zinc-100 px-3 py-1 text-xs font-medium text-zinc-600">
+                        {version.messageCount} Messages
+                      </span>
+                      <button
+                        className="rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-50"
+                        onClick={() => restoreSnapshot(version)}
+                        type="button"
+                      >
+                        Restore
+                      </button>
+                    </div>
+                  </div>
+                  <p className="mt-3 whitespace-pre-wrap text-sm text-zinc-600">
+                    {version.description || "无备注"}
+                  </p>
+                </li>
+              ))}
+            </ol>
+          ) : (
+            <p className="mt-4 rounded-xl border border-dashed border-zinc-300 bg-zinc-50 p-5 text-sm text-zinc-500">
+              尚未创建 Snapshot。
+            </p>
+          )}
+        </div>
+      </section>
+
+      <section className="detail-section">
+        <div className="detail-section-heading">
+          <p className="detail-kicker">03 · Source</p>
           <h2 className="detail-title">原始文本 Preview</h2>
           <p className="detail-description">
             可直接使用 Ctrl+V 粘贴完整文本；保存后仍保留原文。
@@ -836,7 +1014,7 @@ export function ConversationDetail({
 
       <section className="detail-section">
         <div className="detail-section-heading">
-          <p className="detail-kicker">03 · Messages</p>
+          <p className="detail-kicker">04 · Messages</p>
           <h2 className="detail-title">Message Timeline</h2>
           <p className="detail-description">
             按发言标记拆分原始文本，不调用 AI API。
@@ -1099,7 +1277,7 @@ export function ConversationDetail({
 
       <section className="detail-section">
         <div className="detail-section-heading">
-          <p className="detail-kicker">04 · Proposal Workspace</p>
+          <p className="detail-kicker">05 · Proposal Workspace</p>
           <h2 className="detail-title">整理建议</h2>
           <p className="detail-description">
             按创建时间查看、追溯和管理当前 Conversation 下的所有 Proposal。
@@ -1178,7 +1356,7 @@ export function ConversationDetail({
 
       <section className="detail-section">
         <div className="detail-section-heading">
-          <p className="detail-kicker">05 · Knowledge</p>
+          <p className="detail-kicker">06 · Knowledge</p>
           <h2 className="detail-title">KnowledgeCard</h2>
         </div>
         {knowledgeCard ? (
