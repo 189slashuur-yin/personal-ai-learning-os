@@ -208,6 +208,21 @@ export function DashboardOverview() {
       </section>
 
       <section className="mt-8 rounded-xl border border-zinc-200 bg-white p-5 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <p className="eyebrow">Daily Focus</p>
+            <h2 className="mt-2 text-lg font-semibold text-zinc-950">Today</h2>
+            <p className="mt-1 text-sm text-zinc-500">
+              {data.todayTaskCount} 个今天或已逾期的未完成 Task。
+            </p>
+          </div>
+          <Link className="rounded-lg bg-zinc-950 px-4 py-2.5 text-sm font-medium text-white hover:bg-zinc-800" href="/today">
+            打开 Today →
+          </Link>
+        </div>
+      </section>
+
+      <section className="mt-8 rounded-xl border border-zinc-200 bg-white p-5 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <p className="eyebrow">Workspace Recent</p>

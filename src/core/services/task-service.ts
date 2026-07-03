@@ -210,6 +210,38 @@ export class TaskService {
     });
   }
 
+  listOverdue(referenceDate = new Date()) {
+    const today = localDateKey(referenceDate);
+    return this.listTasks().filter((task) => {
+      if (task.status === "completed" || task.status === "archived") {
+        return false;
+      }
+
+      const due = dueDateKey(task.dueDate);
+      return due !== undefined && due < today;
+    });
+  }
+
+  listDueToday(referenceDate = new Date()) {
+    const today = localDateKey(referenceDate);
+    return this.listTasks().filter((task) => {
+      if (task.status === "completed" || task.status === "archived") {
+        return false;
+      }
+
+      return dueDateKey(task.dueDate) === today;
+    });
+  }
+
+  listCompletedToday(referenceDate = new Date()) {
+    const today = localDateKey(referenceDate);
+    return this.listTasks().filter(
+      (task) =>
+        task.status === "completed" &&
+        dueDateKey(task.completedAt) === today,
+    );
+  }
+
   listUpcoming(referenceDate = new Date()) {
     const today = localDateKey(referenceDate);
     return this.listTasks()

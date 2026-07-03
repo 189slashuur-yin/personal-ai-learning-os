@@ -122,7 +122,7 @@
 
 | ID | 操作 | 预期结果 | 是否可能失败 | 失败模块 |
 | --- | --- | --- | --- | --- |
-| TSK-01 | 打开 `/tasks` 并刷新。 | 页面和导航正常；无数据时五个分区显示空状态，Dashboard Task 数为 0。 | 是：路由或 Storage 初始化失败。 | Task UI / Storage |
+| TSK-01 | 打开 `/tasks` 并刷新。 | 页面和导航正常；无数据时任务列表显示空状态，Dashboard Task 数为 0。 | 是：路由或 Storage 初始化失败。 | Task UI / Storage |
 | TSK-02 | 快速创建无日期的手动 Task。 | Task 出现在 Inbox；title、type、priority、Workspace 与 manual SourceRef 快照正确，刷新后保留。 | 是：字段或持久化缺失。 | Task Service / Storage |
 | TSK-03 | 分别创建今天、过去和未来 dueDate 的 Task。 | 今天和过去日期出现在 Today；未来日期出现在 Upcoming，并按日期排序。 | 是：本地日期或视图规则错误。 | Task Date Views |
 | TSK-04 | 对活动 Task 执行 Complete，再执行 Reopen。 | Complete 后只出现在 Completed 并设置 completedAt；Reopen 清除 completedAt 并按 dueDate 回到对应活动分区。 | 是：状态或时间戳错误。 | Task Lifecycle |
@@ -134,6 +134,21 @@
 | TSK-10 | 读取缺失新字段或使用旧 `notes`、`scheduledDate`、旧 type/status 的 Task 数据。 | 安全归一化为当前字段与默认值，不修改其它 Sprint 数据。 | 是：兼容读取崩溃或误清数据。 | Task Storage Compatibility |
 | TSK-11 | 将 Task key 置为损坏 JSON 后读取，再尝试创建或删除。 | 读取安全降级；写操作失败且不覆盖、清空损坏的原值。 | 是：旧值被静默覆盖。 | Task Storage Safety |
 | TSK-12 | 核对 Dashboard。 | Task 总数与 `/tasks` 一致；Today Tasks 包含今天及逾期未完成 Task。 | 是：统计口径不同步。 | Dashboard / Task Service |
+
+## Today / Task UI Smoke Test
+
+| ID | 操作 | 预期结果 | 是否可能失败 | 失败模块 |
+| --- | --- | --- | --- | --- |
+| D2-01 | 从主导航和 Dashboard 打开 `/today`。 | 两个入口均可用；页面显示 Overdue、Today、Upcoming、Inbox、Completed Today。 | 是：入口或路由缺失。 | Today Routing |
+| D2-02 | 在不同 Workspace 创建逾期、今天、未来和无日期 Task，再切换 Workspace 筛选。 | 五类分区与数量只显示所选 Workspace 数据；All Workspaces 恢复全部。 | 是：日期或 Workspace 过滤错误。 | Today View |
+| D2-03 | 在 Today Quick Capture 留空标题。 | Create 按钮不可用，不写入 Task。 | 是：空标题被创建。 | Quick Capture Validation |
+| D2-04 | 选择 type、priority、dueDate、workspace 后创建 Task。 | 新 Task 使用 inbox 状态和所选字段；成功提示出现，表单恢复 todo、medium、空日期与 Inbox。 | 是：默认值、字段或提示错误。 | Quick Capture |
+| D2-05 | 在 Today 对活动 Task Complete，再在 Completed Today 展开区 Reopen。 | Task 移入当天完成区并可重开；Completed Today 默认折叠且位于页面下方。 | 是：状态、时间或折叠行为错误。 | Today Lifecycle |
+| D2-06 | 查看逾期 Task 和全空 Workspace。 | 逾期项有明确但简洁的红色视觉提示；全空时显示 Today Empty State。 | 是：状态辨识或空状态缺失。 | Today UX |
+| D2-07 | 在 `/tasks` 依次切换 Inbox、Today、Upcoming、Completed、Archived、All。 | 每个视图使用相应 TaskService 查询口径，Today 包含逾期任务。 | 是：视图范围错误。 | Tasks View Filters |
+| D2-08 | 组合 Workspace、Priority、Type 与标题/描述搜索。 | 列表同时满足全部条件；清除条件后恢复当前视图完整结果。 | 是：组合筛选错误。 | Tasks Filters |
+| D2-09 | 核对任一 Task Card。 | 显示 title、description、status、type、priority、dueDate、workspace、sourceRef、createdAt、updatedAt。 | 是：字段遗漏或兼容显示错误。 | Task Details |
+| D2-10 | 分别执行 complete、reopen、archive、restore；删除时先取消再确认。 | 状态操作即时刷新；取消删除不变，确认只删除 Task。 | 是：操作或确认边界错误。 | Task Actions |
 
 ## Messages
 

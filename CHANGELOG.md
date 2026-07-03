@@ -2,6 +2,17 @@
 
 本文件记录当前仓库已经完成的 Sprint 与关键提交。日期使用仓库 commit date。
 
+## 2026-07-03 — Epic D D2: Today / Task UI
+
+状态：Today 与 Task 日常界面已实现；最终 build 因执行环境用量限制待复跑，未创建 Git commit。
+
+- 新增 `/today`、导航与 Dashboard 入口，展示 Overdue、Today、Upcoming、Inbox 和默认折叠的 Completed Today。
+- Today 支持 Workspace 筛选、快速完成 / 重开与 Quick Capture；空标题不可创建，成功后恢复默认输入并提示。
+- `/tasks` 升级为任务管理页，支持 Inbox、Today、Upcoming、Completed、Archived、All，以及 Workspace、Priority、Type 和标题/描述搜索。
+- Task Card 展示完整字段与 SourceRef，并提供 complete、reopen、archive、restore、确认删除操作。
+- TaskService 增加 Overdue、当天到期和当天完成查询；页面不直接操作 LocalStorage。
+- 未实现 Activity、Calendar、Reminder、Recurring Task、Agent、RAG、数据库或 AI Suggest Task。
+
 ## 2026-07-03 — Epic D D1: Task Domain Foundation
 
 状态：Task Domain 基础已实现，未创建 Git commit。

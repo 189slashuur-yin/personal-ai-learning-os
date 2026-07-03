@@ -1,4 +1,66 @@
-# Epic D D1 — Task Domain Foundation Handoff
+# Epic D D2 — Today / Task UI Handoff
+
+## 当前状态
+
+Epic D D2 Part 1–4 已实现；本轮未创建 Git commit。`/today` 已成为日常入口，`/tasks` 已从 D1 调试页升级为完整任务管理页。Part 4 与最终生产 build 因执行环境用量限制未能复跑，因此本轮不能标记为通过最终完成门禁。未实现 Activity、Calendar、Reminder、Recurring Task、Agent、RAG、数据库或 AI Suggest Task。
+
+## Part 完成情况
+
+- Part 1：完成 `/today`、导航与 Dashboard 入口；展示 Overdue、Today、Upcoming、Inbox、Completed Today，支持 Workspace 筛选和完成 / 重开。
+- Part 2：完成 Quick Capture，支持 title、type、priority、dueDate、workspace；默认 inbox / todo / medium，空标题禁用，成功后清空并提示。
+- Part 3：完成 `/tasks` 六类视图、四类组合筛选、完整字段展示，以及 complete / reopen / archive / restore / delete。
+- Part 4：完成 Today Empty State、Overdue 视觉提示、Completed Today 默认折叠，以及 README / ROADMAP / CHANGELOG / HANDOFF / QA 同步。
+
+## 新增文件
+
+- `src/app/today/page.tsx`
+- `src/app/today/today-view.tsx`
+
+## 修改文件
+
+- `src/core/services/task-service.ts`
+- `src/app/tasks/page.tsx`
+- `src/app/tasks/task-manager.tsx`
+- `src/app/layout.tsx`
+- `src/app/dashboard-overview.tsx`
+- `README.md`
+- `ROADMAP.md`
+- `CHANGELOG.md`
+- `HANDOFF.md`
+- `docs/QA_CHECKLIST.md`
+
+## 手动验收步骤
+
+1. 从导航和 Dashboard 打开 `/today`，创建过去、今天、未来和无日期 Task，核对五类分区与 Workspace 筛选。
+2. 使用 Quick Capture 组合 type、priority、dueDate、workspace；确认空标题不可提交，成功后表单恢复默认值并出现提示。
+3. 在 Today 完成 Task，展开页面下方 Completed Today 后重开；核对逾期视觉提示和全空 Empty State。
+4. 打开 `/tasks`，依次切换 Inbox、Today、Upcoming、Completed、Archived、All，并组合 Workspace、Priority、Type 与标题/描述搜索。
+5. 核对 Task Card 全部字段和 SourceRef；执行 complete、reopen、archive、restore，再分别取消和确认 delete。
+6. 刷新 `/today`、`/tasks` 和 Dashboard，确认本地数据、状态与统计保留；回归 Workspace 删除回迁与缺失 SourceRef 展示。
+
+## 已知限制
+
+- Task 仍使用当前浏览器 LocalStorage 单集合线性读取，适合单设备小数据量；没有同步、备份或数据库。
+- D3 来源侧创建 / 关联入口尚未实现；现有 SourceRef 仅展示和判断 missing。
+- `/tasks` 不提供批量操作、编辑表单或 URL 持久化筛选。
+- Quick Capture 不包含 description 或 SourceRef 关联编辑；这些不在本轮要求内。
+- 不包含 Activity、Calendar、Reminder、Recurring Task、Agent、RAG 或 AI Suggest Task。
+
+## Architecture Impact
+
+- Entity / Contract / Storage：无模型、Contract 或 LocalStorage key 变化，继续复用 D1 TaskStorage 与 BrowserTaskStorage。
+- Service：TaskService 新增 Overdue、当天到期、当天完成查询，集中维护本地日期规则。
+- UI：新增 Today 组合页并升级 Tasks 管理页；Page / Component 只通过 TaskService 和 BrowserStorage Adapter 访问数据。
+- Cross-domain：Workspace 回迁、SourceRef missing 与 Conversation / Knowledge 删除边界保持不变。
+- AI boundary：Provider / Analyzer 未接入 Task 写入，不增加自动创建或状态变更。
+
+## 质量检查说明
+
+Part 1–3 checkpoint 均通过 `npm run lint`、`npm run build` 与 `git diff --check`。Part 1 首次 build 仅因沙箱禁止 Turbopack 绑定内部端口失败，在允许的构建环境复跑后通过；没有代码修复。Part 4 的 `npm run lint` 与 `git diff --check` 已通过，但沙箱外 build 被环境用量限制拒绝；最终三项检查因此未能完整执行。恢复构建权限后应依次复跑 `npm run lint`、`npm run build`、`git diff --check`，通过后才可把 D2 标记为完成。
+
+---
+
+# Previous Handoff — Epic D D1 Task Domain Foundation
 
 ## 当前状态
 
