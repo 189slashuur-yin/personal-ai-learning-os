@@ -2,6 +2,19 @@
 
 状态定义：`已完成` 表示能力已在当前工作区实现；`未开始` 表示尚无实现承诺。后续 Sprint 的主题开始前需要重新确认范围。
 
+## Product phases
+
+- Phase1 / MVP：已完成，覆盖本地 Import、Conversation、Analyzer、Review、Knowledge 与 Provider 边界。
+- Phase2：进行中，范围为 Workspace、Conversation Editing 与 Knowledge Editing；Epic B 已完成。
+- Phase3：未开始，候选范围为 Real AI、Search 2.0 与 RAG，必须独立评审。
+- Phase4：未开始，候选范围为 Memory 与 Agent，当前不实现。
+
+## Epic B — Workspace Foundation（已完成）
+
+- Part 0：架构图、产品路线评审、Workspace RFC、LocalStorage 与 Human Review ADR。
+- Part 1–4：单层 Workspace、Inbox 兼容、Workspace UI、Conversation / Import / Dashboard / Search / Knowledge 集成和 QA，均已完成。
+- 明确不做数据库、多级目录、团队权限、云同步、RAG、Agent、真实云 Provider 或 Workspace 树形层级。
+
 | Sprint | 状态 | 交付范围 |
 | --- | --- | --- |
 | Sprint1 | 已完成 | Import → Demo Analyzer → Proposal → Review → KnowledgeCard 最小闭环。 |

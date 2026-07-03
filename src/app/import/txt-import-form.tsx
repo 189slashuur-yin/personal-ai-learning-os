@@ -4,8 +4,11 @@ import { useRouter } from "next/navigation";
 import { type ChangeEvent, useEffect, useState } from "react";
 import type { Conversation } from "@/core/entities/conversation";
 import type { ImportedSource } from "@/core/entities/imported-source";
+import type { Workspace } from "@/core/entities/workspace";
+import { WorkspaceService } from "@/core/services/workspace-service";
 import { BrowserConversationStorage } from "@/infrastructure/storage/browser-conversation-storage";
 import { BrowserSourceStorage } from "@/infrastructure/storage/browser-source-storage";
+import { BrowserWorkspaceStorage } from "@/infrastructure/storage/browser-workspace-storage";
 
 export function TxtImportForm() {
   const router = useRouter();
@@ -13,10 +16,19 @@ export function TxtImportForm() {
   const [error, setError] = useState<string | null>(null);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [conversationId, setConversationId] = useState("auto");
+  const [workspaceId, setWorkspaceId] = useState("inbox");
+  const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
 
   useEffect(() => {
     const loadTimer = window.setTimeout(() => {
-      setConversations(new BrowserConversationStorage().getAll());
+      const conversationStorage = new BrowserConversationStorage();
+      setConversations(conversationStorage.getAll());
+      setWorkspaces(
+        new WorkspaceService(
+          new BrowserWorkspaceStorage(),
+          conversationStorage,
+        ).listWorkspaces().filter((workspace) => !workspace.archivedAt),
+      );
     }, 0);
 
     return () => window.clearTimeout(loadTimer);
@@ -76,12 +88,13 @@ export function TxtImportForm() {
         id: crypto.randomUUID(),
         title: source.name.replace(/\.txt$/i, ""),
         sourceType: "TXT",
+        workspaceId,
         createdAt: timestamp,
         updatedAt: timestamp,
         lastOpenedAt: timestamp,
       };
     } else {
-      conversation = { ...conversation, updatedAt: timestamp };
+      conversation = { ...conversation, workspaceId, updatedAt: timestamp };
     }
 
     conversationStorage.save(conversation);
@@ -138,6 +151,13 @@ export function TxtImportForm() {
                 </option>
               ))}
             </select>
+          </label>
+          <label className="block text-sm font-medium text-zinc-800">
+            Workspace
+            <select className="mt-2 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2.5 outline-none focus:border-zinc-500" onChange={(event) => setWorkspaceId(event.target.value)} value={workspaceId}>
+              {workspaces.map((workspace) => <option key={workspace.id} value={workspace.id}>{workspace.name}</option>)}
+            </select>
+            <span className="mt-2 block text-xs font-normal text-zinc-500">默认 Inbox；保存到已有 Conversation 时会更新其 Workspace。</span>
           </label>
           <button
             className="rounded-lg bg-zinc-950 px-5 py-3 text-sm font-medium text-white"

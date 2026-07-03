@@ -12,7 +12,7 @@ Proposal → Review
 KnowledgeCard + Tags
 ```
 
-当前是完成 Sprint11 的浏览器端 MVP：数据保存在当前浏览器的 LocalStorage 中，不需要数据库。内置 Demo Provider 使用确定性的本地逻辑；用户也可以显式启用本机 Ollama，通过本地 HTTP 生成待审核 Proposal。
+Phase1 / MVP 已完成，项目正在进入 Phase2。当前 Epic B 将增加单层 Workspace，让 Conversation 归属 Inbox、项目、主题或长期学习单元；数据仍保存在当前浏览器的 LocalStorage 中，不需要数据库。内置 Demo Provider 使用确定性的本地逻辑；用户也可以显式启用本机 Ollama，通过本地 HTTP 生成待审核 Proposal。
 
 ## 当前功能
 
@@ -28,6 +28,7 @@ KnowledgeCard + Tags
 - 浏览、搜索、编辑、归档、删除 KnowledgeCard，并检查来源完整性。
 - 创建、编辑和删除 Tag；给 KnowledgeCard 添加 Tag，并按 Tag 筛选。
 - Dashboard 统计与 Conversation、Proposal、Knowledge 的全局搜索。
+- 单层 Workspace、默认 Inbox、Conversation 筛选与归属切换，以及 Dashboard / Search Workspace 上下文。
 - Provider Settings、Provider Registry 和 Analyzer Provider Contract。
 - Analyzer Prompt 默认模板、结构化输出校验、运行状态、错误与可恢复重试。
 - 展示 Provider、生成时间、分析模式、Message 数量与证据摘要等元数据。
@@ -81,6 +82,7 @@ git diff --check
 | `/import` | TXT File Import 与 Clipboard Import |
 | `/conversation` | Conversation 列表与创建 |
 | `/conversation/[id]` | Source 编辑、Message 时间线、Proposal Workspace |
+| `/workspace` | Workspace 创建、编辑、归档、恢复与安全删除 |
 | `/review` | Proposal 审核 |
 | `/knowledge` | Knowledge 列表、搜索、排序、状态与 Tag 筛选 |
 | `/knowledge/[id]` | Knowledge 编辑、来源追溯与 Tag 关联 |
@@ -98,6 +100,8 @@ git diff --check
 - 清除浏览器站点数据会删除本地内容；当前尚无正式备份恢复流程。
 
 更详细的产品边界见 [PROJECT.md](./PROJECT.md)，分层与数据流见 [ARCHITECTURE.md](./ARCHITECTURE.md)，后续计划见 [ROADMAP.md](./ROADMAP.md)。
+
+架构图与决策记录见 [Architecture Diagram](./docs/architecture/architecture-diagram.md)、[Product Roadmap Review](./docs/architecture/product-roadmap-review.md)、[RFC-001](./docs/rfc/RFC-001-architecture.md)、[RFC-002](./docs/rfc/RFC-002-workspace.md)、[ADR-001](./docs/adr/ADR-001-localstorage-first.md) 与 [ADR-002](./docs/adr/ADR-002-human-review-required.md)。
 
 手工验收步骤见 [Manual QA Checklist](./docs/QA_CHECKLIST.md)。
 

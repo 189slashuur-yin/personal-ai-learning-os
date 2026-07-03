@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import type { Conversation } from "@/core/entities/conversation";
+import { DEFAULT_WORKSPACE_ID, type Workspace } from "@/core/entities/workspace";
 import {
   deleteConversationWorkspace,
   duplicateConversationWorkspace,
@@ -15,11 +16,15 @@ import { BrowserKnowledgeCardStorage } from "@/infrastructure/storage/browser-kn
 import { BrowserMessageStorage } from "@/infrastructure/storage/browser-message-storage";
 import { BrowserProposalStorage } from "@/infrastructure/storage/browser-proposal-storage";
 import { BrowserSourceStorage } from "@/infrastructure/storage/browser-source-storage";
+import { BrowserWorkspaceStorage } from "@/infrastructure/storage/browser-workspace-storage";
+import { WorkspaceService } from "@/core/services/workspace-service";
 import { ConversationCard } from "./conversation-card";
 import { CreateConversationDialog } from "./create-conversation-dialog";
 
 type ConversationItem = {
   conversation: Conversation;
+  workspaceName: string;
+  workspaceColor?: string;
   knowledgeCount: number;
   messageCount: number;
   proposalCount: number;
@@ -37,11 +42,18 @@ function createWorkspaceStorages(): ConversationWorkspaceStorages {
   };
 }
 
-function loadConversationItems(): ConversationItem[] {
+function loadConversationData(): { items: ConversationItem[]; workspaces: Workspace[] } {
   const storages = createWorkspaceStorages();
   const conversations = storages.conversations.getAll();
+  const workspaces = new WorkspaceService(
+    new BrowserWorkspaceStorage(),
+    storages.conversations,
+  ).listWorkspaces();
+  const workspaceById = new Map(
+    workspaces.map((workspace) => [workspace.id, workspace]),
+  );
 
-  return conversations.map((conversation) => {
+  return { items: conversations.map((conversation) => {
     const source = storages.sources.getByConversationId(conversation.id);
     const proposals = storages.proposals.getByConversationId(conversation.id);
     const sourceProposal = source
@@ -55,22 +67,41 @@ function loadConversationItems(): ConversationItem[] {
 
     return {
       conversation,
+      workspaceName:
+        workspaceById.get(conversation.workspaceId ?? DEFAULT_WORKSPACE_ID)?.name ??
+        "Inbox",
+      workspaceColor: workspaceById.get(
+        conversation.workspaceId ?? DEFAULT_WORKSPACE_ID,
+      )?.color,
       messageCount: storages.messages.getByConversationId(conversation.id).length,
       proposalCount: conversationProposals.length,
       knowledgeCount: storages.knowledgeCards
         .getAll()
         .filter((card) => proposalIds.has(card.proposalId)).length,
     };
-  });
+  }), workspaces };
 }
 
 export function ConversationList() {
   const [items, setItems] = useState<ConversationItem[] | null>(null);
+  const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
+  const [workspaceFilter, setWorkspaceFilter] = useState("all");
   const [isCreating, setIsCreating] = useState(false);
 
   useEffect(() => {
     const loadTimer = window.setTimeout(() => {
-      setItems(loadConversationItems());
+      const data = loadConversationData();
+      setItems(data.items);
+      setWorkspaces(data.workspaces);
+      const requestedWorkspace = new URLSearchParams(window.location.search).get(
+        "workspace",
+      );
+      if (
+        requestedWorkspace &&
+        data.workspaces.some((workspace) => workspace.id === requestedWorkspace)
+      ) {
+        setWorkspaceFilter(requestedWorkspace);
+      }
     }, 0);
 
     return () => window.clearTimeout(loadTimer);
@@ -86,12 +117,12 @@ export function ConversationList() {
     }
 
     deleteConversationWorkspace(conversation.id, createWorkspaceStorages());
-    setItems(loadConversationItems());
+    setItems(loadConversationData().items);
   }
 
   function handleDuplicate(conversation: Conversation) {
     duplicateConversationWorkspace(conversation.id, createWorkspaceStorages());
-    setItems(loadConversationItems());
+    setItems(loadConversationData().items);
   }
 
   if (!items) {
@@ -102,10 +133,26 @@ export function ConversationList() {
     );
   }
 
+  const visibleItems = items.filter(
+    (item) =>
+      workspaceFilter === "all" || item.conversation.workspaceId === workspaceFilter,
+  );
+
   return (
     <>
       <div className="mt-8 flex flex-wrap items-center justify-between gap-3">
-        <p className="text-sm text-zinc-500">{items.length} 个 Conversation</p>
+        <div className="flex flex-wrap items-center gap-3">
+          <p className="text-sm text-zinc-500">{visibleItems.length} 个 Conversation</p>
+          <label className="text-sm text-zinc-600">
+            <span className="sr-only">按 Workspace 筛选</span>
+            <select className="rounded-lg border border-zinc-200 bg-white px-3 py-2" onChange={(event) => setWorkspaceFilter(event.target.value)} value={workspaceFilter}>
+              <option value="all">全部 Workspace</option>
+              {workspaces.map((workspace) => (
+                <option key={workspace.id} value={workspace.id}>{workspace.name}{workspace.archivedAt ? " (Archived)" : ""}</option>
+              ))}
+            </select>
+          </label>
+        </div>
         <div className="flex gap-3">
           <Link
             className="rounded-lg border border-zinc-200 bg-white px-4 py-2.5 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
@@ -123,7 +170,16 @@ export function ConversationList() {
         </div>
       </div>
 
-      {items.length === 0 ? (
+      <div className="mt-4 flex flex-wrap gap-2" aria-label="Workspace 快捷筛选">
+        <button className={`rounded-full border px-3 py-1.5 text-xs font-medium ${workspaceFilter === "all" ? "border-zinc-950 bg-zinc-950 text-white" : "border-zinc-200 bg-white text-zinc-600"}`} onClick={() => setWorkspaceFilter("all")} type="button">All</button>
+        {workspaces.filter((workspace) => !workspace.archivedAt).map((workspace) => (
+          <button className={`rounded-full border px-3 py-1.5 text-xs font-medium ${workspaceFilter === workspace.id ? "border-zinc-950 bg-zinc-950 text-white" : "border-zinc-200 bg-white text-zinc-600"}`} key={workspace.id} onClick={() => setWorkspaceFilter(workspace.id)} type="button">
+            {workspace.name}
+          </button>
+        ))}
+      </div>
+
+      {visibleItems.length === 0 ? (
         <section className="mt-8 flex min-h-72 flex-col items-center justify-center rounded-2xl border border-dashed border-zinc-300 bg-white px-6 text-center">
           <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-zinc-100 text-xl text-zinc-500">
             +
@@ -142,7 +198,7 @@ export function ConversationList() {
         </section>
       ) : (
         <div className="mt-6 grid gap-4 sm:grid-cols-2">
-          {items.map((item) => (
+            {visibleItems.map((item) => (
             <ConversationCard
               key={item.conversation.id}
               onDelete={handleDelete}

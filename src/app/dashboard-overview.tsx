@@ -6,8 +6,10 @@ import type { Conversation } from "@/core/entities/conversation";
 import type { ImportedSource } from "@/core/entities/imported-source";
 import type { KnowledgeCard } from "@/core/entities/knowledge-card";
 import type { Tag } from "@/core/entities/tag";
+import type { Workspace } from "@/core/entities/workspace";
 import { ProviderService } from "@/core/services/provider-service";
 import { ProviderConfigurationService } from "@/core/services/provider-configuration-service";
+import { WorkspaceService } from "@/core/services/workspace-service";
 import { BrowserAIProviderStorage } from "@/infrastructure/storage/browser-ai-provider-storage";
 import { BrowserConversationStorage } from "@/infrastructure/storage/browser-conversation-storage";
 import { BrowserKnowledgeCardStorage } from "@/infrastructure/storage/browser-knowledge-card-storage";
@@ -17,6 +19,7 @@ import { BrowserPromptTemplateStorage } from "@/infrastructure/storage/browser-p
 import { BrowserProviderConfigurationStorage } from "@/infrastructure/storage/browser-provider-configuration-storage";
 import { BrowserSourceStorage } from "@/infrastructure/storage/browser-source-storage";
 import { BrowserTagStorage } from "@/infrastructure/storage/browser-tag-storage";
+import { BrowserWorkspaceStorage } from "@/infrastructure/storage/browser-workspace-storage";
 
 type DashboardData = {
   conversationCount: number;
@@ -25,6 +28,8 @@ type DashboardData = {
   messageCountsByConversation: Record<string, number>;
   proposalCount: number;
   tagCount: number;
+  workspaceCount: number;
+  recentWorkspaces: Array<{ workspace: Workspace; conversationCount: number }>;
   recentConversations: Conversation[];
   recentImports: Array<{
     conversation: Conversation;
@@ -58,6 +63,10 @@ export function DashboardOverview() {
   useEffect(() => {
     const loadTimer = window.setTimeout(() => {
       const conversations = new BrowserConversationStorage().getAll();
+      const workspaces = new WorkspaceService(
+        new BrowserWorkspaceStorage(),
+        new BrowserConversationStorage(),
+      ).listWorkspaces();
       const activeKnowledge = new BrowserKnowledgeCardStorage()
         .getAll()
         .filter((card) => card.status === "Active")
@@ -119,6 +128,17 @@ export function DashboardOverview() {
         messageCountsByConversation,
         proposalCount: new BrowserProposalStorage().getAll().length,
         tagCount: tags.length,
+        workspaceCount: workspaces.length,
+        recentWorkspaces: workspaces
+          .filter((workspace) => !workspace.archivedAt)
+          .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+          .slice(0, 4)
+          .map((workspace) => ({
+            workspace,
+            conversationCount: conversations.filter(
+              (conversation) => conversation.workspaceId === workspace.id,
+            ).length,
+          })),
         recentConversations: recentConversations.slice(0, 4),
         recentImports,
         recentKnowledge: activeKnowledge.slice(0, 4),
@@ -150,6 +170,7 @@ export function DashboardOverview() {
     { label: "当前 Provider", value: data.providerName },
     { label: "Last Test", value: data.providerLastTest },
     { label: "Conversation", value: data.conversationCount },
+    { label: "Workspace", value: data.workspaceCount },
     { label: "Messages", value: data.messageCount },
     { label: "Knowledge", value: data.knowledgeCount },
     { label: "Proposal", value: data.proposalCount },
@@ -172,6 +193,27 @@ export function DashboardOverview() {
             </p>
           </div>
         ))}
+      </section>
+
+      <section className="mt-8 rounded-xl border border-zinc-200 bg-white p-5 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="eyebrow">Workspace Recent</p>
+            <h2 className="mt-2 text-lg font-semibold text-zinc-950">最近 Workspace</h2>
+          </div>
+          <Link className="text-sm font-medium text-zinc-600 hover:text-zinc-950" href="/workspace">管理 Workspace →</Link>
+        </div>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {data.recentWorkspaces.map(({ workspace, conversationCount }) => (
+            <Link className="rounded-lg border border-zinc-200 p-4 hover:bg-zinc-50" href={`/conversation?workspace=${encodeURIComponent(workspace.id)}`} key={workspace.id}>
+              <div className="flex items-center gap-2">
+                <span className="h-3 w-3 rounded-full bg-zinc-300" style={workspace.color ? { backgroundColor: workspace.color } : undefined} />
+                <p className="truncate font-medium text-zinc-900">{workspace.name}</p>
+              </div>
+              <p className="mt-2 text-xs text-zinc-500">{conversationCount} Conversation · 更新 {formatDashboardTime(workspace.updatedAt)}</p>
+            </Link>
+          ))}
+        </div>
       </section>
 
       <section className="mt-8 rounded-xl border border-zinc-200 bg-white p-5 shadow-sm">

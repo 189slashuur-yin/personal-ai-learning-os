@@ -3,9 +3,12 @@
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ImportProfileService } from "@/core/services/import-profile-service";
+import type { Workspace } from "@/core/entities/workspace";
+import { WorkspaceService } from "@/core/services/workspace-service";
 import { BrowserConversationStorage } from "@/infrastructure/storage/browser-conversation-storage";
 import { BrowserMessageStorage } from "@/infrastructure/storage/browser-message-storage";
 import { BrowserSourceStorage } from "@/infrastructure/storage/browser-source-storage";
+import { BrowserWorkspaceStorage } from "@/infrastructure/storage/browser-workspace-storage";
 
 const importProfileService = new ImportProfileService();
 const importProfiles = importProfileService.listProfiles();
@@ -17,6 +20,8 @@ function countLines(text: string) {
 export function ClipboardImportForm() {
   const [title, setTitle] = useState("");
   const [profileId, setProfileId] = useState("chatgpt");
+  const [workspaceId, setWorkspaceId] = useState("inbox");
+  const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [rawText, setRawText] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [importResult, setImportResult] = useState<{
@@ -44,6 +49,18 @@ export function ClipboardImportForm() {
       setTitle(preview?.suggestedTitle ?? "");
     }
   }, [preview?.suggestedTitle]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setWorkspaces(
+        new WorkspaceService(
+          new BrowserWorkspaceStorage(),
+          new BrowserConversationStorage(),
+        ).listWorkspaces().filter((workspace) => !workspace.archivedAt),
+      );
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   function importClipboardText() {
     const normalizedTitle = title.trim();
@@ -77,6 +94,7 @@ export function ClipboardImportForm() {
         id: conversationId,
         title: normalizedTitle,
         sourceType: profile.sourceType,
+        workspaceId,
         importProfileId: profile.id,
         createdAt: timestamp,
         updatedAt: timestamp,
@@ -110,7 +128,7 @@ export function ClipboardImportForm() {
 
   return (
     <section className="mt-6 space-y-5 rounded-xl border border-zinc-200 bg-white p-6">
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="grid gap-4 sm:grid-cols-3">
         <label className="text-sm font-medium text-zinc-800">
           Conversation 标题
           <input
@@ -144,6 +162,13 @@ export function ClipboardImportForm() {
           <span className="mt-2 block text-xs font-normal leading-5 text-zinc-500">
             {selectedProfile?.description}
           </span>
+        </label>
+        <label className="text-sm font-medium text-zinc-800">
+          Workspace
+          <select className="mt-2 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2.5 outline-none focus:border-zinc-500" onChange={(event) => setWorkspaceId(event.target.value)} value={workspaceId}>
+            {workspaces.map((workspace) => <option key={workspace.id} value={workspace.id}>{workspace.name}</option>)}
+          </select>
+          <span className="mt-2 block text-xs font-normal text-zinc-500">默认保存到 Inbox。</span>
         </label>
       </div>
 

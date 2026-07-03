@@ -1,5 +1,6 @@
 import type { ConversationStorage } from "@/core/contracts/conversation-storage";
 import type { Conversation } from "@/core/entities/conversation";
+import { DEFAULT_WORKSPACE_ID } from "@/core/entities/workspace";
 
 const CONVERSATIONS_KEY = "ai-learning-os.conversations";
 
@@ -22,7 +23,7 @@ export class BrowserConversationStorage implements ConversationStorage {
     );
   }
 
-  getAll() {
+  getAll(): Conversation[] {
     const storedConversations = window.localStorage.getItem(CONVERSATIONS_KEY);
 
     if (!storedConversations) {
@@ -32,6 +33,7 @@ export class BrowserConversationStorage implements ConversationStorage {
     return (JSON.parse(storedConversations) as Conversation[])
       .map((conversation) => ({
         ...conversation,
+        workspaceId: conversation.workspaceId ?? DEFAULT_WORKSPACE_ID,
         lastOpenedAt: conversation.lastOpenedAt ?? conversation.updatedAt,
       }))
       .sort(
@@ -41,7 +43,7 @@ export class BrowserConversationStorage implements ConversationStorage {
       );
   }
 
-  getById(id: string) {
+  getById(id: string): Conversation | null {
     return this.getAll().find((conversation) => conversation.id === id) ?? null;
   }
 

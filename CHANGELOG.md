@@ -2,6 +2,17 @@
 
 本文件记录当前仓库已经完成的 Sprint 与关键提交。日期使用仓库 commit date。
 
+## 2026-07-03 — Epic B: Workspace Foundation
+
+状态：已完成，未创建 Git commit。
+
+- 新增单层 Workspace Entity、Storage Contract、BrowserStorage、WorkspaceService 与 `/workspace` 页面。
+- 默认 Inbox 自动创建；旧 Conversation 安全归入 Inbox，删除 Workspace 时 Conversation 回迁 Inbox 而不被删除。
+- Workspace 支持创建、编辑、颜色、Archive、Restore、双重确认删除和 Active / Archived / All 筛选。
+- Conversation 列表、详情、Clipboard/TXT Import、Dashboard、Search 与 Knowledge 来源展示接入 Workspace。
+- 新增 Architecture Diagram、Roadmap Review、两份 RFC、两份 ADR 和 Workspace Smoke Test。
+- 未实现数据库、多级目录、权限、团队协作、云同步、RAG、Agent、真实云 Provider 或 Workspace 树形层级。
+
 ## 2026-07-03 — Epic A / Feature Set 2: Conversation Versioning
 
 状态：已完成，未创建 Git commit。

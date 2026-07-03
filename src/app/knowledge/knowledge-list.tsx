@@ -4,11 +4,14 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import type { KnowledgeCard } from "@/core/entities/knowledge-card";
 import type { Tag } from "@/core/entities/tag";
+import { DEFAULT_WORKSPACE_ID } from "@/core/entities/workspace";
+import { WorkspaceService } from "@/core/services/workspace-service";
 import { BrowserConversationStorage } from "@/infrastructure/storage/browser-conversation-storage";
 import { BrowserKnowledgeCardStorage } from "@/infrastructure/storage/browser-knowledge-card-storage";
 import { BrowserMessageStorage } from "@/infrastructure/storage/browser-message-storage";
 import { BrowserProposalStorage } from "@/infrastructure/storage/browser-proposal-storage";
 import { BrowserTagStorage } from "@/infrastructure/storage/browser-tag-storage";
+import { BrowserWorkspaceStorage } from "@/infrastructure/storage/browser-workspace-storage";
 
 const PAGE_SIZE = 6;
 
@@ -20,6 +23,7 @@ const filters: Filter[] = ["All", "Active", "Archived"];
 
 type KnowledgeListItem = KnowledgeCard & {
   sourceConversationTitle?: string;
+  sourceWorkspaceName: string;
   missingSourceMessageCount: number;
 };
 
@@ -42,6 +46,12 @@ export function KnowledgeList() {
     const loadTimer = window.setTimeout(() => {
       const proposalStorage = new BrowserProposalStorage();
       const conversationStorage = new BrowserConversationStorage();
+      const workspaceById = new Map(
+        new WorkspaceService(
+          new BrowserWorkspaceStorage(),
+          conversationStorage,
+        ).listWorkspaces().map((workspace) => [workspace.id, workspace]),
+      );
       setTags(new BrowserTagStorage().getAll());
       const availableMessageIds = new Set(
         new BrowserMessageStorage().getAll().map((message) => message.id),
@@ -61,6 +71,11 @@ export function KnowledgeList() {
             sourceMessageCount:
               card.sourceMessageCount ?? proposal?.sourceMessageIds?.length,
             sourceConversationTitle: conversation?.title,
+            sourceWorkspaceName: conversation
+              ? workspaceById.get(
+                  conversation.workspaceId ?? DEFAULT_WORKSPACE_ID,
+                )?.name ?? "unknown"
+              : "unknown",
             missingSourceMessageCount: (
               card.sourceMessageIds ?? proposal?.sourceMessageIds ?? []
             ).filter((messageId) => !availableMessageIds.has(messageId)).length,
@@ -233,6 +248,9 @@ export function KnowledgeList() {
                       Conversation：{card.sourceConversationTitle}
                     </p>
                   ) : null}
+                  <p className="mt-1 truncate">
+                    Workspace：{card.sourceWorkspaceName}
+                  </p>
                   {card.sourceMessageCount ? (
                     <p className="mt-1">来源 Messages：{card.sourceMessageCount} 条</p>
                   ) : null}

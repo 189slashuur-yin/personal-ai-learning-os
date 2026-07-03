@@ -3,6 +3,8 @@ import type { Conversation } from "@/core/entities/conversation";
 
 type ConversationCardProps = {
   conversation: Conversation;
+  workspaceName: string;
+  workspaceColor?: string;
   knowledgeCount: number;
   messageCount: number;
   proposalCount: number;
@@ -12,6 +14,8 @@ type ConversationCardProps = {
 
 export function ConversationCard({
   conversation,
+  workspaceName,
+  workspaceColor,
   knowledgeCount,
   messageCount,
   proposalCount,
@@ -36,6 +40,10 @@ export function ConversationCard({
           </Link>
           <p className="mt-1 text-sm text-zinc-500">
             {conversation.sourceType} · 更新于 {updatedAt}
+          </p>
+          <p className="mt-2 flex items-center gap-2 text-xs font-medium text-zinc-600">
+            <span className="h-2.5 w-2.5 rounded-full bg-zinc-300" style={workspaceColor ? { backgroundColor: workspaceColor } : undefined} />
+            {workspaceName}
           </p>
         </div>
         <span className="rounded-md border border-zinc-200 bg-zinc-50 px-2 py-1 text-xs font-medium text-zinc-600">

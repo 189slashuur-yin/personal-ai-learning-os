@@ -16,6 +16,7 @@ import type { KnowledgeCard } from "@/core/entities/knowledge-card";
 import type { Message, MessageRole } from "@/core/entities/message";
 import type { Proposal } from "@/core/entities/proposal";
 import type { ProviderCapability } from "@/core/entities/provider-capability";
+import { DEFAULT_WORKSPACE_ID, type Workspace } from "@/core/entities/workspace";
 import { AnalyzerExecutionService } from "@/core/services/analyzer-execution";
 import { ImportProfileService } from "@/core/services/import-profile-service";
 import { ConversationVersionService } from "@/core/services/conversation-version-service";
@@ -25,6 +26,7 @@ import { PromptTemplateService } from "@/core/services/prompt-template-service";
 import { ProviderConfigurationService } from "@/core/services/provider-configuration-service";
 import { ProviderService } from "@/core/services/provider-service";
 import { countWords } from "@/core/services/text-statistics";
+import { WorkspaceService } from "@/core/services/workspace-service";
 import { BrowserConversationStorage } from "@/infrastructure/storage/browser-conversation-storage";
 import { BrowserConversationVersionStorage } from "@/infrastructure/storage/browser-conversation-version-storage";
 import { BrowserAIProviderStorage } from "@/infrastructure/storage/browser-ai-provider-storage";
@@ -35,6 +37,7 @@ import { BrowserProposalStorage } from "@/infrastructure/storage/browser-proposa
 import { BrowserPromptTemplateStorage } from "@/infrastructure/storage/browser-prompt-template-storage";
 import { BrowserProviderConfigurationStorage } from "@/infrastructure/storage/browser-provider-configuration-storage";
 import { BrowserSourceStorage } from "@/infrastructure/storage/browser-source-storage";
+import { BrowserWorkspaceStorage } from "@/infrastructure/storage/browser-workspace-storage";
 import { ProposalWorkspace } from "./proposal-workspace";
 import { CapabilityBadges } from "@/app/capability-badges";
 
@@ -131,6 +134,7 @@ export function ConversationDetail({
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
   const [isRenaming, setIsRenaming] = useState(false);
   const [titleDraft, setTitleDraft] = useState("");
+  const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [selectedMessageIds, setSelectedMessageIds] = useState<Set<string>>(
     new Set(),
   );
@@ -223,6 +227,12 @@ export function ConversationDetail({
         lastOpenedAt: new Date().toISOString(),
       };
       new BrowserConversationStorage().save(openedConversation);
+      setWorkspaces(
+        new WorkspaceService(
+          new BrowserWorkspaceStorage(),
+          new BrowserConversationStorage(),
+        ).listWorkspaces(),
+      );
 
       const source = new BrowserSourceStorage().getByConversationId(conversationId);
       const proposalStorage = new BrowserProposalStorage();
@@ -732,6 +742,21 @@ export function ConversationDetail({
     setIsRenaming(false);
   }
 
+  function changeWorkspace(workspaceId: string) {
+    if (state.status !== "ready") {
+      return;
+    }
+
+    const timestamp = new Date().toISOString();
+    const nextConversation = {
+      ...state.conversation,
+      workspaceId,
+      updatedAt: timestamp,
+    };
+    new BrowserConversationStorage().save(nextConversation);
+    setState({ ...state, conversation: nextConversation });
+  }
+
   function handleTitleKeyDown(event: KeyboardEvent<HTMLInputElement>) {
     if (event.key === "Enter") {
       event.currentTarget.blur();
@@ -817,7 +842,29 @@ export function ConversationDetail({
           <p className="detail-kicker">01 · Context</p>
           <h2 className="detail-title">Conversation 信息</h2>
         </div>
-        <dl className="grid gap-4 rounded-xl border border-zinc-200 bg-white p-5 text-sm sm:grid-cols-3 lg:grid-cols-8">
+        <dl className="grid gap-4 rounded-xl border border-zinc-200 bg-white p-5 text-sm sm:grid-cols-3 lg:grid-cols-9">
+          <div>
+            <dt className="text-zinc-500">Workspace</dt>
+            <dd className="mt-1">
+              <select
+                aria-label="切换 Workspace"
+                className="max-w-full rounded-md border border-zinc-200 bg-white px-2 py-1.5 font-medium text-zinc-900"
+                onChange={(event) => changeWorkspace(event.target.value)}
+                value={conversation.workspaceId ?? DEFAULT_WORKSPACE_ID}
+              >
+                {workspaces
+                  .filter(
+                    (workspace) =>
+                      !workspace.archivedAt || workspace.id === conversation.workspaceId,
+                  )
+                  .map((workspace) => (
+                    <option key={workspace.id} value={workspace.id}>
+                      {workspace.name}{workspace.archivedAt ? " (Archived)" : ""}
+                    </option>
+                  ))}
+              </select>
+            </dd>
+          </div>
           <div>
             <dt className="text-zinc-500">来源</dt>
             <dd className="mt-1 font-medium text-zinc-900">

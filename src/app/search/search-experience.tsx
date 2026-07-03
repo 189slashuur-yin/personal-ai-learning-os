@@ -11,6 +11,8 @@ import { BrowserConversationStorage } from "@/infrastructure/storage/browser-con
 import { BrowserKnowledgeCardStorage } from "@/infrastructure/storage/browser-knowledge-card-storage";
 import { BrowserProposalStorage } from "@/infrastructure/storage/browser-proposal-storage";
 import { BrowserSourceStorage } from "@/infrastructure/storage/browser-source-storage";
+import { BrowserWorkspaceStorage } from "@/infrastructure/storage/browser-workspace-storage";
+import { WorkspaceService } from "@/core/services/workspace-service";
 
 const groups: { type: SearchResultType; label: string }[] = [
   { type: "conversation", label: "Conversation" },
@@ -70,6 +72,9 @@ function ResultCard({ result, query }: { result: SearchResult; query: string }) 
           <p className="mt-2 truncate text-xs text-zinc-500">
             来源：<Highlight query={query} text={result.source || "未标注"} />
           </p>
+          <p className="mt-1 truncate text-xs font-medium text-zinc-600">
+            Workspace：{result.workspace}
+          </p>
         </div>
         <span className="mt-1 text-zinc-400 transition group-hover:translate-x-0.5">→</span>
       </div>
@@ -94,6 +99,10 @@ export function SearchExperience({ initialQuery = "" }: { initialQuery?: string 
                 sources: new BrowserSourceStorage().getAll(),
                 proposals: new BrowserProposalStorage().getAll(),
                 knowledgeCards: new BrowserKnowledgeCardStorage().getAll(),
+                workspaces: new WorkspaceService(
+                  new BrowserWorkspaceStorage(),
+                  new BrowserConversationStorage(),
+                ).listWorkspaces(),
               },
               nextQuery,
             )

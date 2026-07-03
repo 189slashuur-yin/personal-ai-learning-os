@@ -1,4 +1,121 @@
-# Epic A / Feature Set 2 — Conversation Versioning Handoff
+# Epic B — Workspace Foundation Handoff
+
+## 当前状态
+
+Epic B Part 0–4 已实现。项目新增单层 Workspace 与默认 Inbox，并完成 Conversation、Import、Dashboard、Search、Knowledge 和 QA 集成。未创建 Git commit。
+
+## Part 0 — Architecture & Documentation
+
+- 新增 Workspace 顶层架构图和 Phase1–Phase4 产品路线评审。
+- RFC-001 固化 `Conversation → Source / Message → AnalyzerRun → Proposal → Review → KnowledgeCard` 核心链路。
+- RFC-002 明确 Workspace 的价值、Inbox 兼容策略和单层边界。
+- ADR-001 记录当前继续 LocalStorage-first；ADR-002 记录 Human Review 必须保留。
+- 同步 README、ARCHITECTURE、ROADMAP 与本 Handoff；Part 0 未修改业务代码。
+
+## Part 0 新增文件
+
+- `docs/architecture/architecture-diagram.md`
+- `docs/architecture/product-roadmap-review.md`
+- `docs/rfc/RFC-001-architecture.md`
+- `docs/rfc/RFC-002-workspace.md`
+- `docs/adr/ADR-001-localstorage-first.md`
+- `docs/adr/ADR-002-human-review-required.md`
+
+## Part 1 — Workspace Foundation
+
+- 新增 `Workspace` Entity、`WorkspaceStorage` Contract、`BrowserWorkspaceStorage` 与 `WorkspaceService`。
+- WorkspaceService 支持 list、create、update、archive、restore、delete、getDefault 与 ensureDefault。
+- 默认 Workspace 使用稳定 ID `inbox` 和名称 `Inbox`；Inbox 不可归档或删除。
+- `Conversation.workspaceId` 为可选字段，BrowserConversationStorage 将旧数据安全视为 Inbox。
+- 删除普通 Workspace 时只将关联 Conversation 回迁 Inbox，不删除 Conversation 或其关联实体。
+
+## Part 1 新增文件
+
+- `src/core/entities/workspace.ts`
+- `src/core/contracts/workspace-storage.ts`
+- `src/infrastructure/storage/browser-workspace-storage.ts`
+- `src/core/services/workspace-service.ts`
+
+## Part 2 — Workspace UI
+
+- 新增 `/workspace` 页面并在全局导航增加 Workspace。
+- 页面展示 Inbox 与全部 Workspace 的名称、描述、颜色、Conversation 数、Knowledge 数和更新时间。
+- 支持创建、重命名、编辑描述与颜色、Archive、Restore 和 Delete。
+- Workspace 删除前执行两次确认，并明确 Conversation 不会删除而会回到 Inbox。
+- Inbox 可编辑元数据，但不可归档或删除。
+
+## Part 3 — Conversation Workspace Integration
+
+- Conversation 列表支持按 Workspace 筛选，Card 显示 Workspace 名称与颜色。
+- Conversation Detail 展示并支持切换当前 Workspace；Archived Workspace 仅在当前已归属时保留可见。
+- Clipboard Import 与 TXT Import 支持选择 Workspace，默认 Inbox。
+- Dashboard 展示 Workspace 总数、最近 Workspace 和各 Workspace 的 Conversation 数。
+- 全局搜索的 Conversation、Proposal、Knowledge 结果展示可追溯的 Workspace 信息。
+
+## Part 4 — Workspace Operations & QA
+
+- Workspace 页面增加 Empty State，以及 Active / Archived / All 筛选。
+- Conversation 页面增加 Workspace 快捷筛选按钮。
+- Knowledge 列表通过 KnowledgeCard / Proposal / Conversation 追溯 Workspace；无法追溯时显示 `unknown`。
+- QA Checklist 增加 Workspace Smoke Test；同步 CHANGELOG、ROADMAP、HANDOFF 与 ARCHITECTURE。
+
+## Epic B 新增文件
+
+- `docs/architecture/architecture-diagram.md`
+- `docs/architecture/product-roadmap-review.md`
+- `docs/rfc/RFC-001-architecture.md`
+- `docs/rfc/RFC-002-workspace.md`
+- `docs/adr/ADR-001-localstorage-first.md`
+- `docs/adr/ADR-002-human-review-required.md`
+- `src/core/entities/workspace.ts`
+- `src/core/contracts/workspace-storage.ts`
+- `src/core/services/workspace-service.ts`
+- `src/infrastructure/storage/browser-workspace-storage.ts`
+- `src/app/workspace/page.tsx`
+- `src/app/workspace/workspace-manager.tsx`
+
+## Epic B 修改文件
+
+- Entity / Storage：`src/core/entities/conversation.ts`、`src/infrastructure/storage/browser-conversation-storage.ts`
+- Service：`src/core/services/global-search.ts`
+- UI：`src/app/layout.tsx`、`src/app/conversation/conversation-list.tsx`、`src/app/conversation/conversation-card.tsx`、`src/app/conversation/[id]/conversation-detail.tsx`、`src/app/import/clipboard-import-form.tsx`、`src/app/import/txt-import-form.tsx`、`src/app/dashboard-overview.tsx`、`src/app/search/search-experience.tsx`、`src/app/knowledge/knowledge-list.tsx`
+- Documentation：`README.md`、`ARCHITECTURE.md`、`ROADMAP.md`、`CHANGELOG.md`、`HANDOFF.md`、`docs/QA_CHECKLIST.md`
+
+## 手动验收步骤
+
+1. 首次打开 `/workspace`，确认 Inbox 自动创建且不可归档或删除。
+2. 创建 Workspace，编辑名称、描述和颜色；刷新后确认持久化。
+3. 测试 Active / Archived / All、Archive、Restore 和无结果 Empty State。
+4. 删除一个含 Conversation 的 Workspace，分别取消两次确认，再完成两次确认；确认 Conversation 回到 Inbox 且关联数据保留。
+5. 在 Clipboard Import 和 TXT Import 中选择 Workspace，确认默认 Inbox 与选择归属正确。
+6. 在 Conversation 列表测试下拉和快捷筛选，核对 Card Workspace；在 Detail 切换归属并刷新。
+7. 核对 Dashboard Workspace 总数、最近 Workspace 和 Conversation 数；核对全局 Search 结果的 Workspace。
+8. 在 Knowledge 列表核对可追溯 Workspace；构造缺失 Conversation 引用时显示 `unknown` 且不报错。
+9. 回归 Conversation → Source / Messages → Proposal → Review → KnowledgeCard，以及复制、级联删除和 Snapshot 流程。
+
+## 已知限制
+
+- Workspace 仅单层，不支持目录树、嵌套、排序或拖拽。
+- Inbox 元数据当前可重命名和改色，但稳定 ID 始终为 `inbox`；它不可归档或删除。
+- Workspace 删除与 Conversation 回迁是 LocalStorage 顺序写入，不具备事务。
+- Knowledge Workspace 来自当前 Conversation 归属，不是生成时 Workspace 快照；无法追溯时显示 `unknown`。
+- 当前没有数据库、账号、团队权限、云同步、RAG、Agent 或真实云 Provider。
+
+## Architecture Impact
+
+- Entity：新增 Workspace；Conversation 增加可选 `workspaceId`。
+- Contract / Infrastructure：新增 WorkspaceStorage 与 BrowserWorkspaceStorage，集中管理 `ai-learning-os.workspaces`。
+- Service：WorkspaceService 集中管理默认 Inbox、CRUD、Archive / Restore 和删除回迁。
+- UI：新增 `/workspace`，并将 Workspace 上下文接入 Conversation、Import、Dashboard、Search 与 Knowledge。
+- Compatibility：旧 Conversation 读取时归一为 Inbox，不静默清空历史数据。
+
+## Commit 建议
+
+建议拆分 commit：先提交 Part 0 架构文档；再提交 Workspace Entity / Contract / Storage / Service；最后提交 UI 集成与 QA 文档。当前按要求未创建 commit。
+
+---
+
+# Previous Handoff — Epic A / Feature Set 2 Conversation Versioning
 
 ## 当前状态
 

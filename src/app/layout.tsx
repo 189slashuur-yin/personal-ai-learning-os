@@ -27,6 +27,9 @@ export default function RootLayout({
               <Link className="whitespace-nowrap rounded-md px-2 py-1.5 hover:bg-zinc-100 hover:text-zinc-950" href="/conversation">
                 Conversation
               </Link>
+              <Link className="whitespace-nowrap rounded-md px-2 py-1.5 hover:bg-zinc-100 hover:text-zinc-950" href="/workspace">
+                Workspace
+              </Link>
               <Link className="whitespace-nowrap rounded-md px-2 py-1.5 hover:bg-zinc-100 hover:text-zinc-950" href="/review">
                 整理建议
               </Link>

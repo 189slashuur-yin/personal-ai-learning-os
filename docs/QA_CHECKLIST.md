@@ -84,6 +84,23 @@
 | CVR-09 | 复制带 Snapshot 的 Conversation。 | 副本不继承原 Conversation 的历史 Snapshot。 | 是：历史归属被伪造。 | Conversation Duplicate |
 | CVR-10 | 删除测试 Conversation 并确认影响提示。 | Conversation 与其 Snapshot 通过 Workspace Service 一并删除，不影响其它 Conversation。 | 是：孤儿 Snapshot 或误删。 | Conversation Delete |
 
+## Workspace Smoke Test
+
+| ID | 操作 | 预期结果 | 是否可能失败 | 失败模块 |
+| --- | --- | --- | --- | --- |
+| WSP-01 | 清除测试站点数据后打开 `/workspace`。 | 自动创建并显示 Inbox；Inbox 不显示 Archive 或 Delete。 | 是：默认空间缺失。 | Workspace Service / Storage |
+| WSP-02 | 使用包含旧 Conversation 且无 `workspaceId` 的数据打开页面。 | 旧 Conversation 计入 Inbox，不清空或报错。 | 是：兼容失败。 | Conversation Storage |
+| WSP-03 | 创建带名称、描述和颜色的 Workspace。 | 新 Workspace 持久化并显示 0 Conversation / 0 Knowledge。 | 是：字段未保存。 | Workspace UI / Storage |
+| WSP-04 | 重命名并修改描述、颜色后刷新。 | 修改保留，更新时间变化。 | 是：更新未持久化。 | Workspace Service |
+| WSP-05 | Archive 普通 Workspace，切换 Active / Archived / All，再 Restore。 | 三种筛选结果正确；恢复后回到 Active。 | 是：状态或筛选错误。 | Workspace UI |
+| WSP-06 | 尝试删除普通 Workspace，分别在第一次和第二次确认取消。 | 两次取消都不删除 Workspace 或 Conversation。 | 是：确认失效。 | Workspace Delete |
+| WSP-07 | 完成两次删除确认。 | Workspace 删除；其中 Conversation 回到 Inbox；Message、Source、Proposal、Knowledge 保留。 | 是：误删或孤儿归属。 | Workspace Service |
+| WSP-08 | 在 Clipboard Import 与 TXT Import 中选择 Workspace。 | 默认 Inbox；选择后新建或目标 Conversation 归属正确。 | 是：导入归属错误。 | Import Integration |
+| WSP-09 | 在 Conversation 列表使用下拉和快捷按钮筛选。 | Card 显示 Workspace；筛选数量和列表一致。 | 是：筛选错误。 | Conversation List |
+| WSP-10 | 在 Conversation Detail 切换 Workspace 并刷新。 | 新归属保留；Source、Proposal、Knowledge 内容不被改写。 | 是：归属未保存或越界修改。 | Conversation Detail |
+| WSP-11 | 检查 Dashboard 与 Search。 | Dashboard 显示 Workspace 总数、最近 Workspace 和 Conversation 数；搜索结果显示 Workspace。 | 是：统计或追溯错误。 | Dashboard / Search |
+| WSP-12 | 打开 Knowledge 列表，分别检查可追溯和不可追溯来源。 | 可追溯时显示 Workspace；无法追溯时显示 `unknown`，页面不报错。 | 是：来源链路异常。 | Knowledge Workspace Trace |
+
 ## Messages
 
 | ID | 操作 | 预期结果 | 是否可能失败 | 失败模块 |
