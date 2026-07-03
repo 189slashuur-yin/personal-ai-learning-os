@@ -1,4 +1,65 @@
-# Epic D D2 — Today / Task UI Handoff
+# Epic D D3 — Source-linked Task Handoff
+
+## 当前状态
+
+Epic D D3 Part 1–4 已实现；本轮未创建 Git commit。Knowledge、Conversation 与选中 Messages 均可由用户显式创建 Task 并保留 SourceRef 快照；`/tasks` 与 `/today` 会显示来源，来源删除后降级为 `Source deleted`。未实现 Activity、AI Suggest Task、Calendar、Reminder、Recurring Task、Agent、RAG 或数据库。
+
+## Part 完成情况
+
+- Part 1：Knowledge Detail 新增 Create Task；默认 inbox / review / medium，保留 Knowledge ID、标题及摘要/内容摘录快照，并从来源 Conversation 链路推断 Workspace。
+- Part 2：Conversation Detail 新增 Create Task；默认 inbox / todo / medium，使用 Conversation Workspace，保留标题及原始文本/最近 Messages 摘录。
+- Part 3：Message Timeline 可从选中 Messages 创建 Task；空选择禁用，第一条 Timeline Message 作为 entityId，摘要按 Timeline 顺序生成，Proposal 选择逻辑不变。
+- Part 4：`/tasks` 与 `/today` 展示 Manual、Knowledge、Conversation、Message 等来源；缺失来源显示 `Source deleted` 且保留快照；README、ROADMAP、CHANGELOG、HANDOFF 与 QA 已同步。
+
+## 新增文件
+
+- `src/app/task-source-details.tsx`
+
+## 修改文件
+
+- `src/core/services/task-service.ts`
+- `src/app/knowledge/[id]/knowledge-detail.tsx`
+- `src/app/conversation/[id]/conversation-detail.tsx`
+- `src/app/tasks/task-manager.tsx`
+- `src/app/today/today-view.tsx`
+- `README.md`
+- `ROADMAP.md`
+- `CHANGELOG.md`
+- `HANDOFF.md`
+- `docs/QA_CHECKLIST.md`
+
+## 手动验收步骤
+
+1. 打开一条 Knowledge Detail，点击 Create Task；确认成功提示可跳转 `/tasks` 或 `/today`，Task 为 inbox / review / medium，Workspace 与来源 Conversation 一致或回退 Inbox。
+2. 打开 Conversation Detail，点击 header 中的 Create Task；确认 Task 为 inbox / todo / medium，SourceRef 标题和原始文本/最近 Messages 快照正确。
+3. 在 Message Timeline 不选择内容时确认按钮禁用；乱序勾选多条后创建，确认 entityId、选择数量和摘要仍按 Timeline 顺序；随后继续生成 Proposal，确认原逻辑不变。
+4. 在 `/tasks` 与 `/today` 检查 Manual、Knowledge、Conversation、Message 标签、当前标题、快照，以及可解析 Knowledge / Conversation 的跳转。
+5. 删除一条测试 Knowledge 或 Conversation（或替换包含首条引用 Message 的 Timeline），确认 Task 保留、显示 `Source deleted`、快照可读且无失效链接。
+6. 刷新页面，回归 Task complete / reopen / archive / restore / delete、Workspace 删除回迁，以及 Conversation → Proposal → Review → Knowledge 旧流程。
+
+## 已知限制
+
+- 全局 Search 仍只索引 Conversation、Proposal、Knowledge、Tag 与 Workspace，不索引 Task。
+- Message 来源使用第一条选中 Message 作为身份；SourceRef 仍是单引用，不保存全部选中 Message IDs。
+- Task 使用当前浏览器 LocalStorage 单集合线性读取，适合单设备小数据量；没有同步、备份或数据库。
+- `/tasks` 不提供批量操作、完整编辑表单或 URL 持久化筛选。
+- 不包含 Activity、AI Suggest Task、Calendar、Reminder、Recurring Task、Agent 或 RAG。
+
+## Architecture Impact
+
+- Entity / Contract / Storage：无模型、Contract、LocalStorage key 或迁移变化；继续复用 D1 SourceRef 快照与 BrowserTaskStorage 兼容逻辑。
+- Service：TaskService 新增来源解析结果，集中判断 missing 并解析当前标题；原 `isSourceMissing` 保持兼容。
+- UI：来源页面通过 TaskService 与 BrowserStorage Adapter 显式创建 Task；共享 TaskSourceDetails 统一 `/tasks` 与 `/today` 的来源、快照和删除降级展示。
+- Cross-domain：创建 Task 不修改 KnowledgeCard、Conversation、Message 或 Proposal；来源删除仍不级联 Task。
+- AI boundary：Provider / Analyzer 未接入 TaskStorage，不存在 AI 自动创建或状态变更。
+
+## 质量检查说明
+
+Part 1–4 checkpoint 均通过 `npm run lint`、`npm run build` 与 `git diff --check`。Part 1 首次 build 因沙箱禁止 Turbopack 绑定内部端口失败，按规则在允许环境仅重跑一次后通过；没有代码修复。完成文档后仍按交付规则重复执行最终三项检查。
+
+---
+
+# Previous Handoff — Epic D D2 Today / Task UI
 
 ## 当前状态
 

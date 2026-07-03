@@ -1,6 +1,7 @@
 "use client";
 
 import { type FormEvent, useEffect, useState } from "react";
+import { TaskSourceDetails } from "@/app/task-source-details";
 import {
   taskPriorities,
   taskTypes,
@@ -12,14 +13,22 @@ import type { Workspace } from "@/core/entities/workspace";
 import { TaskService } from "@/core/services/task-service";
 import { WorkspaceService } from "@/core/services/workspace-service";
 import { BrowserConversationStorage } from "@/infrastructure/storage/browser-conversation-storage";
+import { BrowserKnowledgeCardStorage } from "@/infrastructure/storage/browser-knowledge-card-storage";
+import { BrowserMessageStorage } from "@/infrastructure/storage/browser-message-storage";
+import { BrowserProposalStorage } from "@/infrastructure/storage/browser-proposal-storage";
 import { BrowserTaskStorage } from "@/infrastructure/storage/browser-task-storage";
 import { BrowserWorkspaceStorage } from "@/infrastructure/storage/browser-workspace-storage";
+
+type TodayTask = Task & {
+  sourceMissing: boolean;
+  sourceCurrentTitle?: string;
+};
 
 type TodaySection = {
   id: string;
   title: string;
   description: string;
-  tasks: Task[];
+  tasks: TodayTask[];
 };
 
 type TodayData = {
@@ -43,6 +52,22 @@ function loadTodayData(): TodayData {
     new BrowserConversationStorage(),
     taskStorage,
   ).listWorkspaces();
+  const sourceStorages = {
+    conversations: new BrowserConversationStorage(),
+    knowledgeCards: new BrowserKnowledgeCardStorage(),
+    messages: new BrowserMessageStorage(),
+    proposals: new BrowserProposalStorage(),
+    workspaces: workspaceStorage,
+  };
+  const decorate = (tasks: Task[]): TodayTask[] =>
+    tasks.map((task) => {
+      const source = taskService.resolveSource(task, sourceStorages);
+      return {
+        ...task,
+        sourceMissing: source.missing,
+        sourceCurrentTitle: source.currentTitle,
+      };
+    });
 
   return {
     workspaces: workspaces.filter((workspace) => !workspace.archivedAt),
@@ -51,31 +76,31 @@ function loadTodayData(): TodayData {
         id: "overdue",
         title: "Overdue",
         description: "截止日期早于今天的未完成 Task。",
-        tasks: taskService.listOverdue(),
+        tasks: decorate(taskService.listOverdue()),
       },
       {
         id: "today",
         title: "Today",
         description: "今天到期的 Task。",
-        tasks: taskService.listDueToday(),
+        tasks: decorate(taskService.listDueToday()),
       },
       {
         id: "upcoming",
         title: "Upcoming",
         description: "今天之后到期的 Task。",
-        tasks: taskService.listUpcoming(),
+        tasks: decorate(taskService.listUpcoming()),
       },
       {
         id: "inbox",
         title: "Inbox",
         description: "尚未指定截止日期的 Task。",
-        tasks: taskService.listByStatus("inbox"),
+        tasks: decorate(taskService.listByStatus("inbox")),
       },
       {
         id: "completed-today",
         title: "Completed Today",
         description: "今天完成的 Task。",
-        tasks: taskService.listCompletedToday(),
+        tasks: decorate(taskService.listCompletedToday()),
       },
     ],
   };
@@ -245,6 +270,12 @@ export function TodayView() {
                   <p className={`mt-1 text-xs ${section.id === "overdue" ? "text-red-700" : "text-zinc-500"}`}>
                     {workspaceNames.get(task.workspaceId ?? "inbox") ?? "Inbox"} · {task.priority} · {formatDueDate(task.dueDate)}
                   </p>
+                  <TaskSourceDetails
+                    compact
+                    currentTitle={task.sourceCurrentTitle}
+                    sourceMissing={task.sourceMissing}
+                    task={task}
+                  />
                 </div>
                 <button className="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50" onClick={() => toggleTask(task)} type="button">
                   {task.status === "completed" ? "Reopen" : "Complete"}

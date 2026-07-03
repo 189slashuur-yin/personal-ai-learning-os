@@ -1,6 +1,6 @@
 # Manual QA Checklist
 
-本清单基于 Epic D D1、Epic A Feature Set 2、Feature Set 1、Sprint11、README、PROJECT、ROADMAP、HANDOFF 与当前页面实现整理。它是手工验收基线，不代表测试已经执行，不包含自动化测试。
+本清单基于 Epic D D1–D3、Epic A Feature Set 2、Feature Set 1、Sprint11、README、PROJECT、ROADMAP、HANDOFF 与当前页面实现整理。它是手工验收基线，不代表测试已经执行，不包含自动化测试。
 
 ## 测试准备
 
@@ -149,6 +149,20 @@
 | D2-08 | 组合 Workspace、Priority、Type 与标题/描述搜索。 | 列表同时满足全部条件；清除条件后恢复当前视图完整结果。 | 是：组合筛选错误。 | Tasks Filters |
 | D2-09 | 核对任一 Task Card。 | 显示 title、description、status、type、priority、dueDate、workspace、sourceRef、createdAt、updatedAt。 | 是：字段遗漏或兼容显示错误。 | Task Details |
 | D2-10 | 分别执行 complete、reopen、archive、restore；删除时先取消再确认。 | 状态操作即时刷新；取消删除不变，确认只删除 Task。 | 是：操作或确认边界错误。 | Task Actions |
+
+## Source-linked Task Smoke Test
+
+| ID | 操作 | 预期结果 | 是否可能失败 | 失败模块 |
+| --- | --- | --- | --- | --- |
+| D3-01 | 在 Knowledge Detail 点击 Create Task。 | 创建 inbox / review / medium Task；SourceRef 为 knowledge，包含 Knowledge ID、标题与摘要或内容摘录快照。 | 是：默认值或快照错误。 | Knowledge / Task Integration |
+| D3-02 | 从有来源 Conversation 的 Knowledge 创建 Task。 | Task 优先使用来源 Conversation 的 Workspace；链路不可解析时安全回退 Inbox；KnowledgeCard 不变。 | 是：Workspace 推断或越界写入。 | Knowledge Source Trace |
+| D3-03 | 在 Conversation Detail 点击 Create Task。 | 创建 inbox / todo / medium Task；SourceRef 为 conversation，包含标题和原始文本或最近 Messages 摘要，使用 Conversation Workspace。 | 是：来源或 Workspace 错误。 | Conversation / Task Integration |
+| D3-04 | Message Timeline 未选择 Message。 | Create Task from selection 按钮禁用，不写入 Task。 | 是：空选择仍创建。 | Message Selection |
+| D3-05 | 乱序勾选多条 Message 后创建 Task。 | SourceRef 为 message，entityId 是 Timeline 顺序第一条选中 Message；标题含 Conversation 与数量，摘要按 Timeline 顺序生成。 | 是：顺序、数量或快照错误。 | Message / Task Integration |
+| D3-06 | 从选中 Messages 创建 Task 后继续生成 Proposal。 | 选择保持不变；Proposal 生成逻辑与数量不受 Task 创建影响。 | 是：选择状态或 Proposal 被改写。 | Message Selection Boundary |
+| D3-07 | 在 `/tasks` 与 `/today` 检查手动及三类来源 Task。 | 清晰显示 Manual、Knowledge、Conversation、Message；可解析的 Knowledge / Conversation 标题可导航。 | 是：来源标签或导航错误。 | Task Source Display |
+| D3-08 | 删除 Task 引用的 Knowledge、Conversation 或第一条 Message。 | Task 保留并显示 `Source deleted`；titleSnapshot 与 summarySnapshot 继续显示，页面不崩溃且不提供失效跳转。 | 是：降级或快照丢失。 | Task Source Degradation |
+| D3-09 | 在全局 Search 搜索 Task 标题。 | 当前不返回 Task；README、ROADMAP 与 Handoff 明确 Search 尚未接入 Task。 | 否：当前已知限制。 | Search Scope |
 
 ## Messages
 

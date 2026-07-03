@@ -38,6 +38,11 @@ export type TaskSourceStorages = {
   workspaces: WorkspaceStorage;
 };
 
+export type TaskSourceResolution = {
+  missing: boolean;
+  currentTitle?: string;
+};
+
 function localDateKey(date: Date) {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -261,29 +266,57 @@ export class TaskService {
   }
 
   isSourceMissing(task: Task, storages: TaskSourceStorages) {
+    return this.resolveSource(task, storages).missing;
+  }
+
+  resolveSource(
+    task: Task,
+    storages: TaskSourceStorages,
+  ): TaskSourceResolution {
     const sourceRef = task.sourceRef;
 
     if (!sourceRef || sourceRef.type === "manual") {
-      return false;
+      return {
+        missing: false,
+        currentTitle: sourceRef?.titleSnapshot ?? task.title,
+      };
     }
 
     if (!sourceRef.entityId) {
-      return true;
+      return { missing: true };
     }
 
     switch (sourceRef.type) {
-      case "conversation":
-        return !storages.conversations.getById(sourceRef.entityId);
-      case "knowledge":
-        return !storages.knowledgeCards.getById(sourceRef.entityId);
-      case "proposal":
-        return !storages.proposals.getById(sourceRef.entityId);
-      case "message":
-        return !storages.messages
+      case "conversation": {
+        const conversation = storages.conversations.getById(sourceRef.entityId);
+        return { missing: !conversation, currentTitle: conversation?.title };
+      }
+      case "knowledge": {
+        const knowledge = storages.knowledgeCards.getById(sourceRef.entityId);
+        return { missing: !knowledge, currentTitle: knowledge?.title };
+      }
+      case "proposal": {
+        const proposal = storages.proposals.getById(sourceRef.entityId);
+        return { missing: !proposal, currentTitle: proposal?.title };
+      }
+      case "message": {
+        const message = storages.messages
           .getAll()
-          .some((message) => message.id === sourceRef.entityId);
-      case "workspace":
-        return !storages.workspaces.getById(sourceRef.entityId);
+          .find((item) => item.id === sourceRef.entityId);
+        const conversation = message
+          ? storages.conversations.getById(message.conversationId)
+          : null;
+        return {
+          missing: !message,
+          currentTitle: message
+            ? `${conversation?.title ?? "Conversation"} · Message`
+            : undefined,
+        };
+      }
+      case "workspace": {
+        const workspace = storages.workspaces.getById(sourceRef.entityId);
+        return { missing: !workspace, currentTitle: workspace?.name };
+      }
     }
   }
 

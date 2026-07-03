@@ -2,6 +2,16 @@
 
 本文件记录当前仓库已经完成的 Sprint 与关键提交。日期使用仓库 commit date。
 
+## 2026-07-04 — Epic D D3: Source-linked Task
+
+状态：D3 已实现并通过质量检查，未创建 Git commit。
+
+- Knowledge Detail 可创建 inbox / review / medium Task，并从来源 Conversation 链路推断 Workspace。
+- Conversation Detail 可创建 inbox / todo / medium Task；Message Timeline 可从选中 Messages 创建独立 Task，且不影响 Proposal 选择流程。
+- SourceRef 保存 entityId、titleSnapshot 与 summarySnapshot；不修改 KnowledgeCard、Conversation 或 Message 本体。
+- `/tasks` 与 `/today` 展示 Manual、Knowledge、Conversation、Message 等来源；来源删除后显示 `Source deleted` 并保留快照。
+- 全局 Search 当前仍不索引 Task；未实现 Activity、AI Suggest Task、Calendar、Reminder、Recurring Task、Agent、RAG 或数据库。
+
 ## 2026-07-03 — Epic D D2: Today / Task UI
 
 状态：Today 与 Task 日常界面已实现；最终 build 因执行环境用量限制待复跑，未创建 Git commit。

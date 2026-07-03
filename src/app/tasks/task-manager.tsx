@@ -1,6 +1,7 @@
 "use client";
 
 import { type FormEvent, useEffect, useState } from "react";
+import { TaskSourceDetails } from "@/app/task-source-details";
 import {
   taskPriorities,
   taskTypes,
@@ -31,6 +32,7 @@ type TaskView = (typeof taskViews)[number]["id"];
 
 type TaskItem = Task & {
   sourceMissing: boolean;
+  sourceCurrentTitle?: string;
   workspaceName: string;
 };
 
@@ -66,12 +68,16 @@ function loadTaskView(): TaskViewData {
     workspaces: workspaceStorage,
   };
   const decorate = (tasks: Task[]): TaskItem[] =>
-    tasks.map((task) => ({
-      ...task,
-      sourceMissing: taskService.isSourceMissing(task, sourceStorages),
-      workspaceName:
-        workspaceById.get(task.workspaceId ?? "inbox")?.name ?? "Inbox",
-    }));
+    tasks.map((task) => {
+      const source = taskService.resolveSource(task, sourceStorages);
+      return {
+        ...task,
+        sourceMissing: source.missing,
+        sourceCurrentTitle: source.currentTitle,
+        workspaceName:
+          workspaceById.get(task.workspaceId ?? "inbox")?.name ?? "Inbox",
+      };
+    });
 
   return {
     workspaces: workspaces.filter((workspace) => !workspace.archivedAt),
@@ -134,21 +140,11 @@ function TaskCard({ item, onChange }: { item: TaskItem; onChange: () => void }) 
         <div className="sm:col-span-2"><dt className="inline font-medium text-zinc-700">Updated：</dt><dd className="inline">{formatDate(item.updatedAt, true)}</dd></div>
       </dl>
 
-      <div className="mt-4 rounded-lg bg-zinc-50 p-3 text-xs text-zinc-600">
-        {item.sourceRef ? (
-          <>
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="font-semibold text-zinc-800">SourceRef · {item.sourceRef.type}</span>
-              {item.sourceMissing ? <span className="rounded-full bg-red-100 px-2 py-0.5 font-semibold text-red-700">source missing</span> : null}
-            </div>
-            <p className="mt-1 font-medium text-zinc-700">{item.sourceRef.titleSnapshot}</p>
-            {item.sourceRef.summarySnapshot ? <p className="mt-1 leading-5">{item.sourceRef.summarySnapshot}</p> : null}
-            {item.sourceRef.entityId ? <p className="mt-1 break-all text-zinc-400">{item.sourceRef.entityId}</p> : null}
-          </>
-        ) : (
-          <p>SourceRef：—</p>
-        )}
-      </div>
+      <TaskSourceDetails
+        currentTitle={item.sourceCurrentTitle}
+        sourceMissing={item.sourceMissing}
+        task={item}
+      />
 
       <div className="mt-4 flex flex-wrap gap-3 border-t border-zinc-100 pt-4 text-sm font-medium">
         {item.status === "completed" ? (

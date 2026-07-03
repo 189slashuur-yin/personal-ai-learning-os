@@ -11,11 +11,14 @@ import {
   createTag,
   removeTagFromKnowledgeCard,
 } from "@/core/services/tag-management";
+import { TaskService } from "@/core/services/task-service";
 import { BrowserConversationStorage } from "@/infrastructure/storage/browser-conversation-storage";
 import { BrowserKnowledgeCardStorage } from "@/infrastructure/storage/browser-knowledge-card-storage";
 import { BrowserMessageStorage } from "@/infrastructure/storage/browser-message-storage";
 import { BrowserProposalStorage } from "@/infrastructure/storage/browser-proposal-storage";
 import { BrowserTagStorage } from "@/infrastructure/storage/browser-tag-storage";
+import { BrowserTaskStorage } from "@/infrastructure/storage/browser-task-storage";
+import { BrowserWorkspaceStorage } from "@/infrastructure/storage/browser-workspace-storage";
 
 type Draft = Pick<
   KnowledgeCard,
@@ -29,6 +32,13 @@ function formatDate(value: string) {
   }).format(new Date(value));
 }
 
+function excerpt(value: string, maxLength = 240) {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  return normalized.length > maxLength
+    ? `${normalized.slice(0, maxLength - 1).trimEnd()}…`
+    : normalized;
+}
+
 export function KnowledgeDetail({ cardId }: { cardId: string }) {
   const router = useRouter();
   const [card, setCard] = useState<KnowledgeCard | null | undefined>(undefined);
@@ -40,6 +50,8 @@ export function KnowledgeDetail({ cardId }: { cardId: string }) {
   const [tags, setTags] = useState<Tag[]>([]);
   const [newTagName, setNewTagName] = useState("");
   const [tagError, setTagError] = useState<string | null>(null);
+  const [taskNotice, setTaskNotice] = useState<string | null>(null);
+  const [taskError, setTaskError] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<"idle" | "dirty" | "saved">(
     "idle",
   );
@@ -137,6 +149,42 @@ export function KnowledgeDetail({ cardId }: { cardId: string }) {
     router.push("/knowledge");
   }
 
+  function createTaskFromKnowledge() {
+    if (!card || !draft) return;
+
+    setTaskNotice(null);
+    setTaskError(null);
+
+    try {
+      const proposal = new BrowserProposalStorage().getById(card.proposalId);
+      const conversationId =
+        card.sourceConversationId ?? proposal?.conversationId;
+      const workspaceId = conversationId
+        ? new BrowserConversationStorage().getById(conversationId)?.workspaceId
+        : undefined;
+
+      new TaskService(
+        new BrowserTaskStorage(),
+        new BrowserWorkspaceStorage(),
+      ).createTask({
+        title: `Review: ${draft.title.trim() || card.title}`,
+        status: "inbox",
+        type: "review",
+        priority: "medium",
+        workspaceId,
+        sourceRef: {
+          type: "knowledge",
+          entityId: card.id,
+          titleSnapshot: draft.title.trim() || card.title,
+          summarySnapshot: excerpt(draft.summary || draft.content),
+        },
+      });
+      setTaskNotice("Task 已创建，并保留当前 Knowledge 来源快照。");
+    } catch {
+      setTaskError("Task 创建失败，请确认浏览器允许本地保存。");
+    }
+  }
+
   function addTag(tagId: string) {
     if (!card || !draft) return;
     const taggedCard = addTagToKnowledgeCard({ ...card, ...draft }, tagId);
@@ -193,8 +241,28 @@ export function KnowledgeDetail({ cardId }: { cardId: string }) {
           >
             保存
           </button>
+          <button
+            className="rounded-lg border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
+            onClick={createTaskFromKnowledge}
+            type="button"
+          >
+            Create Task
+          </button>
         </div>
       </div>
+
+      {taskNotice ? (
+        <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-800" role="status">
+          <span>{taskNotice}</span>
+          <span className="flex gap-3 font-semibold">
+            <Link className="underline" href="/tasks">前往 Tasks</Link>
+            <Link className="underline" href="/today">前往 Today</Link>
+          </span>
+        </div>
+      ) : null}
+      {taskError ? (
+        <p className="mt-5 rounded-xl border border-red-200 bg-red-50 px-5 py-4 text-sm text-red-700" role="alert">{taskError}</p>
+      ) : null}
 
       <article className="mt-6 overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm">
         <div className="border-b border-zinc-100 p-6 sm:p-8">

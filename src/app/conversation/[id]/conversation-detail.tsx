@@ -26,6 +26,7 @@ import { PromptTemplateService } from "@/core/services/prompt-template-service";
 import { ProviderConfigurationService } from "@/core/services/provider-configuration-service";
 import { ProviderService } from "@/core/services/provider-service";
 import { countWords } from "@/core/services/text-statistics";
+import { TaskService } from "@/core/services/task-service";
 import { WorkspaceService } from "@/core/services/workspace-service";
 import { BrowserConversationStorage } from "@/infrastructure/storage/browser-conversation-storage";
 import { BrowserConversationVersionStorage } from "@/infrastructure/storage/browser-conversation-version-storage";
@@ -37,6 +38,7 @@ import { BrowserProposalStorage } from "@/infrastructure/storage/browser-proposa
 import { BrowserPromptTemplateStorage } from "@/infrastructure/storage/browser-prompt-template-storage";
 import { BrowserProviderConfigurationStorage } from "@/infrastructure/storage/browser-provider-configuration-storage";
 import { BrowserSourceStorage } from "@/infrastructure/storage/browser-source-storage";
+import { BrowserTaskStorage } from "@/infrastructure/storage/browser-task-storage";
 import { BrowserWorkspaceStorage } from "@/infrastructure/storage/browser-workspace-storage";
 import { ProposalWorkspace } from "./proposal-workspace";
 import { CapabilityBadges } from "@/app/capability-badges";
@@ -111,6 +113,13 @@ function highlightMessageContent(
   );
 }
 
+function excerpt(value: string, maxLength = 240) {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  return normalized.length > maxLength
+    ? `${normalized.slice(0, maxLength - 1).trimEnd()}…`
+    : normalized;
+}
+
 function createAnalyzerExecutionService() {
   const provider = new ProviderService(
     new BrowserAIProviderStorage(),
@@ -150,6 +159,8 @@ export function ConversationDetail({
   const [messageSearchQuery, setMessageSearchQuery] = useState("");
   const [activeSearchIndex, setActiveSearchIndex] = useState(0);
   const [analyzerError, setAnalyzerError] = useState<string | null>(null);
+  const [taskNotice, setTaskNotice] = useState<string | null>(null);
+  const [taskError, setTaskError] = useState<string | null>(null);
   const [latestAnalyzerRun, setLatestAnalyzerRun] =
     useState<AnalyzerRun | null>(null);
   const [providerDetails] = useState<{
@@ -391,6 +402,82 @@ export function ConversationDetail({
       ...state,
       proposals: [result.proposal, ...state.proposals],
     });
+  }
+
+  function createTaskFromConversation() {
+    if (state.status !== "ready") return;
+
+    setTaskNotice(null);
+    setTaskError(null);
+
+    try {
+      const recentMessageSummary = state.messages
+        .slice(-3)
+        .map((message) => `${messageRoleLabels[message.role]}: ${message.content}`)
+        .join("\n");
+
+      new TaskService(
+        new BrowserTaskStorage(),
+        new BrowserWorkspaceStorage(),
+      ).createTask({
+        title: `Follow up: ${state.conversation.title}`,
+        status: "inbox",
+        type: "todo",
+        priority: "medium",
+        workspaceId: state.conversation.workspaceId,
+        sourceRef: {
+          type: "conversation",
+          entityId: state.conversation.id,
+          titleSnapshot: state.conversation.title,
+          summarySnapshot: excerpt(
+            state.source?.content || recentMessageSummary || state.conversation.title,
+          ),
+        },
+      });
+      setTaskNotice("Task 已创建，并保留当前 Conversation 来源快照。");
+    } catch {
+      setTaskError("Task 创建失败，请确认浏览器允许本地保存。");
+    }
+  }
+
+  function createTaskFromSelectedMessages() {
+    if (state.status !== "ready" || selectedMessageIds.size === 0) return;
+
+    setTaskNotice(null);
+    setTaskError(null);
+
+    try {
+      const selectedMessages = state.messages.filter((message) =>
+        selectedMessageIds.has(message.id),
+      );
+      const selectedCount = selectedMessages.length;
+
+      new TaskService(
+        new BrowserTaskStorage(),
+        new BrowserWorkspaceStorage(),
+      ).createTask({
+        title: `Follow up on ${selectedCount} messages: ${state.conversation.title}`,
+        status: "inbox",
+        type: "todo",
+        priority: "medium",
+        workspaceId: state.conversation.workspaceId,
+        sourceRef: {
+          type: "message",
+          entityId: selectedMessages[0].id,
+          titleSnapshot: `${state.conversation.title} · ${selectedCount} selected messages`,
+          summarySnapshot: excerpt(
+            selectedMessages
+              .map((message) => `${messageRoleLabels[message.role]}: ${message.content}`)
+              .join("\n"),
+          ),
+        },
+      });
+      setTaskNotice(
+        `Task 已从 ${selectedCount} 条选中 Messages 创建，并保留来源快照。`,
+      );
+    } catch {
+      setTaskError("Task 创建失败，请确认浏览器允许本地保存。");
+    }
   }
 
   async function runMessageAnalyzer() {
@@ -804,6 +891,13 @@ export function ConversationDetail({
             )}
           </div>
           <div className="flex flex-wrap items-center gap-3">
+            <button
+              className="rounded-lg bg-zinc-950 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:bg-zinc-800"
+              onClick={createTaskFromConversation}
+              type="button"
+            >
+              Create Task
+            </button>
             <Link
               className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs font-semibold text-zinc-600 shadow-sm hover:border-zinc-300 hover:text-zinc-950"
               href={`/search?q=${encodeURIComponent(conversation.title)}&workspaceId=${encodeURIComponent(conversation.workspaceId ?? DEFAULT_WORKSPACE_ID)}&type=conversation`}
@@ -816,6 +910,19 @@ export function ConversationDetail({
           </div>
         </div>
       </header>
+
+      {taskNotice ? (
+        <div className="mt-6 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-800" role="status">
+          <span>{taskNotice}</span>
+          <span className="flex gap-3 font-semibold">
+            <Link className="underline" href="/tasks">前往 Tasks</Link>
+            <Link className="underline" href="/today">前往 Today</Link>
+          </span>
+        </div>
+      ) : null}
+      {taskError ? (
+        <p className="mt-6 rounded-xl border border-red-200 bg-red-50 px-5 py-4 text-sm text-red-700" role="alert">{taskError}</p>
+      ) : null}
 
       {importedFromClipboard ? (
         <p
@@ -1117,6 +1224,14 @@ export function ConversationDetail({
                     type="button"
                   >
                     清空选择
+                  </button>
+                  <button
+                    className="rounded-md bg-zinc-950 px-3 py-1.5 text-xs font-medium text-white hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-300"
+                    disabled={selectedMessageIds.size === 0}
+                    onClick={createTaskFromSelectedMessages}
+                    type="button"
+                  >
+                    Create Task from selection
                   </button>
                 </div>
               </div>
