@@ -4,15 +4,15 @@
 
 ## Current release
 
-- Version：v0.6
+- Version：v0.7
 - Phase：Phase2
-- Current Epic：Epic D / D3 Source-linked Task（Completed）
-- Release theme：v0.6 仍是发布基线；当前工作区已实现 D1–D3 Task Domain、日常任务界面与来源创建链路。
+- Current Epic：Epic D（Completed）
+- Release theme：v0.7 Daily Learning Workflow；Task Domain、Today、Source-linked Task、Task Search 与发布稳定化已完成。
 
 ## Product phases
 
 - Phase1 / MVP：已完成，覆盖本地 Import、Conversation、Analyzer、Review、Knowledge 与 Provider 边界。
-- Phase2：当前阶段；Workspace、Conversation Editing、Knowledge Editing 与 Epic C Search 2.0 已形成 v0.6 基线。
+- Phase2：当前阶段；v0.7 已完成 Workspace、Conversation / Knowledge Editing、Search 2.0 与 Task 日常工作流。
 - Phase3：未开始。Real AI、RAG 与其它候选能力必须独立评审，不能从 Epic C 完成推定为已批准。
 - Phase4：未开始，候选范围为 Memory 与 Agent，当前不实现。
 
@@ -20,21 +20,25 @@
 
 | Epic | 状态 | 范围 |
 | --- | --- | --- |
-| Epic D | D0–D3 已完成；D4 非近期计划；D5 未开始 | Task Domain、Today / Task UI、Source-linked Task 与跨域兼容已实现。 |
-| Epic E | 未开始 | 待产品负责人确认范围与验收标准。 |
+| Epic D | 已完成 | Task Domain、Today / Task UI、Source-linked Task、Task Search 与 v0.7 稳定化。 |
+| Epic E | 建议下一步 | Knowledge Productivity；开始前确认范围与验收标准。 |
 | Epic F | 未开始 | 待产品负责人确认范围与验收标准。 |
 
-## Epic D — Task / Productivity Layer（D0–D3 已完成）
+## Epic D — Task / Productivity Layer（Completed）
 
 - D0 — RFC / Domain Model：Architecture Pack v1 已冻结，包含 Task RFC、Domain Model、Domain Boundaries、Data Lifecycle 与 Epic D Design；仅文档，无运行时改动。
 - D1 — Task Domain：已新增 Task、SourceRef、TaskStorage、BrowserTaskStorage 与 TaskService；支持生命周期、日期查询、Workspace 回迁、Source missing 判断、Dashboard 统计和 `/tasks` 最小调试入口。
 - D2 — Today / Task UI：已新增 `/today`、Quick Capture、Overdue / Today / Upcoming / Inbox / Completed Today、Workspace 筛选；`/tasks` 支持六类视图、Workspace / Priority / Type / 搜索筛选及完整生命周期操作。
 - D3 — Source-linked Task：Knowledge、Conversation 和选中 Messages 可显式创建带 SourceRef 快照的 Task；`/tasks` 与 `/today` 展示来源，源删除后显示 `Source deleted` 并保留快照。
-- D4 — Activity：planned / not immediate；开始前必须另行冻结事件、隐私、保留与失败语义。
-- D5 — Release v0.7：在已实现范围通过兼容、回归、手工 QA 与发布门禁后再发布。
+- D4 — Task Search + Release v0.7 Stabilization：Search 2.0 已索引 Task，支持基础筛选与最近更新；v0.7 文档和发布门禁已完成。
+- Activity 仍为 planned / not immediate；开始前必须另行冻结事件、隐私、保留与失败语义，且不属于 v0.7。
 - 第一阶段只做 Task，不做 Agent、Calendar、RAG、Reminder、Recurring Task、Pomodoro、Habit 或 Workflow。
 - AI 只能建议 Task；不能直接 Create / Complete / Delete Task。
-- Task UI 仍是单浏览器、小数据量的本地线性读取；全局 Search 当前不索引 Task。
+- Task UI 与 Search 仍是单浏览器、小数据量的本地线性读取；Task 结果按标题跳到 `/tasks`，暂不按 ID 精确定位。
+
+## Next suggestion — Epic E Knowledge Productivity
+
+下一版本建议评估 Knowledge Productivity，优先改善 Knowledge 的复习、组织与复用体验。范围、数据模型和验收标准需单独批准；不得默认扩展到 Activity、Agent、RAG、Calendar 或自动化。
 
 正式范围和验收序列见 [docs/design/Epic-D-Design.md](./docs/design/Epic-D-Design.md)，领域决策见 [RFC-003](./docs/rfc/RFC-003-task-domain.md)。
 

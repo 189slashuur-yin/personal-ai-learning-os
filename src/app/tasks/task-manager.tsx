@@ -161,13 +161,13 @@ function TaskCard({ item, onChange }: { item: TaskItem; onChange: () => void }) 
   );
 }
 
-export function TaskManager() {
+export function TaskManager({ initialQuery = "" }: { initialQuery?: string }) {
   const [data, setData] = useState<TaskViewData | null>(null);
   const [view, setView] = useState<TaskView>("inbox");
   const [workspaceFilter, setWorkspaceFilter] = useState("all");
   const [priorityFilter, setPriorityFilter] = useState<"all" | TaskPriority>("all");
   const [typeFilter, setTypeFilter] = useState<"all" | TaskType>("all");
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(initialQuery);
   const [title, setTitle] = useState("");
   const [dueDate, setDueDate] = useState("");
   const [workspaceId, setWorkspaceId] = useState("inbox");

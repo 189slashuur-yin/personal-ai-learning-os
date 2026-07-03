@@ -6,6 +6,14 @@ import type { ProviderConfiguration } from "@/core/entities/provider-configurati
 import type { SearchEntityType } from "@/core/entities/search-filter";
 import type { SearchResult } from "@/core/entities/search-result";
 import type { Tag } from "@/core/entities/tag";
+import {
+  taskPriorities,
+  taskStatuses,
+  taskTypes,
+  type TaskPriority,
+  type TaskStatus,
+  type TaskType,
+} from "@/core/entities/task";
 import type { Workspace } from "@/core/entities/workspace";
 import {
   searchLearningOS,
@@ -19,6 +27,7 @@ import { BrowserProposalStorage } from "@/infrastructure/storage/browser-proposa
 import { BrowserProviderConfigurationStorage } from "@/infrastructure/storage/browser-provider-configuration-storage";
 import { BrowserSourceStorage } from "@/infrastructure/storage/browser-source-storage";
 import { BrowserTagStorage } from "@/infrastructure/storage/browser-tag-storage";
+import { BrowserTaskStorage } from "@/infrastructure/storage/browser-task-storage";
 import { BrowserWorkspaceStorage } from "@/infrastructure/storage/browser-workspace-storage";
 
 type SearchCatalog = {
@@ -36,6 +45,7 @@ const groups: { type: SearchEntityType; label: string }[] = [
   { type: "knowledge", label: "Knowledge" },
   { type: "tag", label: "Tags" },
   { type: "workspace", label: "Workspaces" },
+  { type: "task", label: "Tasks" },
 ];
 
 const resultTypeLabels: Record<SearchEntityType, string> = {
@@ -44,6 +54,7 @@ const resultTypeLabels: Record<SearchEntityType, string> = {
   knowledge: "Knowledge",
   tag: "Tag",
   workspace: "Workspace",
+  task: "Task",
 };
 
 const statusOptions = [
@@ -71,6 +82,7 @@ function loadSearchCatalog(): SearchCatalog {
       knowledgeCards: new BrowserKnowledgeCardStorage().getAll(),
       tags,
       workspaces,
+      tasks: new BrowserTaskStorage().getAll(),
     },
     providers: new ProviderConfigurationService(
       new BrowserProviderConfigurationStorage(),
@@ -152,6 +164,11 @@ function ResultCard({ result, query }: { result: SearchResult; query: string }) 
               </span>
             ))}
             {result.providerName ? <span>Provider · {result.providerName}</span> : null}
+            {result.taskStatus ? <span>Status · {result.taskStatus}</span> : null}
+            {result.taskPriority ? <span>Priority · {result.taskPriority}</span> : null}
+            {result.taskType ? <span>Type · {result.taskType}</span> : null}
+            {result.dueDate ? <span>Due · {result.dueDate}</span> : null}
+            {result.sourceRef ? <span>Source · {result.sourceRef.type}</span> : null}
             {result.updatedAt ? <span>更新 · {formatDate(result.updatedAt)}</span> : null}
             {result.matchedFields.length ? (
               <span>匹配 · {result.matchedFields.join("、")}</span>
@@ -181,6 +198,9 @@ export function SearchExperience({
   const [tagId, setTagId] = useState("");
   const [providerId, setProviderId] = useState("");
   const [status, setStatus] = useState("");
+  const [taskStatus, setTaskStatus] = useState<"" | TaskStatus>("");
+  const [taskPriority, setTaskPriority] = useState<"" | TaskPriority>("");
+  const [taskType, setTaskType] = useState<"" | TaskType>("");
   const [results, setResults] = useState<SearchResult[]>([]);
 
   useEffect(() => {
@@ -200,6 +220,9 @@ export function SearchExperience({
         tagId: tagId || undefined,
         providerId: providerId || undefined,
         status: status || undefined,
+        taskStatus: taskStatus || undefined,
+        taskPriority: taskPriority || undefined,
+        taskType: taskType || undefined,
       });
 
       setDebouncedQuery(nextQuery);
@@ -214,10 +237,28 @@ export function SearchExperience({
     }, 300);
 
     return () => window.clearTimeout(timer);
-  }, [catalog, providerId, query, status, tagId, typeFilter, workspaceId]);
+  }, [
+    catalog,
+    providerId,
+    query,
+    status,
+    tagId,
+    taskPriority,
+    taskStatus,
+    taskType,
+    typeFilter,
+    workspaceId,
+  ]);
 
   const hasFilters = Boolean(
-    typeFilter !== "all" || workspaceId || tagId || providerId || status,
+    typeFilter !== "all" ||
+      workspaceId ||
+      tagId ||
+      providerId ||
+      status ||
+      taskStatus ||
+      taskPriority ||
+      taskType,
   );
 
   function clearSearch() {
@@ -227,6 +268,9 @@ export function SearchExperience({
     setTagId("");
     setProviderId("");
     setStatus("");
+    setTaskStatus("");
+    setTaskPriority("");
+    setTaskType("");
   }
 
   return (
@@ -239,7 +283,7 @@ export function SearchExperience({
             autoFocus
             className="min-w-0 flex-1 border-0 bg-transparent px-1 py-3 text-base text-zinc-950 outline-none placeholder:text-zinc-400"
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="搜索标题、内容、来源、Tag 或 Workspace…"
+            placeholder="搜索标题、内容、来源、Task、Tag 或 Workspace…"
             type="search"
             value={query}
           />
@@ -315,6 +359,54 @@ export function SearchExperience({
               ))}
             </select>
           </label>
+        </div>
+
+        <div className="mt-4 rounded-xl border border-zinc-200 bg-zinc-50/70 p-4">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Task 筛选</p>
+            <p className="mt-1 text-xs text-zinc-500">仅过滤 Task；其它类型结果会继续保留。</p>
+          </div>
+          <div className="mt-3 grid gap-3 sm:grid-cols-3">
+            <label className="text-xs font-semibold text-zinc-500">
+              Status
+              <select
+                className="mt-1.5 w-full rounded-lg border border-zinc-200 bg-white px-3 py-2.5 text-sm font-normal text-zinc-700"
+                onChange={(event) => setTaskStatus(event.target.value as "" | TaskStatus)}
+                value={taskStatus}
+              >
+                <option value="">全部 Task Status</option>
+                {taskStatuses.map((option) => (
+                  <option key={option} value={option}>{option}</option>
+                ))}
+              </select>
+            </label>
+            <label className="text-xs font-semibold text-zinc-500">
+              Priority
+              <select
+                className="mt-1.5 w-full rounded-lg border border-zinc-200 bg-white px-3 py-2.5 text-sm font-normal text-zinc-700"
+                onChange={(event) => setTaskPriority(event.target.value as "" | TaskPriority)}
+                value={taskPriority}
+              >
+                <option value="">全部 Priority</option>
+                {taskPriorities.map((option) => (
+                  <option key={option} value={option}>{option}</option>
+                ))}
+              </select>
+            </label>
+            <label className="text-xs font-semibold text-zinc-500">
+              Type
+              <select
+                className="mt-1.5 w-full rounded-lg border border-zinc-200 bg-white px-3 py-2.5 text-sm font-normal text-zinc-700"
+                onChange={(event) => setTaskType(event.target.value as "" | TaskType)}
+                value={taskType}
+              >
+                <option value="">全部 Task Type</option>
+                {taskTypes.map((option) => (
+                  <option key={option} value={option}>{option}</option>
+                ))}
+              </select>
+            </label>
+          </div>
         </div>
 
         {query || hasFilters ? (

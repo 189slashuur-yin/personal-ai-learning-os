@@ -2,6 +2,16 @@
 
 本文件记录当前仓库已经完成的 Sprint 与关键提交。日期使用仓库 commit date。
 
+## 2026-07-04 — Release v0.7: Daily Learning Workflow
+
+状态：Epic D 已完成并完成 v0.7 发布收尾；未创建 Git commit。
+
+- Search 2.0 新增 Task 索引、分组、类型筛选与最近更新，覆盖 title、description 和 SourceRef 标题/摘要快照。
+- Search 支持 Task Workspace、status、priority、type 筛选；Task 专属筛选不会错误移除非 Task 结果。
+- Task 搜索结果跳转带标题查询的 `/tasks`；`q`、`type`、`workspaceId` 可从 Search URL 恢复。
+- 新增 v0.7 Release Notes，并同步 README、ROADMAP、HANDOFF、ARCHITECTURE 与 QA Checklist。
+- Activity、Calendar、Reminder、Recurring Task、Agent、RAG、数据库与 AI Suggest Task 仍未实现。
+
 ## 2026-07-04 — Epic D D3: Source-linked Task
 
 状态：D3 已实现并通过质量检查，未创建 Git commit。

@@ -1,4 +1,68 @@
-# Epic D D3 — Source-linked Task Handoff
+# Epic D D4 — Task Search + Release v0.7 Stabilization Handoff
+
+## 当前状态
+
+当前版本为 v0.7 Daily Learning Workflow，Epic D 已完成。本轮已完成 Task Search Integration、Task Search Filters、v0.7 Release Documentation 与 Release Stabilization。未创建 Git commit，未实现 Activity、Calendar、Reminder、Recurring Task、Agent、RAG、数据库或 AI Suggest Task。
+
+## Part 完成情况
+
+- Part 1：Task 已接入 Search 2.0，覆盖 title、description、SourceRef titleSnapshot / summarySnapshot；新增 Task 分组、类型筛选、结果元数据和带 `q` 的 `/tasks` 跳转。
+- Part 2：Search 增加 Task Workspace、status、priority、type 筛选；Task 专属筛选不影响非 Task 结果，空搜索最近更新可包含 Task，URL 继续恢复 `q`、`type`、`workspaceId`。
+- Part 3：新增 `docs/releases/v0.7.md`，并同步 README、ROADMAP、CHANGELOG、HANDOFF、ARCHITECTURE 与 QA Checklist。
+- Part 4：主导航已包含 Dashboard、Workspace、Conversation、Import、Search、Today、Tasks、Knowledge、Tags、Settings；README、PROJECT、ROADMAP、HANDOFF、ARCHITECTURE 与 QA 的 v0.7 口径已统一，并完成最终质量门禁。
+
+## 新增文件
+
+- `docs/releases/v0.7.md`
+
+## 修改文件
+
+- `src/core/entities/search-filter.ts`
+- `src/core/entities/search-result.ts`
+- `src/core/services/global-search.ts`
+- `src/app/search/search-experience.tsx`
+- `src/app/tasks/page.tsx`
+- `src/app/tasks/task-manager.tsx`
+- `src/app/layout.tsx`
+- `README.md`
+- `PROJECT.md`
+- `ROADMAP.md`
+- `CHANGELOG.md`
+- `HANDOFF.md`
+- `ARCHITECTURE.md`
+- `docs/QA_CHECKLIST.md`
+
+## 手动验收步骤
+
+1. 创建包含 title、description、Workspace、status、priority、type 和 SourceRef 快照的 Task，并分别用四类文本字段搜索。
+2. 在 `/search` 选择 Task 类型，组合 Workspace、Task status、priority、type，确认结果正确；切回全部类型，确认非 Task 结果仍保留。
+3. 清空关键词，确认最近 12 条可出现 Task；点击 Task 结果，确认 `/tasks?q=...` 恢复标题查询。
+4. 打开 `/search?q=demo&type=task&workspaceId=inbox` 后刷新，确认三项 URL 状态恢复。
+5. 回归 Conversation、Proposal、Knowledge、Tag、Workspace 搜索及旧知识工作流。
+6. 按 `docs/QA_CHECKLIST.md` 执行 Task Search 与 v0.7 Release Smoke Test。
+
+## 已知限制
+
+- Task 结果按标题查询跳转 `/tasks`，不是按 ID 精确定位；同名 Task 可能同时出现。
+- Task status、priority、type 筛选不写入 URL；仅 `q`、`type`、`workspaceId` 可恢复。
+- Search 与 Task Storage 都是当前浏览器 LocalStorage 上的同步线性读取，适合小数据量。
+- 不包含 Activity、Calendar、Reminder、Recurring Task、Agent、RAG、数据库或 AI Suggest Task。
+
+## Architecture Impact
+
+- Entity：SearchEntityType 增加 Task；SearchFilter / SearchResult 增加 Task 筛选与展示元数据，不修改 Task Entity。
+- Service：GlobalSearch 只读映射 Task 集合，复用现有 Workspace 和 SourceRef 快照，不增加索引或存储 key。
+- Infrastructure：Search UI 通过 BrowserTaskStorage 读取 Task；没有直接 LocalStorage 访问或迁移。
+- UI：Search 增加 Task 分组与专属筛选；Tasks 页面只新增 `q` 初始标题过滤。
+- Cross-domain / AI：搜索不修改 Task 或来源；Provider / Analyzer 未获得 TaskStorage 写入能力。
+
+## 是否建议 commit
+
+建议在完成上述手动 smoke test 后创建一个 v0.7 release commit；本轮按要求不创建 commit。
+
+---
+
+# Previous Handoff — Epic D D3 Source-linked Task
 
 ## 当前状态
 

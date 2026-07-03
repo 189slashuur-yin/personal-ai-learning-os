@@ -22,13 +22,19 @@ export default function RootLayout({
             </Link>
             <div className="flex items-center gap-2 overflow-x-auto text-sm text-zinc-600 sm:gap-5">
               <Link className="whitespace-nowrap rounded-md px-2 py-1.5 hover:bg-zinc-100 hover:text-zinc-950" href="/">
-                首页
+                Dashboard
+              </Link>
+              <Link className="whitespace-nowrap rounded-md px-2 py-1.5 hover:bg-zinc-100 hover:text-zinc-950" href="/workspace">
+                Workspace
               </Link>
               <Link className="whitespace-nowrap rounded-md px-2 py-1.5 hover:bg-zinc-100 hover:text-zinc-950" href="/conversation">
                 Conversation
               </Link>
-              <Link className="whitespace-nowrap rounded-md px-2 py-1.5 hover:bg-zinc-100 hover:text-zinc-950" href="/workspace">
-                Workspace
+              <Link className="whitespace-nowrap rounded-md px-2 py-1.5 hover:bg-zinc-100 hover:text-zinc-950" href="/import">
+                Import
+              </Link>
+              <Link className="whitespace-nowrap rounded-md px-2 py-1.5 hover:bg-zinc-100 hover:text-zinc-950" href="/search">
+                Search
               </Link>
               <Link className="whitespace-nowrap rounded-md px-2 py-1.5 hover:bg-zinc-100 hover:text-zinc-950" href="/today">
                 Today
@@ -40,16 +46,13 @@ export default function RootLayout({
                 整理建议
               </Link>
               <Link className="whitespace-nowrap rounded-md px-2 py-1.5 hover:bg-zinc-100 hover:text-zinc-950" href="/knowledge">
-                知识库
+                Knowledge
               </Link>
               <Link className="whitespace-nowrap rounded-md px-2 py-1.5 hover:bg-zinc-100 hover:text-zinc-950" href="/tags">
                 Tags
               </Link>
-              <Link className="whitespace-nowrap rounded-md px-2 py-1.5 hover:bg-zinc-100 hover:text-zinc-950" href="/search">
-                搜索
-              </Link>
               <Link className="whitespace-nowrap rounded-md px-2 py-1.5 hover:bg-zinc-100 hover:text-zinc-950" href="/settings">
-                设置
+                Settings
               </Link>
             </div>
           </nav>

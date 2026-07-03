@@ -4,6 +4,7 @@ export const searchEntityTypes = [
   "knowledge",
   "tag",
   "workspace",
+  "task",
 ] as const;
 
 export type SearchEntityType = (typeof searchEntityTypes)[number];
@@ -20,5 +21,13 @@ export type SearchFilter = {
   tagId?: string;
   providerId?: string;
   status?: string;
+  taskStatus?: TaskStatus;
+  taskPriority?: TaskPriority;
+  taskType?: TaskType;
   dateRange?: SearchDateRange;
 };
+import type {
+  TaskPriority,
+  TaskStatus,
+  TaskType,
+} from "@/core/entities/task";

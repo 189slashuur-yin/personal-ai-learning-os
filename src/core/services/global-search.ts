@@ -8,6 +8,7 @@ import type {
 } from "@/core/entities/search-filter";
 import type { SearchResult } from "@/core/entities/search-result";
 import type { Tag } from "@/core/entities/tag";
+import type { Task } from "@/core/entities/task";
 import { DEFAULT_WORKSPACE_ID, type Workspace } from "@/core/entities/workspace";
 
 export type { SearchFilter, SearchEntityType as SearchResultType, SearchResult };
@@ -19,6 +20,7 @@ export type SearchData = {
   knowledgeCards: KnowledgeCard[];
   tags?: Tag[];
   workspaces: Workspace[];
+  tasks?: Task[];
 };
 
 type SearchDocument = SearchResult & {
@@ -258,12 +260,50 @@ function toSearchDocuments(data: SearchData): SearchDocument[] {
     searchableAt: workspace.updatedAt,
   }));
 
+  const tasks: SearchDocument[] = (data.tasks ?? []).map((task) => {
+    const workspaceId = task.workspaceId ?? DEFAULT_WORKSPACE_ID;
+    const workspaceName = workspaceById.get(workspaceId)?.name ?? "Inbox";
+    const sourceTitle = task.sourceRef?.titleSnapshot ?? "";
+    const sourceSummary = task.sourceRef?.summarySnapshot ?? "";
+    const content = [task.description, sourceTitle, sourceSummary]
+      .filter(Boolean)
+      .join(" ");
+
+    return {
+      id: task.id,
+      type: "task",
+      title: task.title,
+      excerpt: createExcerpt(content || task.title, ""),
+      matchedFields: [],
+      workspaceName,
+      taskStatus: task.status,
+      taskPriority: task.priority,
+      taskType: task.type,
+      dueDate: task.dueDate,
+      sourceRef: task.sourceRef,
+      updatedAt: task.updatedAt,
+      href: `/tasks?q=${encodeURIComponent(task.title)}`,
+      fields: {
+        title: task.title,
+        description: task.description ?? "",
+        sourceTitle,
+        sourceSummary,
+        workspace: workspaceName,
+      },
+      workspaceIds: [workspaceId],
+      tagIds: [],
+      status: task.status,
+      searchableAt: task.updatedAt,
+    };
+  });
+
   return [
     ...conversations,
     ...proposals,
     ...knowledge,
     ...tagDocuments,
     ...workspaces,
+    ...tasks,
   ];
 }
 
@@ -282,6 +322,24 @@ function applySearchFilter(documents: SearchDocument[], filter: SearchFilter) {
       (document) => !filter.providerId || document.providerId === filter.providerId,
     )
     .filter((document) => !filter.status || document.status === filter.status)
+    .filter(
+      (document) =>
+        document.type !== "task" ||
+        !filter.taskStatus ||
+        document.taskStatus === filter.taskStatus,
+    )
+    .filter(
+      (document) =>
+        document.type !== "task" ||
+        !filter.taskPriority ||
+        document.taskPriority === filter.taskPriority,
+    )
+    .filter(
+      (document) =>
+        document.type !== "task" ||
+        !filter.taskType ||
+        document.taskType === filter.taskType,
+    )
     .filter((document) => matchesDateRange(document.searchableAt, filter))
     .map((document) => {
       const matchedFields = query

@@ -1,6 +1,6 @@
 # Manual QA Checklist
 
-本清单基于 Epic D D1–D3、Epic A Feature Set 2、Feature Set 1、Sprint11、README、PROJECT、ROADMAP、HANDOFF 与当前页面实现整理。它是手工验收基线，不代表测试已经执行，不包含自动化测试。
+本清单基于 v0.7、Epic D、Epic A Feature Set 2、Feature Set 1、Sprint11、README、PROJECT、ROADMAP、HANDOFF 与当前页面实现整理。它是手工验收基线，不代表测试已经执行，不包含自动化测试。
 
 ## 测试准备
 
@@ -25,6 +25,21 @@
 | REL-08 | 对 Demo 执行 Connection Test，并确认云 Provider 不可启用。 | Demo 返回 Success；云 Provider 不请求 API Key、不发起真实调用。 | 是。 | Provider Safety |
 | REL-09 | 在 Ollama 默认关闭或服务不可达时检查设置与分析失败路径。 | 默认不访问网络；失败时不写 Proposal，并显示恢复或回退提示。 | 是。 | Ollama / Analyzer Safety |
 | REL-10 | 刷新页面并复核本次创建的数据。 | Conversation、Messages、Version、Proposal、Knowledge、Tag 与 Workspace 均保留。 | 是。 | BrowserStorage |
+
+## v0.7 Release Smoke Test
+
+适用版本：v0.7 Daily Learning Workflow。先使用全新浏览器数据执行，再使用保留 Sprint1–Sprint6 数据的浏览器执行兼容回归。
+
+| ID | 操作 | 预期结果 | 是否可能失败 | 失败模块 |
+| --- | --- | --- | --- | --- |
+| V07-01 | 打开 Dashboard、Workspace、Conversation、Import、Search、Today、Tasks、Knowledge、Tags、Settings。 | 主导航与页面全部可用，无白屏或阻塞错误。 | 是。 | Routing / Navigation |
+| V07-02 | 在 Today Quick Capture 创建无日期、今天、过去、未来 Task。 | 分别进入 Inbox、Today / Overdue、Upcoming，并在刷新后保留。 | 是。 | Today / Task Storage |
+| V07-03 | 完成、重开、归档、恢复并删除测试 Task。 | 生命周期状态和时间正确；删除不修改来源实体。 | 是。 | Task Lifecycle |
+| V07-04 | 从 Knowledge、Conversation、选中 Messages 各创建 Task。 | SourceRef 身份与快照正确；不影响 Proposal / Knowledge 数据。 | 是。 | Source-linked Task |
+| V07-05 | 删除一个 Task 来源并删除一个含 Task 的 Workspace。 | 来源 Task 保留并显示 deleted；Workspace Task 回迁 Inbox。 | 是。 | Task Degradation / Workspace |
+| V07-06 | 搜索并筛选 Task，再清除筛选。 | Task 结果、元数据、跳转和过滤正确；旧实体搜索仍正常。 | 是。 | Task Search |
+| V07-07 | 打开 `/search?q=demo&type=task&workspaceId=inbox` 并刷新。 | q、type、workspaceId 恢复；Task 专属筛选不要求 URL 恢复。 | 是。 | Search Routing |
+| V07-08 | 核对 README、ROADMAP、HANDOFF、ARCHITECTURE 与 Release Notes。 | 版本均为 v0.7，Epic D completed，Activity 仍 planned。 | 是。 | Release Documentation |
 
 ## Import
 
@@ -162,7 +177,19 @@
 | D3-06 | 从选中 Messages 创建 Task 后继续生成 Proposal。 | 选择保持不变；Proposal 生成逻辑与数量不受 Task 创建影响。 | 是：选择状态或 Proposal 被改写。 | Message Selection Boundary |
 | D3-07 | 在 `/tasks` 与 `/today` 检查手动及三类来源 Task。 | 清晰显示 Manual、Knowledge、Conversation、Message；可解析的 Knowledge / Conversation 标题可导航。 | 是：来源标签或导航错误。 | Task Source Display |
 | D3-08 | 删除 Task 引用的 Knowledge、Conversation 或第一条 Message。 | Task 保留并显示 `Source deleted`；titleSnapshot 与 summarySnapshot 继续显示，页面不崩溃且不提供失效跳转。 | 是：降级或快照丢失。 | Task Source Degradation |
-| D3-09 | 在全局 Search 搜索 Task 标题。 | 当前不返回 Task；README、ROADMAP 与 Handoff 明确 Search 尚未接入 Task。 | 否：当前已知限制。 | Search Scope |
+| D3-09 | 在全局 Search 搜索 Task 标题。 | 返回 Task 分组结果并显示来源与 Task 元数据。 | 是：Task 索引遗漏。 | Task Search |
+
+## Task Search Smoke Test
+
+| ID | 操作 | 预期结果 | 是否可能失败 | 失败模块 |
+| --- | --- | --- | --- | --- |
+| D4-01 | 分别搜索 Task title、description、SourceRef titleSnapshot、summarySnapshot。 | 四类字段均可命中正确 Task。 | 是：字段映射遗漏。 | Global Search |
+| D4-02 | 在类型筛选选择 Task。 | 只显示 Tasks 分组；Conversation、Proposal、Knowledge、Tag、Workspace 的类型筛选仍正常。 | 是：实体类型回归。 | Search Filter Model |
+| D4-03 | 组合 Task Workspace、status、priority、type。 | Task 同时满足全部条件；清除筛选后恢复。 | 是：组合条件错误。 | Task Search Filters |
+| D4-04 | 保持“全部类型”并设置 Task 专属筛选。 | 不符合条件的 Task 被过滤，非 Task 结果不因不适用字段消失。 | 是：跨类型错误过滤。 | Search Filter Semantics |
+| D4-05 | 空查询打开 Search，并创建一个最新更新 Task。 | 最近 12 条可包含 Task，仍按 updatedAt 排序并分组。 | 是：Recent 未纳入 Task。 | Search Recent |
+| D4-06 | 点击 Task 搜索结果。 | 打开带 `q` 的 `/tasks` 并恢复标题过滤；同名 Task 可同时出现。 | 是：路由或查询恢复失败。 | Task Search Routing |
+| D4-07 | 打开 `/search?q=demo&type=task&workspaceId=inbox` 并刷新。 | q、type、workspaceId 恢复；其它 Task 筛选当前不持久化。 | 是：URL 状态失败。 | Search Routing |
 
 ## Messages
 
@@ -274,7 +301,7 @@
 | SEA-02 | 搜索 Proposal 标题或摘要。 | 返回正确 Proposal。 | 是：Proposal 映射错误。 | Global Search |
 | SEA-03 | 搜索 Knowledge 内容。 | 返回正确 KnowledgeCard。 | 是：内容字段遗漏。 | Global Search |
 | SEA-04 | 搜索无结果、空格及大小写变体。 | 空结果提示正常，页面不报错。 | 是：查询归一化错误。 | Global Search |
-| SEA-05 | 空关键词打开 `/search`。 | 按更新时间显示最近 12 条本地内容，并按五类实体分组。 | 是：空搜索无内容或排序错误。 | Search Recent |
+| SEA-05 | 空关键词打开 `/search`。 | 按更新时间显示最近 12 条本地内容，并按六类实体分组。 | 是：空搜索无内容或排序错误。 | Search Recent |
 | SEA-06 | 输入关键词并快速连续修改。 | 约 300ms 后更新结果，不因中间输入重复跳动。 | 是：debounce 失效。 | Search UI |
 | SEA-07 | 分别筛选类型、Workspace、Tag、Provider 和状态。 | 结果只保留同时满足条件的实体；清除后恢复。 | 是：组合筛选错误。 | Search Filter Model |
 | SEA-08 | 搜索 Tag 名称和 Workspace 名称。 | 分别出现在 Tags、Workspaces 分组，可进入对应页面。 | 是：新实体遗漏。 | Global Search Mapping |

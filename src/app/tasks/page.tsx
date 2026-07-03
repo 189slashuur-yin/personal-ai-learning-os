@@ -1,6 +1,12 @@
 import { TaskManager } from "./task-manager";
 
-export default function TasksPage() {
+type TasksPageProps = {
+  searchParams: Promise<{ q?: string }>;
+};
+
+export default async function TasksPage({ searchParams }: TasksPageProps) {
+  const { q = "" } = await searchParams;
+
   return (
     <main className="workspace-shell pb-24">
       <p className="eyebrow">Task Management</p>
@@ -8,7 +14,7 @@ export default function TasksPage() {
       <p className="workspace-description">
         按日期视图、Workspace、Priority 和 Type 管理 Task，并搜索标题或描述。
       </p>
-      <TaskManager />
+      <TaskManager initialQuery={q} />
     </main>
   );
 }
