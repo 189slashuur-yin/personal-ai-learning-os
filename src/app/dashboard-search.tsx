@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
 
@@ -34,6 +35,12 @@ export function DashboardSearch() {
         />
         <span className="hidden text-xs text-zinc-400 sm:inline">300ms 实时搜索</span>
       </label>
+      <Link
+        className="mt-3 inline-flex text-sm font-medium text-zinc-600 hover:text-zinc-950"
+        href="/search"
+      >
+        打开 Global Search 2.0 →
+      </Link>
     </form>
   );
 }

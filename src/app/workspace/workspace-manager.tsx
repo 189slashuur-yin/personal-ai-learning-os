@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { type FormEvent, useEffect, useState } from "react";
 import type { Conversation } from "@/core/entities/conversation";
 import type { KnowledgeCard } from "@/core/entities/knowledge-card";
@@ -165,9 +166,17 @@ function WorkspaceCard({
             </p>
           </div>
         </div>
-        <div className="flex gap-4 text-sm text-zinc-600">
-          <span><strong className="text-zinc-950">{conversationCount}</strong> Conversation</span>
-          <span><strong className="text-zinc-950">{knowledgeCount}</strong> Knowledge</span>
+        <div className="text-right text-sm text-zinc-600">
+          <div className="flex gap-4">
+            <span><strong className="text-zinc-950">{conversationCount}</strong> Conversation</span>
+            <span><strong className="text-zinc-950">{knowledgeCount}</strong> Knowledge</span>
+          </div>
+          <Link
+            className="mt-2 inline-block text-xs font-semibold text-zinc-600 hover:text-zinc-950"
+            href={`/search?workspaceId=${encodeURIComponent(workspace.id)}`}
+          >
+            搜索此 Workspace →
+          </Link>
         </div>
       </div>
 

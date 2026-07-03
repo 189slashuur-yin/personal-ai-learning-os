@@ -803,9 +803,17 @@ export function ConversationDetail({
               </button>
             )}
           </div>
-          <span className="rounded-full border border-zinc-200 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-600 shadow-sm">
-            {conversation.sourceType}
-          </span>
+          <div className="flex flex-wrap items-center gap-3">
+            <Link
+              className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs font-semibold text-zinc-600 shadow-sm hover:border-zinc-300 hover:text-zinc-950"
+              href={`/search?q=${encodeURIComponent(conversation.title)}&workspaceId=${encodeURIComponent(conversation.workspaceId ?? DEFAULT_WORKSPACE_ID)}&type=conversation`}
+            >
+              搜索此 Conversation
+            </Link>
+            <span className="rounded-full border border-zinc-200 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-600 shadow-sm">
+              {conversation.sourceType}
+            </span>
+          </div>
         </div>
       </header>
 

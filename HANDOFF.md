@@ -1,4 +1,82 @@
-# Epic B — Workspace Foundation Handoff
+# Epic C — Search 2.0 Handoff
+
+## 当前状态
+
+Epic C Part 1–3 已实现。Search 已从三类关键词匹配升级为五类结构化本地检索中心；未新增存储结构，未创建 Git commit。
+
+## Part 1 — Search Filter Model
+
+- 新增 `SearchFilter`，支持 query、entityTypes、workspaceId、tagId、providerId、status 与 dateRange。
+- 新增统一 `SearchResult`，包含 title、excerpt、matchedFields、Workspace、Tags、Provider、updatedAt 和实体路由。
+- GlobalSearch 支持 Conversation、Proposal、KnowledgeCard、Tag、Workspace，并保留旧 `searchLearningOS(data, string)` 入口。
+- 旧数据缺少 Workspace、Provider 或其它可选字段时安全回退，不修改或清空 LocalStorage。
+- checkpoint：lint、build、diff-check 通过。
+
+## Part 2 — Search UI 2.0
+
+- `/search` 使用 300ms debounce，并支持类型、Workspace、Tag、Provider、状态组合筛选。
+- 结果按 Conversations、Proposals、Knowledge、Tags、Workspaces 分组。
+- 结果展示 title、excerpt、type badge，以及可用的 Workspace、Tags、Provider 和 updatedAt。
+- 无结果显示 Empty State；空关键词展示按更新时间排序的最近 12 条内容。
+- checkpoint：lint、build、diff-check 通过。
+
+## Part 3 — Search Integration
+
+- Dashboard 增加明确的 Global Search 2.0 入口；Knowledge 增加按 Knowledge 类型查看入口。
+- Conversation Detail 增加带当前标题、Workspace 和类型的搜索入口。
+- 每张 Workspace Card 增加“搜索此 Workspace”。
+- Search URL 支持 `q`、`workspaceId`、`type`，交互后同步 URL，刷新可恢复三项状态。
+- README、PROJECT、ARCHITECTURE、架构图、ROADMAP、CHANGELOG、HANDOFF 与 QA Checklist 已同步。
+
+## 新增文件
+
+- `src/core/entities/search-filter.ts`
+- `src/core/entities/search-result.ts`
+
+## 修改文件
+
+- Core Service：`src/core/services/global-search.ts`
+- Search UI：`src/app/search/page.tsx`、`src/app/search/search-experience.tsx`
+- Integration UI：`src/app/dashboard-search.tsx`、`src/app/knowledge/page.tsx`、`src/app/conversation/[id]/conversation-detail.tsx`、`src/app/workspace/workspace-manager.tsx`
+- Documentation：`README.md`、`PROJECT.md`、`ARCHITECTURE.md`、`ROADMAP.md`、`CHANGELOG.md`、`HANDOFF.md`、`docs/QA_CHECKLIST.md`、`docs/architecture/architecture-diagram.md`
+
+## 手动验收步骤
+
+1. 打开 `/search`，确认空关键词展示最近 12 条内容，并按五类分组。
+2. 快速输入关键词，确认约 300ms 后更新；测试大小写、空格和无结果 Empty State。
+3. 分别及组合测试类型、Workspace、Tag、Provider、状态筛选，并检查清除行为。
+4. 核对结果 title、excerpt、type badge、Workspace、Tags、Provider、updatedAt 和点击跳转。
+5. 打开 `/search?q=demo&workspaceId=inbox&type=conversation` 并刷新，确认状态恢复；修改三项后确认 URL 同步。
+6. 从 Dashboard、Knowledge、Conversation Detail 和 Workspace Card 进入搜索，核对预设上下文。
+7. 使用缺少新可选字段的旧 Conversation / Proposal / Knowledge 数据搜索，确认不报错、不改写数据。
+8. 回归 Conversation → Proposal → Review → Knowledge，以及 Workspace、Tag、Provider 原流程。
+
+## 已知限制
+
+- Search 对当前 LocalStorage 集合执行同步线性扫描，适合单浏览器小数据量，不提供索引或相关性评分。
+- 关键词使用大小写不敏感的子串匹配，不支持模糊匹配、拼写纠正或高级查询语法。
+- URL 只持久化需求指定的 `q`、`workspaceId`、`type`；Tag、Provider、状态筛选刷新后重置。
+- Tag 与 Workspace 结果进入现有管理或列表页，没有独立详情路由。
+- 不包含数据库、RAG、Embedding、AI 搜索、云同步或权限系统。
+
+## Architecture Impact
+
+- Entity：新增 SearchFilter 与 SearchResult；SearchEntityType 覆盖五类可检索实体。
+- Service：GlobalSearch 集中完成实体关系解析、统一映射、关键词匹配、结构化过滤和时间排序。
+- Infrastructure：复用现有 BrowserStorage Adapter；不新增 LocalStorage key、迁移或索引。
+- UI：`/search` 成为全局检索中心，四个业务入口通过 URL 传递搜索上下文。
+- Compatibility：旧字符串搜索入口继续可用；旧记录的可选引用与元数据安全降级。
+
+## 质量检查
+
+- Part 1：lint、build、diff-check 通过。
+- Part 2：lint、build、diff-check 通过。
+- Part 3：lint、build、diff-check 通过。
+- 最终检查：lint、build、diff-check 通过。
+
+---
+
+# Previous Handoff — Epic B / Workspace Foundation
 
 ## 当前状态
 

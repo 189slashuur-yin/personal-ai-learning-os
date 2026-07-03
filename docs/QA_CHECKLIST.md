@@ -211,6 +211,14 @@
 | SEA-02 | 搜索 Proposal 标题或摘要。 | 返回正确 Proposal。 | 是：Proposal 映射错误。 | Global Search |
 | SEA-03 | 搜索 Knowledge 内容。 | 返回正确 KnowledgeCard。 | 是：内容字段遗漏。 | Global Search |
 | SEA-04 | 搜索无结果、空格及大小写变体。 | 空结果提示正常，页面不报错。 | 是：查询归一化错误。 | Global Search |
+| SEA-05 | 空关键词打开 `/search`。 | 按更新时间显示最近 12 条本地内容，并按五类实体分组。 | 是：空搜索无内容或排序错误。 | Search Recent |
+| SEA-06 | 输入关键词并快速连续修改。 | 约 300ms 后更新结果，不因中间输入重复跳动。 | 是：debounce 失效。 | Search UI |
+| SEA-07 | 分别筛选类型、Workspace、Tag、Provider 和状态。 | 结果只保留同时满足条件的实体；清除后恢复。 | 是：组合筛选错误。 | Search Filter Model |
+| SEA-08 | 搜索 Tag 名称和 Workspace 名称。 | 分别出现在 Tags、Workspaces 分组，可进入对应页面。 | 是：新实体遗漏。 | Global Search Mapping |
+| SEA-09 | 检查任一结果卡。 | 显示 title、excerpt、type badge，以及可用的 workspace、tags、provider、updatedAt。 | 是：元数据映射错误。 | Search Result UI |
+| SEA-10 | 打开 `/search?q=demo&workspaceId=inbox&type=conversation` 后刷新。 | 搜索词和三项筛选状态恢复，URL 与交互状态一致。 | 是：URL 恢复失败。 | Search Routing |
+| SEA-11 | 从 Dashboard、Knowledge、Conversation、Workspace 使用搜索入口。 | 分别打开全局搜索；上下文入口带入对应 type、query 或 workspaceId。 | 是：集成入口缺失。 | Search Integration |
+| SEA-12 | 使用 Sprint1–Sprint6 缺少可选元数据的旧记录搜索。 | 页面不报错；缺失 Workspace 安全回退 Inbox，其它缺失元数据不伪造。 | 是：旧数据兼容失败。 | Search Compatibility |
 
 ## Smoke Test Checklist
 

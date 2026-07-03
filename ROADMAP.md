@@ -6,8 +6,15 @@
 
 - Phase1 / MVP：已完成，覆盖本地 Import、Conversation、Analyzer、Review、Knowledge 与 Provider 边界。
 - Phase2：进行中，范围为 Workspace、Conversation Editing 与 Knowledge Editing；Epic B 已完成。
-- Phase3：未开始，候选范围为 Real AI、Search 2.0 与 RAG，必须独立评审。
+- Phase3：进行中；Epic C Search 2.0 已完成。Real AI 与 RAG 仍未开始，必须独立评审。
 - Phase4：未开始，候选范围为 Memory 与 Agent，当前不实现。
+
+## Epic C — Search 2.0（已完成）
+
+- Part 1：新增 SearchFilter / SearchResult Core 模型；GlobalSearch 支持 Conversation、Proposal、Knowledge、Tag、Workspace 的关键词与结构化过滤，并兼容旧字符串入口。
+- Part 2：`/search` 增加 300ms debounce、类型 / Workspace / Tag / Provider / 状态筛选、五类结果分组、完整结果元数据、Empty State 与最近更新。
+- Part 3：Dashboard、Knowledge、Conversation、Workspace 接入全局搜索；`q`、`workspaceId`、`type` URL 状态可在刷新后恢复。
+- 明确不做数据库、RAG、Embedding、AI 搜索、云同步或权限系统。
 
 ## Epic B — Workspace Foundation（已完成）
 

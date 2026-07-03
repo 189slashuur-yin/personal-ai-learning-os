@@ -2,6 +2,16 @@
 
 本文件记录当前仓库已经完成的 Sprint 与关键提交。日期使用仓库 commit date。
 
+## 2026-07-03 — Epic C: Search 2.0
+
+状态：已完成，未创建 Git commit。
+
+- 新增 `SearchFilter` 与 `SearchResult` Core Entity；GlobalSearch 支持五类实体、关键词、Workspace、Tag、Provider、状态和日期范围过滤。
+- 保留旧字符串搜索入口与旧 LocalStorage 数据兼容，不新增存储 key 或索引。
+- `/search` 增加 300ms debounce、五类分组、结果元数据、Empty State 与最近更新。
+- Dashboard、Knowledge、Conversation 与 Workspace 增加搜索入口；URL 支持并恢复 `q`、`workspaceId`、`type`。
+- 未实现数据库、RAG、Embedding、AI 搜索、云同步或权限系统。
+
 ## 2026-07-03 — Epic B: Workspace Foundation
 
 状态：已完成，未创建 Git commit。

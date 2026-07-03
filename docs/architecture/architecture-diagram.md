@@ -14,7 +14,10 @@ flowchart TD
   P --> R[Review]
   R --> K[KnowledgeCard]
   K --> T[Tag]
-  K --> X[Search]
+  W --> X[Search 2.0]
+  C --> X
+  P --> X
+  K --> X
   T --> X
   X -. future .-> MM[Memory]
   MM -. future .-> AG[Agent]
