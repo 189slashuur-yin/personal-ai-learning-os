@@ -1,4 +1,207 @@
-# Epic D D4 — Task Search + Release v0.7 Stabilization Handoff
+# v0.9 Draft — Data Foundation & Search Handoff
+
+## 当前状态
+
+Part 0–9 已实现；所有分段 checkpoint 与 Part 9 最终门禁均通过。未创建 Git commit，手工 QA 尚未执行，因此版本保持 v0.9 draft。
+
+## Part 0–9 完成情况
+
+- Part 0：新增 RFC-004 与 ADR-003，冻结 Raw / Interpreted、搜索演进、Asset 与备份边界。
+- Part 1：Conversation 增加可选 note、旧数据归一化、详情编辑/保存/取消与搜索覆盖。
+- Part 2：新增 SearchDocument 与 SearchIndexService，运行时构建九类文档，不持久化索引。
+- Part 3：`/search` 展示具体文本片段、来源路径、Workspace、matched fields，并按相关度排序。
+- Part 4：加入 normalized subsequence fuzzy 与 exact / contains / fuzzy 标记；未新增依赖。
+- Part 5：新增 Asset Entity / Contract / BrowserStorage / Service 与 Conversation metadata UI。
+- Part 6：新增项目白名单备份脚本，支持默认 `backups/` 与自定义 target。
+- Part 7：Settings / Help 增加 Data Management、复制备份命令与边界说明。
+- Part 8：Task 保留但改为可选次要动作；Analyze 继续为主按钮。
+- Part 9：同步产品、架构、Roadmap、QA、生命周期、Changelog 与 v0.9 Release Draft。
+
+## v0.9 新增文件
+
+- `docs/rfc/RFC-004-data-and-search-foundation.md`
+- `docs/adr/ADR-003-local-asset-library.md`
+- `docs/releases/v0.9-draft.md`
+- `scripts/backup-local-data.mjs`
+- `src/core/entities/search-document.ts`
+- `src/core/services/search-index-service.ts`
+- `src/core/entities/asset.ts`
+- `src/core/contracts/asset-storage.ts`
+- `src/infrastructure/storage/browser-asset-storage.ts`
+- `src/core/services/asset-service.ts`
+- `src/app/conversation/[id]/conversation-assets.tsx`
+- `src/app/settings/data-management.tsx`
+
+## v0.9 修改文件
+
+- `.gitignore`
+- `src/core/entities/conversation.ts`
+- `src/infrastructure/storage/browser-conversation-storage.ts`
+- `src/core/services/global-search.ts`
+- `src/app/conversation/[id]/conversation-detail.tsx`
+- `src/app/search/page.tsx`
+- `src/app/search/search-experience.tsx`
+- `src/app/settings/page.tsx`
+- `src/app/help/page.tsx`
+- `README.md`、`PROJECT.md`、`ARCHITECTURE.md`、`ROADMAP.md`、`CHANGELOG.md`、`HANDOFF.md`
+- `docs/QA_CHECKLIST.md`
+- `docs/architecture/DOMAIN_MODEL.md`
+- `docs/architecture/DATA_LIFECYCLE.md`
+
+## 手动验收步骤
+
+1. 使用旧浏览器数据打开 Conversation，确认 note 缺失安全；测试编辑、取消、保存、刷新和 updatedAt。
+2. 在 Note、Source、Message、Q&A、Proposal evidence、Knowledge、Task SourceRef 写入唯一词并从 `/search` 检索。
+3. 核对 snippet、matched fields、Workspace、来源路径、相关度顺序和实体跳转；组合 type / Workspace 筛选并刷新。
+4. 分别搜索完整值、子串与 `oa`，确认 exact / contains / fuzzy 及弱匹配低分。
+5. 添加、刷新、取消删除和确认删除 Conversation Asset metadata；确认本机文件从未读取或删除。
+6. 分别运行默认和自定义 target 备份命令，确认不覆盖旧目录且不读取项目外源文件。
+7. 检查 Settings / Help 的 Data Management 和复制命令；确认没有浏览器执行脚本入口。
+8. 选择 Messages，确认 Analyze 是主动作，Create Task（可选）为次要动作。
+9. 完整执行 `docs/QA_CHECKLIST.md` 的 V09-01 至 V09-10，并回归 Import → Proposal → Review → Knowledge。
+
+## 已知限制
+
+- fuzzy 只是 normalized subsequence，不是编辑距离、拼写纠正或语义搜索；短词可能产生宽泛弱匹配。
+- 索引在页面运行时同步重建，适合当前单浏览器小数据量。
+- Message / Q&A 结果打开所属 Conversation，但暂不滚动到精确锚点。
+- Asset 只保存 metadata/path，不验证文件存在、不复制文件；删除 metadata 不删除文件。
+- 备份脚本不导出浏览器 LocalStorage，也不跟随外部 Asset 路径。
+- 手工 QA 尚未执行，没有自动化测试套件。
+
+## Architecture Impact
+
+- Raw / Interpreted：Conversation / Source / Message 保持原始层；Proposal 是解释草稿；Knowledge 是人工确认结果。
+- Search：SearchDocument 是非持久化读模型，SearchIndexService 不拥有或修改 canonical data。
+- Storage：Conversation note 与 Asset metadata 均经 Contract / BrowserStorage；Page 未直接访问 LocalStorage。
+- Asset：文件内容位于用户控制的文件系统，浏览器只保存 metadata 引用。
+- Backup：Node 脚本只读取项目白名单内容，target 仅用于输出。
+- AI / Safety：未增加 Provider、API Key、RAG、Embedding 或自动接受 Proposal。
+
+## 是否建议 commit
+
+建议先完成 V09-01 至 V09-10 手工 QA；通过后再创建一个聚焦的 v0.9 commit。本轮按要求不创建 commit。
+
+## 质量检查
+
+- `npm run lint`：通过。
+- `npm run build`：通过；Next.js production build 成功生成 16 个路由。
+- `git diff --check`：通过。
+- Part 4 首次 build 发现局部 TypeScript `flatMap` 联合类型推断错误；按规则做一次显式候选类型的最小修复后完整重跑通过。
+
+---
+
+# Previous Handoff — v0.8 Draft Product Onboarding + Conversation Q&A Pair UX
+
+## 当前状态
+
+Part 1–8 已完成，所有分段 checkpoint 与最终自动质量门禁均通过；未创建 Git commit。手工 QA 尚未执行，因此版本状态为 v0.8 draft，不标记正式发布。
+
+## Part 1–8 完成情况
+
+- Part 1：新增 `/help` 中文操作手册、核心概念、推荐流程和 Ollama Analyze 边界；导航增加 Help。
+- Part 2：Settings 收敛为 Demo / Ollama；Ollama 只有 enabled 且 Test Success 后才能设为当前 Provider；Dashboard 与 Settings 读取同一当前选择；默认模型为 `qwen3:8b`。
+- Part 3：新增无持久化 Q&A Pair 类型与派生服务，覆盖连续 Assistant、未回答、Orphan Assistant 与 Unknown。
+- Part 4：Conversation 支持 Timeline / Q&A Pair 双视图、Pair 搜索、三种排序、展开折叠、多选和复用 Messages Analyze。
+- Part 5：Conversation 顶部增加原始内容、Messages、Q&A Pair、Analyze、Review、Knowledge 六步动态引导。
+- Part 6：Knowledge 明确 Active / Archived 语义，推荐 Archive；Delete Forever 移入双重确认 Danger Zone。
+- Part 7：Dashboard 横向显示最近 8 条 Conversation、标题和 60 字原文/首条 Message 摘要。
+- Part 8：更新 README、ROADMAP、CHANGELOG、HANDOFF、QA Checklist，并新增 v0.8 draft Release Notes。
+
+## 新增文件
+
+- `src/app/help/page.tsx`
+- `src/core/entities/qa-pair.ts`
+- `src/core/services/qa-pair-service.ts`
+- `docs/releases/v0.8-draft.md`
+
+## 修改文件
+
+- `src/app/layout.tsx`
+- `src/app/dashboard-overview.tsx`
+- `src/app/settings/provider-settings.tsx`
+- `src/app/conversation/[id]/conversation-detail.tsx`
+- `src/app/knowledge/[id]/knowledge-detail.tsx`
+- `src/core/services/provider-service.ts`
+- `src/core/services/provider-configuration-service.ts`
+- `README.md`
+- `ROADMAP.md`
+- `CHANGELOG.md`
+- `HANDOFF.md`
+- `docs/QA_CHECKLIST.md`
+
+## 手动验收步骤
+
+1. 执行 `docs/QA_CHECKLIST.md` 的 V08-01 至 V08-12；分别使用全新浏览器数据和保留 Sprint1–Sprint6 数据的浏览器配置。
+2. 在 `/settings` 验证 Ollama 未启用、未测试、测试失败、测试成功、设为当前、禁用回退六条路径，并核对 Dashboard。
+3. 导入含 User、Unknown、连续 Assistant、未回答 User 和纯 Assistant 的材料，核对 Pair 派生、搜索、排序、折叠与选择映射。
+4. 从一个或多个 Pair Analyze，确认 Proposal 仍保存 selected Message IDs、Evidence 和 messages analysis mode；Review / Knowledge Snapshot 不变。
+5. 逐步构造六种 Conversation 状态，核对流程条突出项和 Help 链接。
+6. 在 Knowledge 验证 Archive / Restore，并分别取消两次 Delete Forever 确认；只在隔离数据中执行最终删除。
+7. 创建至少 9 条 Conversation，核对 Dashboard 最近 8 条的顺序、摘要和链接。
+
+## 已知限制
+
+- Q&A Pair 由 Messages 实时派生，不支持手动拆分、合并、拖拽或独立持久化；System Message 作为独立 context Pair 保留。
+- Pair 的最近更新排序依赖 Message `updatedAt`，旧数据回退 `createdAt`。
+- Pair 选择最终仍是 Message 选择；Proposal 和 Knowledge 不保存 Pair ID，这是保持现有快照兼容的设计。
+- Ollama 测试成功只代表测试时本地 `/api/tags` 可达；之后服务停止时 Analyze 仍会按现有错误隔离流程失败。
+- 数据仍限当前浏览器 LocalStorage；没有数据库、备份、同步或多人协作。
+- 手工 QA 尚未执行。
+
+## Architecture Impact
+
+- Entity：新增仅运行时使用的 `QAPair` / `QAPairKind`，不改变 Message、Proposal 或 KnowledgeCard。
+- Service：新增纯函数 `deriveQAPairs()`；ProviderService 增加 Ollama enabled + Test Success 双重门禁。
+- Infrastructure：没有新增或修改 storage key，没有数据迁移；所有持久化继续经 BrowserStorage。
+- Page：新增 Help；Conversation 只把 Pair 选择映射回现有 `selectedMessageIds`；Knowledge 与 Dashboard 为展示层增强。
+- AI / Safety：没有新增 Provider、API Key 或云调用；Analyzer 仍只能生成 Proposal，Review 仍是 Knowledge 必经步骤。
+
+## 质量检查
+
+- 每个 Part 后：`npm run lint`、`npm run build`、`git diff --check` 均通过。
+- 最终检查：通过。
+- Part 1 首次 build 因沙箱禁止 Turbopack 绑定内部端口失败；按规则在允许环境重跑一次后通过，后续构建均通过。
+
+## 是否建议 commit
+
+建议先完成 V08-01 至 V08-12 手工验收；无阻断问题后再创建一个聚焦的 v0.8 commit。本轮按要求不创建 commit。
+
+---
+
+# Previous Handoff — Release v0.7 Review
+
+## 当前状态
+
+已完成 v0.7 Release Review。本轮只新增发布评审文档并更新 Handoff，没有修改 `src/`、运行时行为、存储结构、依赖或 ROADMAP，也没有新增功能或创建 Git commit。
+
+## 交付结果
+
+- 新增 `docs/reviews/Release-v0.7-Review.md`。
+- 评审覆盖 v0.7 完成范围、知识与行动核心链路、可日常使用流程、已知限制、技术债、v0.8 候选方向和手动验收建议。
+- v0.8 仅建议评估 Epic E — Knowledge Productivity；范围、数据模型和验收标准仍需产品负责人单独批准。
+- ROADMAP 当前已明确 Epic D 完成、Epic E 为建议下一步及范围护栏，因此本轮无需修改。
+
+## Review 结论
+
+v0.7 已形成“收集材料—生成 Proposal—人工 Review—沉淀 Knowledge—创建 Task—Today 执行—Search 检索”的本地日常闭环，适合单人、单浏览器、小数据量使用。主要发布风险仍是 LocalStorage 数据安全、缺少自动化测试，以及新旧浏览器数据上的手工兼容回归。
+
+## 质量检查
+
+- `npm run lint`：通过。
+- `npm run build`：通过。
+- `git diff --check`：通过。
+- 手工 QA：本轮未执行；应按评审文档和 `docs/QA_CHECKLIST.md` 分别使用全新数据与 Sprint1–Sprint6 历史数据执行。
+
+## 下一步
+
+1. 执行 `V07-01` 至 `V07-08` 以及知识主链路、Conversation Restore 和破坏性操作边界回归。
+2. 手工验收通过后，再由产品负责人决定 v0.7 发布判定和 v0.8 范围。
+3. 不从本次评审顺延 Activity、Agent、RAG、Calendar、Reminder、Recurring Task、云 Provider 或自动化。
+
+---
+
+# Previous Handoff — Epic D D4 Task Search + Release v0.7 Stabilization
 
 ## 当前状态
 

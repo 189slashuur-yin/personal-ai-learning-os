@@ -145,6 +145,13 @@ export function KnowledgeDetail({ cardId }: { cardId: string }) {
     ) {
       return;
     }
+    if (
+      !window.confirm(
+        `再次确认：永久删除「${draft?.title ?? card?.title ?? "这条知识"}」？删除后无法恢复。`,
+      )
+    ) {
+      return;
+    }
     new BrowserKnowledgeCardStorage().remove(cardId);
     router.push("/knowledge");
   }
@@ -278,6 +285,14 @@ export function KnowledgeDetail({ cardId }: { cardId: string }) {
               <option value="Archived">Archived</option>
             </select>
           </div>
+          <div className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
+            <p className={`rounded-lg border p-3 ${draft.status === "Active" ? "border-emerald-200 bg-emerald-50 text-emerald-900" : "border-zinc-200 bg-zinc-50 text-zinc-600"}`}>
+              <span className="font-semibold">Active</span> 表示仍在日常使用和默认搜索中显示。
+            </p>
+            <p className={`rounded-lg border p-3 ${draft.status === "Archived" ? "border-sky-200 bg-sky-50 text-sky-900" : "border-zinc-200 bg-zinc-50 text-zinc-600"}`}>
+              <span className="font-semibold">Archived</span> 表示暂时退出日常视图，但仍可搜索和恢复。
+            </p>
+          </div>
           <label className="mt-5 block">
             <span className="sr-only">标题</span>
             <input
@@ -400,16 +415,31 @@ export function KnowledgeDetail({ cardId }: { cardId: string }) {
         </div>
 
         <div className="flex flex-wrap items-center justify-between gap-3 border-t border-zinc-100 bg-zinc-50 px-6 py-4 sm:px-8">
+          <p className="text-sm text-zinc-600">暂时不用时，推荐 Archive；内容仍可恢复。</p>
           <button
             className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-100"
             onClick={() => changeDraft({ status: draft.status === "Active" ? "Archived" : "Active" })}
             type="button"
           >
-            {draft.status === "Active" ? "Archive" : "恢复为 Active"}
+            {draft.status === "Active" ? "推荐：Archive" : "恢复为 Active"}
           </button>
-          <button className="rounded-lg px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50" onClick={deleteKnowledge} type="button">彻底删除</button>
         </div>
       </article>
+
+      <section className="mt-8 rounded-2xl border border-red-200 bg-red-50 p-6">
+        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-red-700">Danger Zone</p>
+        <h2 className="mt-2 text-lg font-semibold text-red-950">Delete Forever</h2>
+        <p className="mt-2 max-w-2xl text-sm leading-6 text-red-800">
+          永久删除无法恢复。通常应优先使用 Archive；只有确认不再需要这条知识时才执行删除。关联 Task 会保留，但来源会显示 missing。
+        </p>
+        <button
+          className="mt-4 rounded-lg border border-red-300 bg-white px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-100"
+          onClick={deleteKnowledge}
+          type="button"
+        >
+          Delete Forever（需要二次确认）
+        </button>
+      </section>
     </main>
   );
 }

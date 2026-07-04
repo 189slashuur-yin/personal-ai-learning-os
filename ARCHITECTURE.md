@@ -1,5 +1,13 @@
 # Architecture
 
+## v0.9 Data Foundation & Search baseline
+
+v0.9 新增运行时 `SearchDocument` 读模型与 `SearchIndexService`，从 Workspace、Conversation、Source、Message、派生 Q&A Pair、Proposal、KnowledgeCard、Task、Tag 构建全文文档。索引不持久化、不拥有源数据；搜索使用标准化 contains、简单评分与低权重 subsequence fuzzy，并返回 snippet、matched fields、Workspace 和来源路径。
+
+Conversation 新增可选 `note`，由 BrowserConversationStorage 兼容旧数据。Asset 使用独立 Entity、Contract、BrowserStorage 与 Service，只保存 owner、path、hash 等 metadata；浏览器不保存或读取文件内容。备份脚本只复制项目白名单文档和存在时的 `data/`，不宣称导出浏览器 LocalStorage。完整决策见 [RFC-004](./docs/rfc/RFC-004-data-and-search-foundation.md) 与 [ADR-003](./docs/adr/ADR-003-local-asset-library.md)。
+
+本版本不包含 RAG、Embedding、Agent、Calendar、Reminder、Cloud Sync、数据库迁移或真实云 Provider API。
+
 ## Release v0.7 architecture baseline
 
 v0.7 是 Phase2 的 Daily Learning Workflow 基线，Epic D 已完成。Task 已作为独立领域接入 Contract、BrowserStorage、Service、Today / Tasks UI 与 Search；系统继续采用 Entity、Contract、BrowserStorage、Service、Page 五类职责，并保持 Demo Provider 默认可用、Ollama 可选启用、人工 Review 必经的边界。
@@ -240,6 +248,6 @@ LocalStorage 适合当前单设备 MVP，但容量有限、同步读写、无事
 
 Workspace 只提供单层归属，不形成目录树，也不引入账号、权限、团队协作、数据库或云同步。相关决策见 [RFC-002](./docs/rfc/RFC-002-workspace.md)；LocalStorage 与人工审核边界分别见 [ADR-001](./docs/adr/ADR-001-localstorage-first.md) 和 [ADR-002](./docs/adr/ADR-002-human-review-required.md)。
 
-Search 2.0 是对当前 LocalStorage 集合的同步线性扫描，适合当前单浏览器小数据量边界；它不包含数据库索引、RAG、Embedding、AI 搜索或云同步。
+v0.9 SearchIndexService 是对当前 LocalStorage 集合的同步运行时构建与线性评分，适合当前单浏览器小数据量边界；它不包含数据库索引、RAG、Embedding、AI 语义搜索或云同步。
 
 Task 使用独立 Contract、BrowserStorage 与 Service，并由 Search 只读映射。Knowledge 不负责行动，Task 不负责知识内容，Provider 不负责业务决策，Search 不拥有数据，未来 Activity 不负责当前业务状态。AI 不能直接创建、完成或删除 Task；AI Suggest Task 也未实现。

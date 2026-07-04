@@ -34,7 +34,7 @@ type DashboardData = {
   todayTaskCount: number;
   workspaceCount: number;
   recentWorkspaces: Array<{ workspace: Workspace; conversationCount: number }>;
-  recentConversations: Conversation[];
+  recentConversations: Array<{ conversation: Conversation; preview: string }>;
   recentImports: Array<{
     conversation: Conversation;
     source: ImportedSource;
@@ -59,6 +59,11 @@ function formatDashboardTime(timestamp: string | null) {
     hour: "2-digit",
     minute: "2-digit",
   }).format(new Date(timestamp));
+}
+
+function conversationPreview(value: string) {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  return normalized.length > 60 ? `${normalized.slice(0, 59)}…` : normalized;
 }
 
 export function DashboardOverview() {
@@ -149,7 +154,16 @@ export function DashboardOverview() {
               (conversation) => conversation.workspaceId === workspace.id,
             ).length,
           })),
-        recentConversations: recentConversations.slice(0, 4),
+        recentConversations: recentConversations.slice(0, 8).map((conversation) => {
+          const source = sourceStorage.getByConversationId(conversation.id);
+          const firstMessage = messages
+            .filter((message) => message.conversationId === conversation.id)
+            .sort((left, right) => left.order - right.order)[0];
+          return {
+            conversation,
+            preview: conversationPreview(source?.content ?? firstMessage?.content ?? "暂无原文或 Message 摘要"),
+          };
+        }),
         recentImports,
         recentKnowledge: activeKnowledge.slice(0, 4),
         recentTags: tags.slice(0, 6),
@@ -324,32 +338,29 @@ export function DashboardOverview() {
         {data.recentConversations.length === 0 ? (
           <div className="mt-5 rounded-xl border border-dashed border-zinc-300 bg-white p-8 text-center">
             <p className="text-sm text-zinc-500">
-              暂无 Conversation，先创建一个工作区。
+              暂无 Conversation，请先从 Import 导入内容。
             </p>
             <Link
               className="mt-4 inline-block rounded-lg bg-zinc-950 px-4 py-2.5 text-sm font-medium text-white"
-              href="/conversation"
+              href="/import"
             >
-              前往 Conversation
+              前往 Import
             </Link>
           </div>
         ) : (
-          <div className="mt-5 overflow-hidden rounded-xl border border-zinc-200 bg-white">
-            {data.recentConversations.map((conversation, index) => (
+          <div className="mt-5 flex gap-3 overflow-x-auto pb-2">
+            {data.recentConversations.map(({ conversation, preview }) => (
               <Link
-                className={`flex items-center justify-between gap-4 px-5 py-4 hover:bg-zinc-50 ${index > 0 ? "border-t border-zinc-100" : ""}`}
+                className="group min-w-64 max-w-72 rounded-xl border border-zinc-200 bg-white p-4 shadow-sm hover:border-zinc-400 hover:shadow-md"
                 href={`/conversation/${conversation.id}`}
                 key={conversation.id}
+                title={preview}
               >
-                <div className="min-w-0">
-                  <p className="truncate font-medium text-zinc-900">
-                    {conversation.title}
-                  </p>
-                  <p className="mt-1 text-xs text-zinc-500">
-                    {conversation.sourceType} · {data.messageCountsByConversation[conversation.id] ?? 0} Messages · 更新 {formatDashboardTime(conversation.updatedAt)} · 打开 {formatDashboardTime(conversation.lastOpenedAt)}
-                  </p>
-                </div>
-                <span className="text-sm text-zinc-400">→</span>
+                <p className="truncate font-semibold text-zinc-900 group-hover:text-zinc-950">{conversation.title}</p>
+                <p className="mt-2 line-clamp-2 min-h-10 text-xs leading-5 text-zinc-500">{preview}</p>
+                <p className="mt-3 text-[11px] text-zinc-400">
+                  {data.messageCountsByConversation[conversation.id] ?? 0} Messages · {formatDashboardTime(conversation.lastOpenedAt)}
+                </p>
               </Link>
             ))}
           </div>

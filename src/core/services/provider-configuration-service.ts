@@ -97,7 +97,7 @@ const providerDefaults: ProviderDefaults[] = [
     providerId: "ollama",
     displayName: "Ollama",
     baseUrl: "http://localhost:11434",
-    model: "qwen2.5:7b",
+    model: "qwen3:8b",
     timeout: 60_000,
     enabled: false,
     requiresApiKey: false,
@@ -190,7 +190,7 @@ export class ProviderConfigurationService {
 
       if (
         mergedConfiguration.providerId === "ollama" &&
-        mergedConfiguration.model === "llama3.2"
+        ["llama3.2", "qwen2.5:7b"].includes(mergedConfiguration.model)
       ) {
         mergedConfiguration.model = defaultConfiguration.model;
       }

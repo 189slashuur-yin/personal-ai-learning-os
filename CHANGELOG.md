@@ -2,6 +2,28 @@
 
 本文件记录当前仓库已经完成的 Sprint 与关键提交。日期使用仓库 commit date。
 
+## 2026-07-05 — v0.9 Draft: Data Foundation & Search
+
+状态：Part 0–9 已实现，自动门禁执行完成；手工 QA 待执行，未创建 Git commit。
+
+- 新增 Data/Search RFC、Local Asset ADR、Conversation Note 与旧数据兼容。
+- 新增九类运行时 SearchDocument、具体文本片段结果、相关度排序和轻量 subsequence fuzzy。
+- 新增 Asset metadata Entity / Contract / BrowserStorage / Service 与 Conversation Assets UI。
+- 新增项目文档/data 手动备份脚本，以及 Settings / Help Data Management 说明。
+- 降低 Conversation Task 入口优先级；未增强 Task 催办能力。
+- 未实现 RAG、Embedding、Agent、Calendar、Reminder、Cloud Sync、数据库迁移或真实云 Provider API。
+
+## 2026-07-04 — v0.8 Draft: Product Onboarding + Conversation Q&A Pair UX
+
+状态：Part 1–8 已实现并通过自动质量门禁；手工 QA 待执行，未创建 Git commit。
+
+- 新增 `/help` 中文操作手册、核心概念、推荐流程与 Ollama Analyze 边界说明。
+- Provider 选择收敛为 Demo / Ollama；Ollama 需 enabled + Test Success，默认模型更新为 `qwen3:8b`。
+- 新增无持久化 Q&A Pair 派生模型与 Timeline / Q&A Pair 双视图，支持搜索、排序、折叠和按 Pair 选择 Analyze。
+- Conversation 增加六步动态流程条；Knowledge 增加状态解释、Archive 推荐与双重确认 Danger Zone。
+- Dashboard 增加最近 8 条 Conversation 横向导航与 60 字摘要。
+- 未实现 RAG、Elasticsearch、Agent、Calendar、Reminder、数据库或云 Provider API。
+
 ## 2026-07-04 — Release v0.7: Daily Learning Workflow
 
 状态：Epic D 已完成并完成 v0.7 发布收尾；未创建 Git commit。

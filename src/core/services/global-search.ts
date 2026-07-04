@@ -128,6 +128,7 @@ function toSearchDocuments(data: SearchData): SearchDocument[] {
       href: `/conversation/${conversation.id}`,
       fields: {
         title: conversation.title,
+        note: conversation.note ?? "",
         content,
         source: sourceLabel,
         workspace: workspace.name ?? "",

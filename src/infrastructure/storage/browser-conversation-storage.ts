@@ -34,6 +34,7 @@ export class BrowserConversationStorage implements ConversationStorage {
       .map((conversation) => ({
         ...conversation,
         workspaceId: conversation.workspaceId ?? DEFAULT_WORKSPACE_ID,
+        note: typeof conversation.note === "string" ? conversation.note : undefined,
         lastOpenedAt: conversation.lastOpenedAt ?? conversation.updatedAt,
       }))
       .sort(

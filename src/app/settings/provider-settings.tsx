@@ -67,7 +67,7 @@ export function ProviderSettings() {
     const result = createProviderService().selectProvider(providerId);
 
     if (!result.selected) {
-      setMessage("尚未实现");
+      setMessage(result.message);
       return;
     }
 
@@ -125,6 +125,10 @@ export function ProviderSettings() {
           timeout: ollama.timeout,
         }),
       );
+      setProviders(createProviderService().getProviders());
+      setCurrentProviderId(
+        createProviderService().getCurrentProvider().providerInfo.id,
+      );
       setMessage("Ollama configuration 已保存。");
       return true;
     } catch (error) {
@@ -147,6 +151,10 @@ export function ProviderSettings() {
           : configuration,
       ),
     );
+    setProviders(createProviderService().getProviders());
+    setCurrentProviderId(
+      createProviderService().getCurrentProvider().providerInfo.id,
+    );
     setTestingProviderId(null);
 
     if (providerId === "ollama") {
@@ -164,24 +172,40 @@ export function ProviderSettings() {
 
   return (
     <section className="mt-8 max-w-3xl space-y-8">
+      <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-5">
+        <p className="text-sm text-emerald-800">当前 Provider</p>
+        <p className="mt-1 text-xl font-semibold text-emerald-950">
+          {currentProviderId === "ollama" ? "Ollama" : "Demo"}
+        </p>
+        <p className="mt-2 text-sm leading-6 text-emerald-800">
+          当前选择会同步用于 Dashboard 和 Analyze / 生成整理建议。
+        </p>
+      </div>
       <div className="rounded-xl border border-zinc-200 bg-white shadow-sm">
         {providers.map((provider, index) => {
           const selected = provider.id === currentProviderId;
+          const configuration = configurations.find(
+            (item) => item.providerId === provider.id,
+          );
+          const unavailableReason =
+            provider.id === "ollama" && !configuration?.enabled
+              ? "请先在下方启用 Ollama。"
+              : provider.id === "ollama" &&
+                  configuration?.lastTestStatus !== "Success"
+                ? "启用后需要 Test Connection 成功，才能设为当前 Provider。"
+                : null;
 
           return (
-            <button
-              aria-pressed={selected}
-              className={`flex w-full items-center justify-between gap-4 p-5 text-left hover:bg-zinc-50 ${index > 0 ? "border-t border-zinc-100" : ""}`}
+            <article
+              className={`flex w-full items-center justify-between gap-4 p-5 ${index > 0 ? "border-t border-zinc-100" : ""}`}
               key={provider.id}
-              onClick={() => selectProvider(provider.id)}
-              type="button"
             >
               <span>
                 <span className="block font-semibold text-zinc-950">
                   {provider.name}
                 </span>
                 <span className="mt-1 block text-sm text-zinc-500">
-                  {provider.enabled ? "可用" : "Coming Soon"}
+                  {provider.enabled ? "可用于 Analyze" : "尚未满足启用条件"}
                 </span>
                 {provider.kind === "demo" ? (
                   <span className="mt-2 block max-w-xl text-xs leading-5 text-zinc-500">
@@ -193,19 +217,28 @@ export function ProviderSettings() {
                     Ollama runs locally and requires Ollama service to be running.
                   </span>
                 ) : null}
+                {unavailableReason ? (
+                  <span className="mt-2 block max-w-xl text-xs font-medium text-amber-700">
+                    {unavailableReason}
+                  </span>
+                ) : null}
               </span>
-              <span
-                className={`rounded-full px-3 py-1 text-xs font-semibold ${
+              <button
+                aria-pressed={selected}
+                className={`shrink-0 rounded-lg px-3 py-2 text-xs font-semibold ${
                   selected
-                    ? "bg-emerald-50 text-emerald-700"
+                    ? "bg-emerald-100 text-emerald-800"
                     : provider.enabled
-                      ? "bg-zinc-100 text-zinc-600"
-                      : "bg-amber-50 text-amber-700"
+                      ? "bg-zinc-950 text-white hover:bg-zinc-800"
+                      : "cursor-not-allowed bg-zinc-100 text-zinc-400"
                 }`}
+                disabled={selected || !provider.enabled}
+                onClick={() => selectProvider(provider.id)}
+                type="button"
               >
-                {selected ? "当前 Provider" : provider.enabled ? "选择" : "尚未实现"}
-              </span>
-            </button>
+                {selected ? "当前 Provider" : "设为当前 Provider"}
+              </button>
+            </article>
           );
         })}
       </div>
@@ -215,11 +248,15 @@ export function ProviderSettings() {
             Provider Configuration
           </h2>
           <p className="mt-1 text-sm leading-6 text-zinc-500">
-            Ollama 可配置并测试本地服务；其它非 Demo Provider 仍仅展示占位配置。
+            当前仅提供 Demo 与本地 Ollama。云 Provider 不在本版本范围内。
           </p>
         </div>
         <div className="mt-5 space-y-4">
-          {configurations.map((configuration) => (
+          {configurations
+            .filter((configuration) =>
+              ["demo", "ollama"].includes(configuration.providerId),
+            )
+            .map((configuration) => (
             <article
               className="rounded-lg border border-zinc-200 p-4"
               key={configuration.providerId}
@@ -237,6 +274,7 @@ export function ProviderSettings() {
                   <input
                     checked={configuration.enabled}
                     className="h-4 w-4 accent-zinc-950"
+                    disabled={configuration.providerId === "demo"}
                     onChange={(event) =>
                       toggleConfiguration(
                         configuration.providerId,
@@ -245,7 +283,7 @@ export function ProviderSettings() {
                     }
                     type="checkbox"
                   />
-                  enabled
+                  {configuration.providerId === "demo" ? "始终可用" : "enabled"}
                 </label>
               </div>
               {configuration.providerId === "ollama" ? (
@@ -262,7 +300,7 @@ export function ProviderSettings() {
                       <li>
                         拉取下方配置的模型，例如{" "}
                         <code className="font-semibold">
-                          ollama pull qwen2.5:7b
+                          ollama pull qwen3:8b
                         </code>
                         。
                       </li>

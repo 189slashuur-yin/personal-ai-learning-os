@@ -1,7 +1,7 @@
 import type { AIProviderStorage } from "@/core/contracts/ai-provider-storage";
 import type { PromptTemplateStorage } from "@/core/contracts/prompt-template-storage";
 import type { ProviderConfigurationStorage } from "@/core/contracts/provider-configuration-storage";
-import type { AIProvider, AIProviderKind } from "@/core/entities/ai-provider";
+import type { AIProvider } from "@/core/entities/ai-provider";
 import type {
   ProviderConfiguration,
   ProviderConnectionTestStatus,
@@ -12,32 +12,19 @@ import { PromptTemplateService } from "@/core/services/prompt-template-service";
 import { ProviderConfigurationService } from "@/core/services/provider-configuration-service";
 import { createDefaultProviderRegistry } from "@/core/services/provider-registry";
 
-const PLACEHOLDER_CREATED_AT = "2026-01-01T00:00:00.000Z";
-
 const OLLAMA_CONNECTION_CHECKS =
   "请检查：Ollama 是否已启动；baseUrl 是否正确；配置的 model 是否已下载。";
 
-function comingSoonProvider(
-  id: string,
-  name: string,
-  kind: AIProviderKind,
-): AIProvider {
-  return {
-    id,
-    name,
-    kind,
-    enabled: false,
-    createdAt: PLACEHOLDER_CREATED_AT,
-    updatedAt: PLACEHOLDER_CREATED_AT,
-  };
-}
-
 const availableProviders: AIProvider[] = [
   demoProviderInfo,
-  comingSoonProvider("openai", "OpenAI", "openai"),
-  comingSoonProvider("claude", "Claude", "claude"),
-  comingSoonProvider("ollama", "Ollama", "ollama"),
-  comingSoonProvider("custom", "Custom", "custom"),
+  {
+    id: "ollama",
+    name: "Ollama",
+    kind: "ollama",
+    enabled: false,
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+  },
 ];
 
 export class ProviderService {
@@ -48,10 +35,15 @@ export class ProviderService {
   ) {}
 
   getProviders(): AIProvider[] {
-    const ollamaEnabled = this.getOllamaConfiguration()?.enabled ?? false;
+    const ollamaConfiguration = this.getOllamaConfiguration();
     return availableProviders.map((provider) =>
       provider.id === "ollama"
-        ? { ...provider, enabled: ollamaEnabled }
+        ? {
+            ...provider,
+            enabled:
+              ollamaConfiguration?.enabled === true &&
+              ollamaConfiguration.lastTestStatus === "Success",
+          }
         : provider,
     );
   }
@@ -74,7 +66,14 @@ export class ProviderService {
     );
 
     if (!providerInfo?.enabled) {
-      return { selected: false as const, message: "尚未实现" };
+      const ollamaConfiguration = this.getOllamaConfiguration();
+      const message =
+        providerId === "ollama" && !ollamaConfiguration?.enabled
+          ? "请先启用 Ollama。"
+          : providerId === "ollama"
+            ? "请先完成 Ollama Connection Test，并取得 Success。"
+            : "该 Provider 当前不可用。";
+      return { selected: false as const, message };
     }
 
     const provider = this.createRegistry().switchProvider(providerId);
@@ -178,6 +177,7 @@ export class ProviderService {
 
     if (
       !configuration?.enabled ||
+      configuration.lastTestStatus !== "Success" ||
       !this.promptTemplateStorage
     ) {
       return createDefaultProviderRegistry(currentProviderId);

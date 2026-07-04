@@ -4,10 +4,31 @@
 
 ## Current release
 
-- Version：v0.7
+- Version：v0.9 draft
 - Phase：Phase2
 - Current Epic：Epic D（Completed）
-- Release theme：v0.7 Daily Learning Workflow；Task Domain、Today、Source-linked Task、Task Search 与发布稳定化已完成。
+- Release theme：Data Foundation & Search；实现完成，手工 QA 待执行。
+
+## v0.9 — Data Foundation & Search
+
+- Conversation Note 独立于 Tags / Knowledge，并纳入全文搜索。
+- SearchDocument 在运行时覆盖 Workspace、Conversation、Source、Message、Q&A Pair、Proposal、Knowledge、Task、Tag。
+- `/search` 展示具体片段、来源路径、matched fields、相关度与 exact / contains / fuzzy 模式。
+- 轻量 fuzzy 使用 normalized subsequence；未引入 Fuse.js、MiniSearch、Embedding 或语义搜索。
+- Asset foundation 只保存 metadata/path，Conversation Detail 可手工登记与删除 metadata。
+- 备份脚本复制项目文档与存在时的 data/；Settings / Help 解释数据边界。
+- Task 保留但降低主流程入口优先级，不继续增强催办能力。
+- 不包含 RAG、Agent、Calendar、Reminder、Cloud Sync、数据库迁移或云 Provider API。
+
+## v0.8 — Product Onboarding + Conversation Q&A Pair UX
+
+- 内置 `/help` 中文操作手册与八步推荐流程。
+- Settings 当前只展示 Demo / Ollama；Ollama 需 enabled 且 Test Success 后才能设为当前 Provider，默认模型为 `qwen3:8b`。
+- Q&A Pair 从 Messages 运行时派生，不新增 LocalStorage key，不改变 Proposal / Knowledge Snapshot。
+- Conversation 支持 Timeline / Q&A Pair、Pair 搜索排序折叠、多选 Analyze 与六步动态流程引导。
+- Knowledge 明确 Active / Archived 语义，永久删除进入双重确认 Danger Zone。
+- Dashboard 提供最近 8 条 Conversation 横向导航。
+- 不包含 RAG、Agent、Calendar、Reminder、数据库或云 Provider API。
 
 ## Product phases
 
@@ -147,7 +168,7 @@
 
 ### Sprint9 — Local Ollama Provider
 
-- 增加非流式 OllamaProvider，默认 `http://localhost:11434` 与 `qwen2.5:7b`，默认不启用。
+- 增加非流式 OllamaProvider，当前默认 `http://localhost:11434` 与 `qwen3:8b`，默认不启用。
 - Settings 支持 Ollama enabled、baseUrl、model、timeout，并通过 `/api/tags` 执行真实本地连接测试。
 - Source 与 selected Messages 使用 Sprint7 PromptTemplate 和 AnalyzerOutputValidator 生成 Proposal。
 - Ollama 不可达时保留可恢复错误，不写 Proposal；Demo 始终作为默认回退。

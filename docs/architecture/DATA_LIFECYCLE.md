@@ -20,6 +20,9 @@
 | Workspace | System ensures Inbox; user creates regular Workspace. | Edit metadata, archive, restore; Conversation and planned Task can move between Workspaces. | Inbox cannot be deleted. Deleting a regular Workspace first rehomes Conversations and planned Tasks to Inbox, then removes only the Workspace. |
 | Task (planned) | User explicitly creates a standalone Task or confirms an AI suggestion. | Edit; move Workspace; add/change date; open ↔ completed with timestamps; optional source may become missing. | Explicit Task delete affects no source. Conversation/Knowledge deletion never cascades to Task. Workspace deletion rehomes Task to Inbox. |
 | Activity (planned) | A successful, meaningful domain transition emits a factual record after the business write succeeds. | Append-only; corrections are additional records rather than mutations. | Retention/deletion policy is not approved and must be frozen before Activity implementation. Activity never becomes current business state. |
+| Conversation Note | User edits an optional field on Conversation. | Save trims content and updates Conversation `updatedAt`; cancel restores current value. | Removed with Conversation; does not mutate Source, Message, Proposal, or Knowledge. |
+| SearchDocument | Built at runtime from canonical collections. | Rebuilt on page load; query adds score, snippet, matched fields and match mode. | Never persisted in v0.9; disappears with runtime state and never owns source data. |
+| Asset metadata | User explicitly records filename/path/note for Conversation, Knowledge, Task, or Workspace. | Metadata can be listed and later extended through Asset Service. | Deleting metadata does not delete a filesystem file; browser never reads or copies the referenced file. |
 
 ## Conversation and knowledge path
 
@@ -58,4 +61,3 @@ Source deletion is not a Task transition. The Task remains open or completed whi
 ## Planned Activity ordering
 
 Activity is deliberately deferred. Before implementation, D4 must define event names, actor model, write ordering, retention, compatibility, and failure behavior. The minimum invariant is: failed business operations emit no success Activity, and failure to record Activity must not fabricate a successful business transition.
-

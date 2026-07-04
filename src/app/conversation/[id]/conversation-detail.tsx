@@ -25,6 +25,7 @@ import { parseMessagesFromRawText } from "@/core/services/message-parser";
 import { PromptTemplateService } from "@/core/services/prompt-template-service";
 import { ProviderConfigurationService } from "@/core/services/provider-configuration-service";
 import { ProviderService } from "@/core/services/provider-service";
+import { deriveQAPairs } from "@/core/services/qa-pair-service";
 import { countWords } from "@/core/services/text-statistics";
 import { TaskService } from "@/core/services/task-service";
 import { WorkspaceService } from "@/core/services/workspace-service";
@@ -41,6 +42,7 @@ import { BrowserSourceStorage } from "@/infrastructure/storage/browser-source-st
 import { BrowserTaskStorage } from "@/infrastructure/storage/browser-task-storage";
 import { BrowserWorkspaceStorage } from "@/infrastructure/storage/browser-workspace-storage";
 import { ProposalWorkspace } from "./proposal-workspace";
+import { ConversationAssets } from "./conversation-assets";
 import { CapabilityBadges } from "@/app/capability-badges";
 
 type ConversationDetailProps = {
@@ -63,6 +65,8 @@ type DetailState =
     };
 
 type SaveStatus = "saved" | "editing";
+type MessageView = "timeline" | "qa-pairs";
+type QAPairSort = "order" | "updated" | "question";
 
 const messageRoleLabels: Record<MessageRole, string> = {
   user: "User",
@@ -143,6 +147,8 @@ export function ConversationDetail({
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
   const [isRenaming, setIsRenaming] = useState(false);
   const [titleDraft, setTitleDraft] = useState("");
+  const [isEditingNote, setIsEditingNote] = useState(false);
+  const [noteDraft, setNoteDraft] = useState("");
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [selectedMessageIds, setSelectedMessageIds] = useState<Set<string>>(
     new Set(),
@@ -157,6 +163,12 @@ export function ConversationDetail({
     new Set(),
   );
   const [messageSearchQuery, setMessageSearchQuery] = useState("");
+  const [messageView, setMessageView] = useState<MessageView>("timeline");
+  const [qaPairSearchQuery, setQAPairSearchQuery] = useState("");
+  const [qaPairSort, setQAPairSort] = useState<QAPairSort>("order");
+  const [collapsedQAPairIds, setCollapsedQAPairIds] = useState<Set<string>>(
+    new Set(),
+  );
   const [activeSearchIndex, setActiveSearchIndex] = useState(0);
   const [analyzerError, setAnalyzerError] = useState<string | null>(null);
   const [taskNotice, setTaskNotice] = useState<string | null>(null);
@@ -208,6 +220,34 @@ export function ConversationDetail({
     Math.max(searchMatchIds.length - 1, 0),
   );
   const activeSearchMessageId = searchMatchIds[currentSearchIndex] ?? null;
+  const qaPairs = useMemo(
+    () => (state.status === "ready" ? deriveQAPairs(state.messages) : []),
+    [state],
+  );
+  const visibleQAPairs = useMemo(() => {
+    const query = qaPairSearchQuery.trim().toLocaleLowerCase();
+    const filtered = query
+      ? qaPairs.filter((pair) =>
+          `${pair.questionText}\n${pair.answerText}`
+            .toLocaleLowerCase()
+            .includes(query),
+        )
+      : [...qaPairs];
+
+    return filtered.sort((left, right) => {
+      if (qaPairSort === "updated") {
+        return (right.updatedAt ?? "").localeCompare(left.updatedAt ?? "");
+      }
+
+      if (qaPairSort === "question") {
+        const leftTitle = left.questionText || left.answerText;
+        const rightTitle = right.questionText || right.answerText;
+        return leftTitle.localeCompare(rightTitle, "zh-CN");
+      }
+
+      return left.order - right.order;
+    });
+  }, [qaPairSearchQuery, qaPairSort, qaPairs]);
 
   useEffect(() => {
     if (!activeSearchMessageId) {
@@ -286,6 +326,7 @@ export function ConversationDetail({
       lastSavedContent.current = sourceContent;
       setDraft(sourceContent);
       setTitleDraft(openedConversation.title);
+      setNoteDraft(openedConversation.note ?? "");
       setLastSavedAt(source?.updatedAt ?? null);
       setState({
         status: "ready",
@@ -371,7 +412,7 @@ export function ConversationDetail({
     );
   }
 
-  const { conversation, source, proposals, knowledgeCard } = state;
+  const { conversation, source, proposals, knowledgeCard, knowledgeCount } = state;
   const importProfileService = new ImportProfileService();
   const importProfile = conversation.importProfileId
     ? importProfileService.getById(conversation.importProfileId)
@@ -380,6 +421,26 @@ export function ConversationDetail({
     dateStyle: "medium",
     timeStyle: "short",
   }).format(new Date(conversation.updatedAt));
+  const hasOriginalContent = draft.trim().length > 0;
+  const activeFlowStep = !hasOriginalContent
+    ? 1
+    : state.messages.length === 0
+      ? 2
+      : knowledgeCount > 0
+        ? 6
+        : proposals.length > 0
+          ? 5
+          : selectedMessageIds.size > 0
+            ? 4
+            : 3;
+  const flowSteps = [
+    "原始内容",
+    "Messages",
+    "Q&A Pair",
+    "Analyze",
+    "Review",
+    "Knowledge",
+  ];
 
   async function runSourceAnalyzer(simulateFailure = false) {
     if (state.status !== "ready" || !state.source) {
@@ -643,6 +704,30 @@ export function ConversationDetail({
     });
   }
 
+  function toggleQAPair(messageIds: string[]) {
+    setSelectedMessageIds((currentIds) => {
+      const nextIds = new Set(currentIds);
+      const allSelected = messageIds.every((messageId) =>
+        nextIds.has(messageId),
+      );
+
+      messageIds.forEach((messageId) => {
+        if (allSelected) nextIds.delete(messageId);
+        else nextIds.add(messageId);
+      });
+      return nextIds;
+    });
+  }
+
+  function toggleQAPairCollapse(pairId: string) {
+    setCollapsedQAPairIds((currentIds) => {
+      const nextIds = new Set(currentIds);
+      if (nextIds.has(pairId)) nextIds.delete(pairId);
+      else nextIds.add(pairId);
+      return nextIds;
+    });
+  }
+
   function toggleMessageCollapse(messageId: string) {
     setCollapsedMessageIds((currentIds) => {
       const nextIds = new Set(currentIds);
@@ -844,6 +929,40 @@ export function ConversationDetail({
     setState({ ...state, conversation: nextConversation });
   }
 
+  function saveNote() {
+    if (state.status !== "ready") {
+      return;
+    }
+
+    const normalizedNote = noteDraft.trim();
+    const currentNote = state.conversation.note ?? "";
+
+    if (normalizedNote === currentNote) {
+      setNoteDraft(currentNote);
+      setIsEditingNote(false);
+      return;
+    }
+
+    const nextConversation: Conversation = {
+      ...state.conversation,
+      note: normalizedNote || undefined,
+      updatedAt: new Date().toISOString(),
+    };
+    new BrowserConversationStorage().save(nextConversation);
+    setState({ ...state, conversation: nextConversation });
+    setNoteDraft(nextConversation.note ?? "");
+    setIsEditingNote(false);
+  }
+
+  function cancelNoteEditing() {
+    if (state.status !== "ready") {
+      return;
+    }
+
+    setNoteDraft(state.conversation.note ?? "");
+    setIsEditingNote(false);
+  }
+
   function handleTitleKeyDown(event: KeyboardEvent<HTMLInputElement>) {
     if (event.key === "Enter") {
       event.currentTarget.blur();
@@ -892,11 +1011,11 @@ export function ConversationDetail({
           </div>
           <div className="flex flex-wrap items-center gap-3">
             <button
-              className="rounded-lg bg-zinc-950 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:bg-zinc-800"
+              className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs font-semibold text-zinc-600 shadow-sm hover:border-zinc-300 hover:text-zinc-950"
               onClick={createTaskFromConversation}
               type="button"
             >
-              Create Task
+              Create Task（可选）
             </button>
             <Link
               className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs font-semibold text-zinc-600 shadow-sm hover:border-zinc-300 hover:text-zinc-950"
@@ -933,23 +1052,45 @@ export function ConversationDetail({
         </p>
       ) : null}
 
-      <nav
-        aria-label="Clipboard Import 流程"
-        className="mt-8 rounded-xl border border-sky-200 bg-sky-50 p-5"
-      >
-        <p className="text-sm font-semibold text-sky-950">Clipboard → Knowledge 流程</p>
-        <ol className="mt-3 grid gap-2 text-xs font-medium text-sky-900 sm:grid-cols-3 lg:grid-cols-6">
-          <li>Step 1 · 原始文本</li>
-          <li>Step 2 · 生成 Messages</li>
-          <li>Step 3 · 选择 Messages</li>
-          <li>Step 4 · 生成 Proposal</li>
-          <li>
-            <Link className="underline" href="/review">Step 5 · Review</Link>
-          </li>
-          <li>
-            <Link className="underline" href="/knowledge">Step 6 · KnowledgeCard</Link>
-          </li>
+      <nav aria-label="Conversation 整理流程" className="mt-8 rounded-xl border border-sky-200 bg-sky-50 p-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-sm font-semibold text-sky-950">Conversation → Knowledge 流程</p>
+            <p className="mt-1 text-xs text-sky-800">当前建议处理 Step {activeFlowStep}</p>
+          </div>
+          <Link className="text-xs font-semibold text-sky-900 underline" href="/help">查看操作手册</Link>
+        </div>
+        <ol className="mt-4 grid gap-2 sm:grid-cols-3 lg:grid-cols-6">
+          {flowSteps.map((label, index) => {
+            const step = index + 1;
+            const active = step === activeFlowStep;
+            const completed = step < activeFlowStep;
+            return (
+              <li
+                className={`rounded-lg border px-3 py-3 text-xs font-semibold ${active ? "border-sky-600 bg-white text-sky-950 shadow-sm ring-2 ring-sky-200" : completed ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-sky-100 bg-sky-100/60 text-sky-700"}`}
+                key={label}
+              >
+                <span className="block text-[10px] uppercase tracking-wider">Step {step}</span>
+                <span className="mt-1 block">{label}</span>
+              </li>
+            );
+          })}
         </ol>
+        <div className="mt-4 text-sm leading-6 text-sky-950">
+          {!hasOriginalContent ? (
+            <p>还没有原始内容。请先前往 <Link className="font-semibold underline" href="/import">Import</Link> 导入材料。</p>
+          ) : state.messages.length === 0 ? (
+            <p>原始内容已就绪。下一步请点击“从原始文本生成 Messages”。</p>
+          ) : proposals.length > 0 && knowledgeCount === 0 ? (
+            <p>整理建议已经生成。请前往 <Link className="font-semibold underline" href="/review">Review</Link> 人工审核。</p>
+          ) : knowledgeCount > 0 ? (
+            <p>已有 Knowledge。你仍可继续从 Timeline 或 Q&amp;A Pair 选择其它内容整理。</p>
+          ) : selectedMessageIds.size > 0 ? (
+            <p>已选择 {selectedMessageIds.size} 条 Messages。下一步点击“Analyze / 生成整理建议”。</p>
+          ) : (
+            <p>Messages 已就绪。可用 Timeline 查看原始轮次，或切换 Q&amp;A Pair 按一问一答阅读和选择。</p>
+          )}
+        </div>
       </nav>
 
       <section className="detail-section">
@@ -1034,11 +1175,64 @@ export function ConversationDetail({
             </dd>
           </div>
         </dl>
+        <div className="mt-4 rounded-xl border border-zinc-200 bg-white p-5">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-semibold text-zinc-900">备注 / Note</h3>
+              <p className="mt-1 text-xs text-zinc-500">
+                仅记录 Conversation 级上下文，不会写入 Tags、Proposal 或 Knowledge。
+              </p>
+            </div>
+            {!isEditingNote ? (
+              <button
+                className="rounded-lg border border-zinc-200 px-3 py-2 text-xs font-semibold text-zinc-700 hover:border-zinc-300 hover:text-zinc-950"
+                onClick={() => setIsEditingNote(true)}
+                type="button"
+              >
+                编辑备注
+              </button>
+            ) : null}
+          </div>
+          {isEditingNote ? (
+            <div className="mt-4">
+              <textarea
+                aria-label="Conversation 备注"
+                autoFocus
+                className="min-h-28 w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm leading-6 text-zinc-900 outline-none focus:border-zinc-400"
+                onChange={(event) => setNoteDraft(event.target.value)}
+                placeholder="记录背景、后续整理方向或其它私有备注…"
+                value={noteDraft}
+              />
+              <div className="mt-3 flex gap-2">
+                <button
+                  className="rounded-lg bg-zinc-950 px-3 py-2 text-xs font-semibold text-white hover:bg-zinc-800"
+                  onClick={saveNote}
+                  type="button"
+                >
+                  保存备注
+                </button>
+                <button
+                  className="rounded-lg border border-zinc-200 px-3 py-2 text-xs font-semibold text-zinc-600 hover:border-zinc-300"
+                  onClick={cancelNoteEditing}
+                  type="button"
+                >
+                  取消
+                </button>
+              </div>
+            </div>
+          ) : (
+            <p className="mt-4 whitespace-pre-wrap text-sm leading-6 text-zinc-700">
+              {conversation.note || "暂无备注。"}
+            </p>
+          )}
+        </div>
       </section>
+
+      <ConversationAssets conversationId={conversation.id} />
 
       <section className="detail-section">
         <div className="detail-section-heading">
-          <p className="detail-kicker">02 · Conversation Version</p>
+          <p className="detail-kicker">03 · Conversation Version</p>
           <h2 className="detail-title">Conversation Snapshots</h2>
           <p className="detail-description">
             保存当前 Conversation 与 Messages；不包含 Proposal、Knowledge、AnalyzerRun、Tag 或 Provider。
@@ -1131,7 +1325,7 @@ export function ConversationDetail({
 
       <section className="detail-section">
         <div className="detail-section-heading">
-          <p className="detail-kicker">03 · Source</p>
+          <p className="detail-kicker">04 · Source</p>
           <h2 className="detail-title">原始文本 Preview</h2>
           <p className="detail-description">
             可直接使用 Ctrl+V 粘贴完整文本；保存后仍保留原文。
@@ -1176,7 +1370,7 @@ export function ConversationDetail({
 
       <section className="detail-section">
         <div className="detail-section-heading">
-          <p className="detail-kicker">04 · Messages</p>
+          <p className="detail-kicker">05 · Messages</p>
           <h2 className="detail-title">Message Timeline</h2>
           <p className="detail-description">
             按发言标记拆分原始文本，不调用 AI API。
@@ -1226,15 +1420,35 @@ export function ConversationDetail({
                     清空选择
                   </button>
                   <button
-                    className="rounded-md bg-zinc-950 px-3 py-1.5 text-xs font-medium text-white hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-300"
+                    className="rounded-md border border-zinc-200 px-3 py-1.5 text-xs font-medium text-zinc-600 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-40"
                     disabled={selectedMessageIds.size === 0}
                     onClick={createTaskFromSelectedMessages}
                     type="button"
                   >
-                    Create Task from selection
+                    Create Task（可选）
                   </button>
                 </div>
               </div>
+              <div className="mt-4 inline-flex rounded-lg border border-zinc-200 bg-white p-1" aria-label="Message 阅读视图">
+                <button
+                  aria-pressed={messageView === "timeline"}
+                  className={`rounded-md px-4 py-2 text-sm font-medium ${messageView === "timeline" ? "bg-zinc-950 text-white" : "text-zinc-600 hover:bg-zinc-50"}`}
+                  onClick={() => setMessageView("timeline")}
+                  type="button"
+                >
+                  Timeline
+                </button>
+                <button
+                  aria-pressed={messageView === "qa-pairs"}
+                  className={`rounded-md px-4 py-2 text-sm font-medium ${messageView === "qa-pairs" ? "bg-zinc-950 text-white" : "text-zinc-600 hover:bg-zinc-50"}`}
+                  onClick={() => setMessageView("qa-pairs")}
+                  type="button"
+                >
+                  Q&amp;A Pair ({qaPairs.length})
+                </button>
+              </div>
+              {messageView === "timeline" ? (
+                <>
               <div className="mt-4 rounded-lg border border-zinc-200 bg-white p-4">
                 <div className="flex flex-wrap items-end gap-3">
                   <label className="min-w-64 flex-1 text-xs font-medium text-zinc-600">
@@ -1411,6 +1625,115 @@ export function ConversationDetail({
                   );
                 })}
               </ol>
+                </>
+              ) : (
+                <div className="mt-4">
+                  <div className="grid gap-3 rounded-lg border border-zinc-200 bg-white p-4 sm:grid-cols-[1fr_auto]">
+                    <label className="text-xs font-medium text-zinc-600">
+                      Search Q&amp;A Pair
+                      <input
+                        className="mt-1.5 w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm text-zinc-900 outline-none focus:border-zinc-400 focus:ring-2 focus:ring-zinc-100"
+                        onChange={(event) => setQAPairSearchQuery(event.target.value)}
+                        placeholder="搜索问题或回答"
+                        type="search"
+                        value={qaPairSearchQuery}
+                      />
+                    </label>
+                    <label className="text-xs font-medium text-zinc-600">
+                      排序
+                      <select
+                        className="mt-1.5 w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900"
+                        onChange={(event) => setQAPairSort(event.target.value as QAPairSort)}
+                        value={qaPairSort}
+                      >
+                        <option value="order">原始顺序</option>
+                        <option value="updated">最近更新</option>
+                        <option value="question">问题标题 A-Z</option>
+                      </select>
+                    </label>
+                  </div>
+                  <p className="mt-3 text-xs text-zinc-500" role="status">
+                    显示 {visibleQAPairs.length} / {qaPairs.length} 个 Pair；选择 Pair 会选择其中全部 Messages。
+                  </p>
+                  <ol className="mt-3 space-y-3">
+                    {visibleQAPairs.map((pair) => {
+                      const isCollapsed = collapsedQAPairIds.has(pair.id);
+                      const allSelected = pair.messageIds.every((messageId) =>
+                        selectedMessageIds.has(messageId),
+                      );
+
+                      return (
+                        <li
+                          className={`rounded-xl border bg-white p-4 ${allSelected ? "border-zinc-500 ring-2 ring-zinc-200" : "border-zinc-200"}`}
+                          key={pair.id}
+                        >
+                          <div className="flex items-start gap-3">
+                            <input
+                              aria-label={`选择第 ${pair.order} 个 Q&A Pair`}
+                              checked={allSelected}
+                              className="mt-1 size-4 shrink-0 accent-zinc-950"
+                              onChange={() => toggleQAPair(pair.messageIds)}
+                              type="checkbox"
+                            />
+                            <div className="min-w-0 flex-1">
+                              <div className="flex flex-wrap items-center justify-between gap-2">
+                                <div className="flex items-center gap-2">
+                                  <span className="rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-semibold text-zinc-700">
+                                    Pair #{pair.order}
+                                  </span>
+                                  <span className="text-xs text-zinc-500">
+                                    {pair.messageIds.length} Messages
+                                  </span>
+                                  {pair.kind === "orphan-assistant" ? (
+                                    <span className="text-xs font-medium text-amber-700">Orphan Assistant</span>
+                                  ) : pair.kind === "unanswered" ? (
+                                    <span className="text-xs font-medium text-sky-700">未回答</span>
+                                  ) : null}
+                                </div>
+                                <button
+                                  aria-expanded={!isCollapsed}
+                                  className="text-xs font-medium text-zinc-600 hover:text-zinc-950"
+                                  onClick={() => toggleQAPairCollapse(pair.id)}
+                                  type="button"
+                                >
+                                  {isCollapsed ? "展开" : "折叠"}
+                                </button>
+                              </div>
+                              <p className="mt-3 text-sm font-medium text-zinc-900">
+                                问：{excerpt(pair.questionText || "（无问题，Assistant 独立内容）", 100)}
+                              </p>
+                              <p className="mt-2 text-sm text-zinc-600">
+                                答：{excerpt(pair.answerText || "（尚未回答）", 120)}
+                              </p>
+                              {!isCollapsed ? (
+                                <div className="mt-4 grid gap-3 border-t border-zinc-100 pt-4 md:grid-cols-2">
+                                  <div className="rounded-lg bg-sky-50 p-3">
+                                    <p className="text-xs font-semibold text-sky-800">Question</p>
+                                    <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-sky-950">
+                                      {pair.questionText || "无 User / Unknown 问题。"}
+                                    </p>
+                                  </div>
+                                  <div className="rounded-lg bg-violet-50 p-3">
+                                    <p className="text-xs font-semibold text-violet-800">Answer</p>
+                                    <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-violet-950">
+                                      {pair.answerText || "尚无 Assistant 回答。"}
+                                    </p>
+                                  </div>
+                                </div>
+                              ) : null}
+                            </div>
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ol>
+                  {visibleQAPairs.length === 0 ? (
+                    <p className="mt-4 rounded-lg border border-dashed border-zinc-300 p-5 text-center text-sm text-zinc-500">
+                      没有匹配的 Q&amp;A Pair。
+                    </p>
+                  ) : null}
+                </div>
+              )}
               <div className="mt-5 flex justify-end">
                 <div className="text-right">
                   <p className="mb-2 text-xs text-zinc-500">
@@ -1425,7 +1748,7 @@ export function ConversationDetail({
                     onClick={runMessageAnalyzer}
                     type="button"
                   >
-                    基于选中 Messages 生成 Proposal
+                    Analyze / 生成整理建议
                   </button>
                 </div>
               </div>
@@ -1433,7 +1756,7 @@ export function ConversationDetail({
           ) : (
             <div className="mt-5 rounded-xl border border-dashed border-zinc-300 bg-zinc-50 p-5 text-sm leading-6 text-zinc-500">
               <p className="font-medium text-zinc-700">
-                请先从原始文本生成 Messages，再选择内容生成 Proposal。
+                请先从原始文本生成 Messages，再选择内容 Analyze / 生成整理建议。
               </p>
               <p className="mt-2">
               支持我、用户、User、You、ChatGPT、GPT、Assistant、Claude、AI、Gemini、DeepSeek
@@ -1447,7 +1770,7 @@ export function ConversationDetail({
 
       <section className="detail-section">
         <div className="detail-section-heading">
-          <p className="detail-kicker">05 · Proposal Workspace</p>
+          <p className="detail-kicker">06 · Proposal Workspace</p>
           <h2 className="detail-title">整理建议</h2>
           <p className="detail-description">
             按创建时间查看、追溯和管理当前 Conversation 下的所有 Proposal。
@@ -1468,7 +1791,7 @@ export function ConversationDetail({
               onClick={() => runSourceAnalyzer(false)}
               type="button"
             >
-              从 Source 生成 Proposal
+              Analyze Source / 生成整理建议
             </button>
             {providerDetails.id === "demo" ? (
             <button
@@ -1526,7 +1849,7 @@ export function ConversationDetail({
 
       <section className="detail-section">
         <div className="detail-section-heading">
-          <p className="detail-kicker">06 · Knowledge</p>
+          <p className="detail-kicker">07 · Knowledge</p>
           <h2 className="detail-title">KnowledgeCard</h2>
         </div>
         {knowledgeCard ? (

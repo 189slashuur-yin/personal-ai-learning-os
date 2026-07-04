@@ -1,5 +1,26 @@
 # Domain Model
 
+## v0.9 implemented addendum
+
+`Task` 已实现但在 v0.9 降低主流程优先级。v0.9 新增 `Asset` metadata 实体和运行时 `SearchDocument` 读模型：Asset 可引用 Conversation、KnowledgeCard、Task 或 Workspace，但不拥有文件内容；SearchDocument 从 canonical collections 派生，不持久化、不修改源实体。Q&A Pair 仍从 Messages 派生。
+
+```mermaid
+flowchart LR
+  C[Conversation] --> N[Conversation Note]
+  C --> A[Asset metadata]
+  K[KnowledgeCard] -. owner reference .-> A
+  TK[Task] -. owner reference .-> A
+  W[Workspace] -. owner reference .-> A
+  W --> SD[SearchDocument runtime read model]
+  C --> SD
+  S[Source] --> SD
+  M[Message / Q&A Pair] --> SD
+  P[Proposal] --> SD
+  K --> SD
+  TK --> SD
+  T[Tag] --> SD
+```
+
 ## Status and notation
 
 This model is the Architecture Pack v1 baseline for Epic D. Solid nodes are implemented in v0.6 unless marked otherwise; `Task` and `Activity` are planned, while `Memory` and `Agent` are future concepts without an implementation commitment.
@@ -86,4 +107,3 @@ The arrows describe allowed relationships, not ownership by the target. In parti
 ## Evolution boundary
 
 Epic D phase one implements only Task. Activity remains planned, and Memory/Agent remain future. Calendar, reminder, recurrence, RAG, and autonomous action are not implied by this model.
-

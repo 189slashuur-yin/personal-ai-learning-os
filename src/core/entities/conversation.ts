@@ -17,6 +17,7 @@ export type Conversation = {
   sourceType: ConversationSourceType;
   workspaceId?: string;
   importProfileId?: string;
+  note?: string;
   createdAt: string;
   updatedAt: string;
   lastOpenedAt: string;

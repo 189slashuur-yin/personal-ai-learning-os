@@ -1,8 +1,23 @@
 # Manual QA Checklist
 
-本清单基于 v0.7、Epic D、Epic A Feature Set 2、Feature Set 1、Sprint11、README、PROJECT、ROADMAP、HANDOFF 与当前页面实现整理。它是手工验收基线，不代表测试已经执行，不包含自动化测试。
+本清单基于 v0.8 draft、v0.7、Epic D、Epic A Feature Set 2、Feature Set 1、Sprint11、README、PROJECT、ROADMAP、HANDOFF 与当前页面实现整理。它是手工验收基线，不代表测试已经执行，不包含自动化测试。
 
 ## 测试准备
+
+## v0.9 Draft — Data Foundation & Search
+
+| ID | 操作 | 预期结果 | 是否可能失败 | 失败模块 |
+| --- | --- | --- | --- | --- |
+| V09-01 | 给旧 Conversation 与新 Conversation 打开详情。 | 旧数据无 note 仍可读取；备注支持编辑、取消、保存并更新 Conversation 时间。 | 是。 | Conversation / Storage |
+| V09-02 | 在 note、Source、Message、Q&A 问答中分别写入唯一关键词后搜索。 | 返回对应具体文本单元、片段、Workspace、来源路径与 matched fields。 | 是。 | SearchDocument |
+| V09-03 | 在 Proposal evidence、Knowledge content、Task description/sourceRef 中搜索 `ollama`。 | 结果按相关度显示具体 Proposal / Knowledge / Task，而非只显示聚合实体卡。 | 是。 | Full Text Search |
+| V09-04 | 搜索完整值、子串和 `oa`。 | 分别显示 exact / contains / fuzzy；fuzzy 分数低于直接匹配。 | 是。 | Fuzzy Ranking |
+| V09-05 | 组合 Entity Type 与 Workspace 筛选并刷新 URL。 | 结果正确，q/type/workspaceId 可恢复。 | 是。 | Search Filters |
+| V09-06 | Conversation 添加文件名、路径、备注。 | 只保存 Asset metadata；刷新可见；不会读取或复制文件。 | 是。 | Asset Storage |
+| V09-07 | 删除 Asset metadata，先取消再确认。 | 取消不变；确认只删除 metadata，并明确本地文件不删除。 | 是。 | Asset Deletion |
+| V09-08 | 运行默认与自定义 target 备份命令。 | 创建新时间戳目录，不覆盖旧备份；只含白名单项目内容。 | 是。 | Backup Script |
+| V09-09 | 打开 Settings / Help。 | 正确说明 LocalStorage、项目文件、Asset metadata、脚本路径及 LocalStorage 未导出的限制。 | 是。 | Data Management |
+| V09-10 | 在 Conversation 选择 Messages。 | Analyze 为主动作；Create Task 标记可选且为次要样式。 | 是。 | UX Priority |
 
 - 准备普通、空白和非 TXT 文件各一份。
 - 准备包含中英文角色标记、三反引号代码块、无角色标记的对话文本。
@@ -40,6 +55,23 @@
 | V07-06 | 搜索并筛选 Task，再清除筛选。 | Task 结果、元数据、跳转和过滤正确；旧实体搜索仍正常。 | 是。 | Task Search |
 | V07-07 | 打开 `/search?q=demo&type=task&workspaceId=inbox` 并刷新。 | q、type、workspaceId 恢复；Task 专属筛选不要求 URL 恢复。 | 是。 | Search Routing |
 | V07-08 | 核对 README、ROADMAP、HANDOFF、ARCHITECTURE 与 Release Notes。 | 版本均为 v0.7，Epic D completed，Activity 仍 planned。 | 是。 | Release Documentation |
+
+## v0.8 Draft Smoke Test
+
+| ID | 操作 | 预期结果 | 是否可能失败 | 失败模块 |
+| --- | --- | --- | --- | --- |
+| V08-01 | 打开主导航 Help。 | `/help` 用中文解释核心概念、推荐流程，并说明 Ollama 只用于 Analyze。 | 是。 | Help / Navigation |
+| V08-02 | 在 Settings 检查初始状态。 | 顶部显示当前 Demo；界面只展示 Demo 与 Ollama；默认模型为 `qwen3:8b`。 | 是。 | Provider Settings |
+| V08-03 | 未启用 Ollama或未 Test Success 时尝试选择。 | “设为当前 Provider”不可用，并显示缺少的条件。 | 是。 | Provider Guard |
+| V08-04 | 启用 Ollama、测试成功并设为当前 Provider。 | Settings 与 Dashboard 同时显示 Ollama；禁用后安全回退 Demo。 | 是。 | Provider Selection |
+| V08-05 | 用 User + 连续 Assistant、仅 User、仅 Assistant、Unknown 输入生成 Messages。 | Pair 分别为合并回答、未回答、Orphan Assistant、Unknown 问题，不丢 Message ID。 | 是。 | Q&A Pair Service |
+| V08-06 | 在 Conversation 切换 Timeline / Q&A Pair。 | Timeline 行为不变；Pair 按原始 order 展示序号、问答摘要和 Message 数。 | 是。 | Conversation Views |
+| V08-07 | 搜索 Pair，并切换原始顺序、最近更新、问题标题 A-Z。 | 筛选和排序正确，空结果有提示。 | 是。 | Q&A Pair Search / Sort |
+| V08-08 | 展开、折叠并多选 Pair 后 Analyze。 | Pair 的全部 Message 被选中；Proposal 仍为 messages mode，Evidence 顺序正确。 | 是。 | Pair Selection / Analyzer |
+| V08-09 | 分别构造无原文、有原文无 Messages、有选择、有 Proposal、有 Knowledge 状态。 | 六步流程条依次突出 Import、Messages、Q&A Pair、Analyze、Review、Knowledge。 | 是。 | Conversation Onboarding |
+| V08-10 | 在 Knowledge 查看状态说明，执行 Archive / Restore。 | Active / Archived 解释准确；Archive 可恢复且为推荐操作。 | 是。 | Knowledge Lifecycle |
+| V08-11 | 点击 Delete Forever，先后取消第一、第二次确认。 | 任一次取消均不删除；两次确认后才永久删除。 | 是。 | Knowledge Danger Zone |
+| V08-12 | 创建超过 8 条 Conversation 后打开 Dashboard。 | 横向只显示最近 8 条；标题、60 字摘要和详情跳转正确；空数据引导 Import。 | 是。 | Recent Conversation Strip |
 
 ## Import
 
@@ -277,7 +309,7 @@
 
 | ID | 操作 | 预期结果 | 是否可能失败 | 失败模块 |
 | --- | --- | --- | --- | --- |
-| OLL-01 | 检查默认配置。 | 默认关闭；地址为 `http://localhost:11434`，模型为 `qwen2.5:7b`，超时为 60000ms。 | 是：默认值或旧数据归一化错误。 | Ollama Configuration |
+| OLL-01 | 检查默认配置。 | 默认关闭；地址为 `http://localhost:11434`，模型为 `qwen3:8b`，超时为 60000ms。 | 是：默认值或旧数据归一化错误。 | Ollama Configuration |
 | OLL-02 | 保存末尾带 `/` 的合法 Base URL。 | 保存后自动去除尾部 `/`。 | 是：生成重复斜线 URL。 | Provider Configuration Service |
 | OLL-03 | 输入非 HTTP URL、空模型或小于 1000ms 的超时。 | 显示对应校验错误，不保存无效配置。 | 是：校验绕过。 | Ollama Validation |
 | OLL-04 | 未启动 Ollama 时 Test Connection。 | 显示 Failed、具体原因和排查提示，Last Test 更新。 | 是：无反馈或错误显示 Success。 | Ollama Connection Test |
