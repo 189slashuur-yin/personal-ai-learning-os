@@ -2,15 +2,15 @@
 
 ## Current release context
 
-- Current Version：v0.9 draft
-- Current Focus：v1.0 Phase0 Architecture Freeze candidate；v0.9 manual QA pending
-- Next Recommended Phase：人工批准 Phase0；批准前不实现 Round、不执行迁移
+- Current Version：v1.0 alpha draft
+- Current Focus：Phase1 Conversation / Round runtime implemented；manual QA pending
+- Next Recommended Phase：验证 A–L，不进入 M–Z/AA
 
 当前架构结论仍受单浏览器、小数据量与 LocalStorage 边界约束。v1.0 候选必须先完成范围和验收评审，不能从本文的演进 seam 推定为已批准实现。
 
-## v1.0 Phase0 architecture freeze candidate
+## v1.0 Phase0 architecture freeze
 
-本节描述目标 Domain；后续 v0.9 章节仍描述当前 runtime。目标 Domain 只有在人工整体批准 Freeze Report 后才生效。
+本节是已批准的 v1.x Domain 基线；Phase1 在其边界内实现 Conversation / Round alpha。
 
 ```text
 Workspace → Conversation (Aggregate Root)
@@ -40,7 +40,16 @@ SearchDocument → SearchResult（read-only）
 
 所有权边界：Conversation 只拥有 Source segment、Round、Message、Version、Note 与对应 owner metadata。删除 Conversation 后，Proposal、Knowledge、Task、ImportReceipt 默认保留并显示 live reference missing；需要删除派生副本时必须使用独立 privacy-erasure 用例并展示影响。
 
-详细决策见 [RFC-005](./docs/rfc/RFC-005-conversation-round-model.md)、[RFC-006](./docs/rfc/RFC-006-import-parser-contract.md)、[RFC-007](./docs/rfc/RFC-007-search-result-contract.md)、[RFC-008](./docs/rfc/RFC-008-proposal-review-knowledge-lifecycle.md)、[ADR-004](./docs/adr/ADR-004-conversation-remains-aggregate-root.md) 与 [Freeze Report](./docs/reviews/Architecture-Freeze-v1.0-Phase0.md)。Phase0 没有实现或迁移。
+详细决策见 [RFC-005](./docs/rfc/RFC-005-conversation-round-model.md)、[RFC-006](./docs/rfc/RFC-006-import-parser-contract.md)、[RFC-007](./docs/rfc/RFC-007-search-result-contract.md)、[RFC-008](./docs/rfc/RFC-008-proposal-review-knowledge-lifecycle.md)、[ADR-004](./docs/adr/ADR-004-conversation-remains-aggregate-root.md) 与 [Freeze Report](./docs/reviews/Architecture-Freeze-v1.0-Phase0.md)。
+
+## v1.0 Phase1 runtime delta
+
+- `Round` 通过 `RoundStorage` / `BrowserRoundStorage` 独立保存，并由 `RoundService` 统一执行新增、编辑、删除、合并、拆分、排序与 messageIds 重新绑定。
+- 为兼容本次验收字段，Round 持久化 `question`、`answer`、`messageIds`；Service/Parser 负责统一生成这些投影，旧 Message 仍是保留的原始数据，不自动增加字段或被删除。
+- `MessageToRoundMigrationService` 提供全量或单 Conversation dry-run summary 与显式 apply；没有 page-load 自动迁移、schema swap 或旧数据清理。
+- `ConversationParser` 是 pure/versioned Core contract；`ImportParserPipeline` 只产草稿与 Preview，`ImportService.confirm` 才通过 Contracts 写 Conversation/Source/Message/Round。
+- Proposal/Knowledge 只增加 optional `sourceRoundId`；旧记录无需回填。SearchDocument 继续是运行时读模型，新增 Round/Asset，Raw Message 仅在高级模式显示。
+- Page/Component 未直接访问 LocalStorage；所有新持久化仍集中在 Infrastructure。
 
 ## v0.9 Data Foundation & Search baseline
 

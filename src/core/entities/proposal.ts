@@ -6,6 +6,8 @@ import type { ProviderCapability } from "@/core/entities/provider-capability";
 
 export type Proposal = {
   id: string;
+  sourceType?: "round" | "conversation" | "source" | "messages";
+  sourceRoundId?: string;
   sourceId?: string;
   conversationId?: string;
   sourceMessageIds?: string[];

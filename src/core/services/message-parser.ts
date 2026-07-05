@@ -1,7 +1,7 @@
 import type { Message, MessageRole } from "@/core/entities/message";
 import type { ImportRoleAliases } from "@/core/entities/import-profile";
 
-type MessageDraft = Pick<Message, "role" | "content">;
+export type MessageDraft = Pick<Message, "role" | "content">;
 
 export type MessageParserOptions = {
   createdAt?: string;
@@ -70,6 +70,30 @@ export function parseMessagesFromRawText(
   conversationId: string,
   options: MessageParserOptions = {},
 ): Message[] {
+  const drafts = parseMessageDraftsFromRawText(rawText, options.roleAliases);
+
+  if (drafts.length === 0) {
+    return [];
+  }
+
+  const createdAt = options.createdAt ?? new Date().toISOString();
+  const createId = options.createId ?? (() => crypto.randomUUID());
+
+  return drafts.map((draft, order) => ({
+    id: createId(),
+    conversationId,
+    role: draft.role,
+    content: draft.content,
+    order,
+    createdAt,
+    updatedAt: createdAt,
+  }));
+}
+
+export function parseMessageDraftsFromRawText(
+  rawText: string,
+  roleAliases: ImportRoleAliases = DEFAULT_ROLE_ALIASES,
+): MessageDraft[] {
   const normalizedText = rawText.replace(/\r\n?/g, "\n").trim();
 
   if (!normalizedText) {
@@ -77,9 +101,7 @@ export function parseMessagesFromRawText(
   }
 
   const drafts: MessageDraft[] = [];
-  const speakerMatcher = createSpeakerMatcher(
-    options.roleAliases ?? DEFAULT_ROLE_ALIASES,
-  );
+  const speakerMatcher = createSpeakerMatcher(roleAliases);
   let currentRole: MessageRole = "unknown";
   let currentLines: string[] = [];
   let isInsideCodeBlock = false;
@@ -111,16 +133,5 @@ export function parseMessagesFromRawText(
 
   appendDraft(drafts, currentRole, currentLines);
 
-  const createdAt = options.createdAt ?? new Date().toISOString();
-  const createId = options.createId ?? (() => crypto.randomUUID());
-
-  return drafts.map((draft, order) => ({
-    id: createId(),
-    conversationId,
-    role: draft.role,
-    content: draft.content,
-    order,
-    createdAt,
-    updatedAt: createdAt,
-  }));
+  return drafts;
 }

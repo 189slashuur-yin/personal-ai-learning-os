@@ -19,6 +19,7 @@ export function createKnowledgeCard(
     sourceFile: proposal.sourceEvidence.sourceName,
     sourceId: proposal.sourceId,
     sourceConversationId: proposal.conversationId,
+    sourceRoundId: proposal.sourceRoundId,
     sourceMessageIds: proposal.sourceMessageIds,
     sourceMessageCount: proposal.sourceMessageIds?.length,
     sourceEvidenceExcerpt: proposal.sourceEvidence.excerpt,

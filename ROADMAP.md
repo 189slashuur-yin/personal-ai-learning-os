@@ -4,13 +4,25 @@
 
 ## Current release
 
-- Current Version：v0.9 draft
-- Phase：Phase2
-- Current Epic：Epic D（Completed）
-- Current Focus：v1.0 Phase0 Architecture Freeze candidate；v0.9 手工 QA 仍待执行。
-- Next Recommended Phase：人工批准 Phase0；批准前不实现 Round、不执行迁移。
+- Current Version：v1.0 alpha draft
+- Phase：v1.0 Phase1
+- Current Epic：Conversation / Round Epic A–L（Implementation complete）
+- Current Focus：人工 QA 与 alpha 稳定化
+- Next Recommended Phase：验证 A–L；不要进入 M–Z/AA
 
-## v1.0 Phase0 — Architecture Freeze（Approval pending）
+## v1.0 Phase1 — Conversation / Round Implementation（A–L completed）
+
+- Epic A–B：Round Entity/Contract/Storage/Service 与显式、幂等、保留 Message 的预检迁移。
+- Epic C–D：ChatGPT/Claude/Gemini/DeepSeek/Markdown/TXT/Manual versioned Parser；Paste/TXT Preview/Confirm，JSON 占位。
+- Epic E–F：Round-first Conversation、搜索/折叠/Note/手动编辑，以及删除/合并/拆分/重排/重新绑定。
+- Epic G–H：Round/Conversation/Source/Messages Proposal 来源；Knowledge `sourceRoundId` 与 Round Knowledge count。
+- Epic I：默认 Conversation/Knowledge/Round/Proposal/Task/Asset，Raw Message 高级模式；Round 深链。
+- Epic J–K：History 用户命名与旧 Message/QAPair/Proposal/Knowledge/Search 兼容。
+- Epic L：Migration Report、release draft、QA 与 Handoff。自动 gate 已通过各 checkpoint；人工 QA 待执行。
+
+Phase1 到此停止；M–Z/AA 未授权、未开始。
+
+## v1.0 Phase0 — Architecture Freeze（Approved / completed）
 
 ### 已完成的文档设计
 
@@ -23,7 +35,7 @@
 - Part6：RFC-008 定义 Proposal → ReviewDecision → Knowledge/KnowledgeRevision 生命周期。
 - Part7：完成 Architecture/Project/Roadmap/RFC/ADR/architecture pack 与 Handoff 同步，并输出 Freeze Report。
 
-### 批准门槛
+### 已完成的批准门槛
 
 - 人工整体批准 RFC-005、RFC-006、RFC-007、RFC-008、ADR-004 与 Freeze Report。
 - 批准前不新增 Round Entity/Storage，不执行 Message migration，不改变 Conversation delete cascade。

@@ -6,6 +6,7 @@ import type { KnowledgeCardStorage } from "@/core/contracts/knowledge-card-stora
 import type { MessageStorage } from "@/core/contracts/message-storage";
 import type { ProposalStorage } from "@/core/contracts/proposal-storage";
 import type { SourceStorage } from "@/core/contracts/source-storage";
+import type { RoundStorage } from "@/core/contracts/round-storage";
 import type { Conversation } from "@/core/entities/conversation";
 import { AssetService } from "@/core/services/asset-service";
 
@@ -18,6 +19,7 @@ export type ConversationWorkspaceStorages = {
   analyzerRuns?: AnalyzerRunStorage;
   versions?: ConversationVersionStorage;
   assets?: AssetStorage;
+  rounds?: RoundStorage;
 };
 
 function runAssetLifecycle(
@@ -56,6 +58,7 @@ export function deleteConversationWorkspace(
   storages.proposals.removeByConversationId(conversationId);
   storages.sources.removeByConversationId(conversationId);
   storages.messages.removeByConversationId(conversationId);
+  storages.rounds?.removeByConversationId(conversationId);
   storages.analyzerRuns?.removeByConversationId(conversationId);
   storages.versions?.removeByConversationId(conversationId);
   runAssetLifecycle(storages.assets, (service) => {
@@ -103,6 +106,26 @@ export function duplicateConversationWorkspace(
     });
   storages.messages.saveMany(duplicatedMessages);
 
+  const roundIdMap = new Map<string, string>();
+  const duplicatedRounds = storages.rounds
+    ?.getByConversationId(conversationId)
+    .map((round) => {
+      const duplicatedRoundId = crypto.randomUUID();
+      roundIdMap.set(round.id, duplicatedRoundId);
+      return {
+        ...round,
+        id: duplicatedRoundId,
+        conversationId: duplicatedConversation.id,
+        messageIds: round.messageIds.flatMap((messageId) => {
+          const duplicatedMessageId = messageIdMap.get(messageId);
+          return duplicatedMessageId ? [duplicatedMessageId] : [];
+        }),
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      };
+    });
+  if (duplicatedRounds) storages.rounds?.saveMany(duplicatedRounds);
+
   const originalSources = storages.sources
     .getAll()
     .filter((source) => source.conversationId === conversationId);
@@ -146,6 +169,9 @@ export function duplicateConversationWorkspace(
       ...proposal,
       id: duplicatedProposalId,
       sourceId: duplicatedSourceId,
+      sourceRoundId: proposal.sourceRoundId
+        ? roundIdMap.get(proposal.sourceRoundId)
+        : undefined,
       conversationId: duplicatedConversation.id,
       sourceMessageIds: duplicatedMessageIds,
       createdAt: timestamp,
@@ -163,6 +189,9 @@ export function duplicateConversationWorkspace(
       ...card,
       id: crypto.randomUUID(),
       proposalId: duplicatedProposalId,
+      sourceRoundId: card.sourceRoundId
+        ? roundIdMap.get(card.sourceRoundId)
+        : undefined,
       createdAt: timestamp,
     });
   });

@@ -6,7 +6,6 @@ import type {
   SearchDocumentEntityType,
   SearchDocumentMatch,
 } from "@/core/entities/search-document";
-import { searchDocumentEntityTypes } from "@/core/entities/search-document";
 import type { Workspace } from "@/core/entities/workspace";
 import { SearchIndexService } from "@/core/services/search-index-service";
 import { WorkspaceService } from "@/core/services/workspace-service";
@@ -18,6 +17,8 @@ import { BrowserSourceStorage } from "@/infrastructure/storage/browser-source-st
 import { BrowserTagStorage } from "@/infrastructure/storage/browser-tag-storage";
 import { BrowserTaskStorage } from "@/infrastructure/storage/browser-task-storage";
 import { BrowserWorkspaceStorage } from "@/infrastructure/storage/browser-workspace-storage";
+import { BrowserRoundStorage } from "@/infrastructure/storage/browser-round-storage";
+import { BrowserAssetStorage } from "@/infrastructure/storage/browser-asset-storage";
 
 type SearchCatalog = {
   service: SearchIndexService;
@@ -28,25 +29,34 @@ type SearchTypeFilter = "all" | SearchDocumentEntityType;
 
 const groups: { type: SearchDocumentEntityType; label: string }[] = [
   { type: "conversation", label: "Conversations" },
-  { type: "source", label: "Sources" },
-  { type: "message", label: "Messages" },
-  { type: "qa-pair", label: "Q&A Pairs" },
-  { type: "proposal", label: "Proposals" },
   { type: "knowledge", label: "Knowledge" },
+  { type: "round", label: "Rounds" },
+  { type: "proposal", label: "Proposals" },
   { type: "task", label: "Tasks" },
-  { type: "tag", label: "Tags" },
-  { type: "workspace", label: "Workspaces" },
+  { type: "asset", label: "Assets" },
+  { type: "message", label: "Raw Messages (advanced)" },
+];
+
+const defaultSearchTypes: SearchDocumentEntityType[] = [
+  "conversation",
+  "knowledge",
+  "round",
+  "proposal",
+  "task",
+  "asset",
 ];
 
 const resultTypeLabels: Record<SearchDocumentEntityType, string> = {
   workspace: "Workspace",
   conversation: "Conversation",
+  round: "Round",
   source: "Source",
   message: "Message",
   "qa-pair": "Q&A Pair",
   proposal: "Proposal",
   knowledge: "Knowledge",
   task: "Task",
+  asset: "Asset",
   tag: "Tag",
 };
 
@@ -61,10 +71,12 @@ function loadSearchCatalog(): SearchCatalog {
     conversations: conversationStorage.getAll(),
     sources: new BrowserSourceStorage().getAll(),
     messages: new BrowserMessageStorage().getAll(),
+    rounds: new BrowserRoundStorage().getAll(),
     proposals: new BrowserProposalStorage().getAll(),
     knowledgeCards: new BrowserKnowledgeCardStorage().getAll(),
     tasks: new BrowserTaskStorage().getAll(),
     tags: new BrowserTagStorage().getAll(),
+    assets: new BrowserAssetStorage().getAll(),
   });
   service.buildDocuments();
   return { service, workspaces };
@@ -169,6 +181,7 @@ export function SearchExperience({
   const [typeFilter, setTypeFilter] = useState<SearchTypeFilter>(initialType ?? "all");
   const [workspaceId, setWorkspaceId] = useState(initialWorkspaceId);
   const [results, setResults] = useState<SearchDocumentMatch[]>([]);
+  const [advancedMode, setAdvancedMode] = useState(initialType === "message");
 
   useEffect(() => {
     const timer = window.setTimeout(() => setCatalog(loadSearchCatalog()), 0);
@@ -180,7 +193,12 @@ export function SearchExperience({
     const timer = window.setTimeout(() => {
       const nextQuery = query.trim();
       const nextResults = catalog.service.searchDocuments(nextQuery, {
-        entityTypes: typeFilter === "all" ? undefined : [typeFilter],
+        entityTypes:
+          typeFilter === "all"
+            ? advancedMode
+              ? [...defaultSearchTypes, "message"]
+              : defaultSearchTypes
+            : [typeFilter],
         workspaceId: workspaceId || undefined,
       });
       setDebouncedQuery(nextQuery);
@@ -197,7 +215,7 @@ export function SearchExperience({
       );
     }, 300);
     return () => window.clearTimeout(timer);
-  }, [catalog, query, typeFilter, workspaceId]);
+  }, [advancedMode, catalog, query, typeFilter, workspaceId]);
 
   const groupedResults = useMemo(
     () => groups.map((group) => ({
@@ -224,7 +242,7 @@ export function SearchExperience({
             autoFocus
             className="min-w-0 flex-1 border-0 bg-transparent px-1 py-3 text-base text-zinc-950 outline-none placeholder:text-zinc-400"
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="搜索 Note、Source、Message、问答、Proposal、Knowledge、Task…"
+            placeholder="搜索 Conversation、Knowledge、Round、Proposal、Task、Asset…"
             type="search"
             value={query}
           />
@@ -238,7 +256,7 @@ export function SearchExperience({
               value={typeFilter}
             >
               <option value="all">全部类型</option>
-              {searchDocumentEntityTypes.map((type) => (
+              {defaultSearchTypes.concat(advancedMode ? ["message"] : []).map((type) => (
                 <option key={type} value={type}>{resultTypeLabels[type]}</option>
               ))}
             </select>
@@ -259,6 +277,10 @@ export function SearchExperience({
             </select>
           </label>
         </div>
+        <label className="mt-4 flex items-center gap-2 text-sm text-zinc-600">
+          <input checked={advancedMode} onChange={(event) => { setAdvancedMode(event.target.checked); if (!event.target.checked && typeFilter === "message") setTypeFilter("all"); }} type="checkbox" />
+          高级模式：包含 Raw Message
+        </label>
         {query || hasFilters ? (
           <button
             className="mt-4 rounded-lg px-3 py-2 text-sm font-medium text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900"

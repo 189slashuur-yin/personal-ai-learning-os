@@ -2,6 +2,8 @@ import type { Conversation } from "@/core/entities/conversation";
 import type { ImportedSource } from "@/core/entities/imported-source";
 import type { KnowledgeCard } from "@/core/entities/knowledge-card";
 import type { Message } from "@/core/entities/message";
+import type { Round } from "@/core/entities/round";
+import type { Asset } from "@/core/entities/asset";
 import type { Proposal } from "@/core/entities/proposal";
 import type {
   SearchDocument,
@@ -18,10 +20,12 @@ export type SearchIndexData = {
   conversations: Conversation[];
   sources: ImportedSource[];
   messages: Message[];
+  rounds: Round[];
   proposals: Proposal[];
   knowledgeCards: KnowledgeCard[];
   tasks: Task[];
   tags: Tag[];
+  assets: Asset[];
 };
 
 type MatchCandidate = {
@@ -218,6 +222,37 @@ export class SearchIndexService {
       };
     });
 
+    const rounds: SearchDocument[] = this.data.rounds.map((round) => {
+      const conversation = conversationById.get(round.conversationId);
+      const workspace = getWorkspace(round.conversationId);
+      return {
+        id: documentId("round", round.id),
+        entityType: "round",
+        entityId: round.id,
+        workspaceId: workspace.id,
+        workspaceName: workspace.name,
+        title: round.title || `${conversation?.title ?? "Conversation"} · Round ${round.order}`,
+        body: [round.question, round.answer, round.note].filter(Boolean).join("\n"),
+        sourceLabel: "Round",
+        sourcePath: `${conversation?.title ?? "Conversation"} > Round ${round.order}`,
+        updatedAt: round.updatedAt,
+        href: `/conversation/${round.conversationId}?round=${encodeURIComponent(round.id)}#round-${round.id}`,
+        fields: {
+          title: round.title,
+          question: round.question,
+          answer: round.answer,
+          note: round.note ?? "",
+          conversation: conversation?.title ?? "",
+          workspace: workspace.name ?? "",
+        },
+        metadata: {
+          conversationId: round.conversationId,
+          order: round.order,
+          messageIds: round.messageIds,
+        },
+      };
+    });
+
     const qaPairs: SearchDocument[] = this.data.conversations.flatMap(
       (conversation) => {
         const workspace = getWorkspace(conversation.id);
@@ -399,15 +434,62 @@ export class SearchIndexService {
       },
     }));
 
+    const assets: SearchDocument[] = this.data.assets.map((asset) => {
+      let conversationId: string | undefined;
+      let workspaceId: string | undefined;
+      let href = "/search";
+      if (asset.entityType === "conversation") {
+        conversationId = asset.entityId;
+        href = `/conversation/${asset.entityId}`;
+      } else if (asset.entityType === "knowledge") {
+        const card = this.data.knowledgeCards.find((item) => item.id === asset.entityId);
+        conversationId = card?.sourceConversationId;
+        href = `/knowledge/${asset.entityId}`;
+      } else if (asset.entityType === "task") {
+        const task = this.data.tasks.find((item) => item.id === asset.entityId);
+        workspaceId = task?.workspaceId;
+        href = "/tasks";
+      } else if (asset.entityType === "workspace") {
+        workspaceId = asset.entityId;
+        href = "/workspace";
+      }
+      const workspace = conversationId
+        ? getWorkspace(conversationId)
+        : { id: workspaceId, name: workspaceId ? workspaceById.get(workspaceId)?.name : undefined };
+      return {
+        id: documentId("asset", asset.id),
+        entityType: "asset",
+        entityId: asset.id,
+        workspaceId: workspace.id,
+        workspaceName: workspace.name,
+        title: asset.originalName || asset.filename,
+        body: [asset.filename, asset.note, asset.mimeType, asset.localPath, asset.relativePath].filter(Boolean).join("\n"),
+        sourceLabel: `Asset · ${asset.entityType}`,
+        sourcePath: `Asset > ${asset.entityType}`,
+        updatedAt: asset.updatedAt,
+        href,
+        fields: {
+          title: asset.originalName || asset.filename,
+          filename: asset.filename,
+          note: asset.note ?? "",
+          mimeType: asset.mimeType ?? "",
+          path: asset.relativePath ?? asset.localPath ?? "",
+        },
+        metadata: { ownerType: asset.entityType, ownerId: asset.entityId },
+      };
+    });
+
     this.documents = [
       ...workspaces,
       ...conversations,
       ...sources,
       ...messages,
+      ...rounds,
       ...qaPairs,
       ...proposals,
       ...knowledge,
       ...tasks,
+      ...assets,
       ...tags,
     ];
     return [...this.documents];

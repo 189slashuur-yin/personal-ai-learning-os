@@ -6,6 +6,7 @@ export type AnalyzerRun = {
   id: string;
   conversationId?: string;
   sourceId?: string;
+  roundId?: string;
   messageIds?: string[];
   providerId: string;
   providerName: string;

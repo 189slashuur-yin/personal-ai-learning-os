@@ -1,12 +1,14 @@
 export const searchDocumentEntityTypes = [
   "workspace",
   "conversation",
+  "round",
   "source",
   "message",
   "qa-pair",
   "proposal",
   "knowledge",
   "task",
+  "asset",
   "tag",
 ] as const;
 

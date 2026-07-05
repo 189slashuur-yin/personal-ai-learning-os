@@ -2,7 +2,20 @@
 
 本文件记录当前仓库已经完成的 Sprint 与关键提交。日期使用仓库 commit date。
 
-当前口径：Runtime Version 为 v0.9 draft；Current Focus 为 v1.0 Phase0 Architecture Freeze candidate；Next Recommended Phase 为人工批准 Phase0。批准前不实现 Round、不执行迁移。
+当前口径：Runtime Version 为 v1.0 alpha draft；Phase1 Epic A–L 已实现并通过自动门禁；人工 QA 待执行，M–Z/AA 未开始。
+
+## 2026-07-05 — v1.0 Phase1 Alpha: Conversation / Round
+
+状态：Epic A–L implementation complete；每个 Epic 的 lint/build/diff-check 均通过（Epic D lint 经一次最小修复后通过）；未创建 commit，人工 QA 待执行。
+
+- 新增 Round Entity/Contract/BrowserStorage/Service、Round 操作与 Conversation copy/delete 协调。
+- 新增保留 Message 的 deterministic Message→Round preview/apply 与 migration summary；不自动运行、不删除旧数据。
+- 新增七类 pure/versioned Parser、Parser/Round Preview、Paste/TXT Confirm Import；JSON 仍为明确占位。
+- Conversation Detail 改为 Round-first；Message Timeline 默认折叠，旧 Q&A Pair 保留。
+- Proposal/Knowledge 增加 optional Round provenance，Review/Knowledge/Conversation 显示来源与数量。
+- Search 新增 Round/Asset，默认六类顺序，Raw Message 仅高级模式；Round 结果可深链定位。
+- Snapshot 用户文案改为 History / 版本记录 / 恢复点；底层 Entity/Storage 未重命名。
+- Breaking Changes：None。现有 Message、Q&A Pair、Proposal、Knowledge 与 Search 兼容读取；完整限制见 Migration Report。
 
 ## 2026-07-05 — v1.0 Phase0: Architecture Freeze Candidate
 

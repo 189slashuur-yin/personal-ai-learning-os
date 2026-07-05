@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import type { Proposal } from "@/core/entities/proposal";
 import type { Conversation } from "@/core/entities/conversation";
 import type { Message } from "@/core/entities/message";
+import type { Round } from "@/core/entities/round";
 import { createKnowledgeCard } from "@/core/services/knowledge-card-creation";
 import {
   acceptProposal,
@@ -16,6 +17,7 @@ import { BrowserKnowledgeCardStorage } from "@/infrastructure/storage/browser-kn
 import { BrowserConversationStorage } from "@/infrastructure/storage/browser-conversation-storage";
 import { BrowserMessageStorage } from "@/infrastructure/storage/browser-message-storage";
 import { BrowserProposalStorage } from "@/infrastructure/storage/browser-proposal-storage";
+import { BrowserRoundStorage } from "@/infrastructure/storage/browser-round-storage";
 import { CapabilityBadges } from "@/app/capability-badges";
 
 type ReviewState =
@@ -25,6 +27,7 @@ type ReviewState =
       status: "ready";
       proposal: Proposal;
       conversation: Conversation | null;
+      round: Round | null;
       sourceMessages: Message[];
     };
 
@@ -50,6 +53,9 @@ export function ReviewProposal({ proposalId }: { proposalId?: string }) {
         ? new BrowserConversationStorage().getById(proposal.conversationId)
         : null;
       const sourceMessageIdSet = new Set(proposal?.sourceMessageIds ?? []);
+      const round = proposal?.sourceRoundId
+        ? new BrowserRoundStorage().getById(proposal.sourceRoundId)
+        : null;
       const sourceMessages = proposal?.conversationId
         ? new BrowserMessageStorage()
             .getByConversationId(proposal.conversationId)
@@ -58,7 +64,7 @@ export function ReviewProposal({ proposalId }: { proposalId?: string }) {
 
       setState(
         proposal
-          ? { status: "ready", proposal, conversation, sourceMessages }
+          ? { status: "ready", proposal, conversation, round, sourceMessages }
           : { status: "missing-proposal" },
       );
     }, 0);
@@ -137,7 +143,7 @@ export function ReviewProposal({ proposalId }: { proposalId?: string }) {
     (state.proposal.sourceMessageIds?.length ?? 0) - state.sourceMessages.length,
   );
   const analysisMode =
-    state.proposal.analysisMode ??
+    state.proposal.sourceType ?? state.proposal.analysisMode ??
     (state.proposal.sourceMessageIds?.length ? "messages" : "source");
 
   return (
@@ -159,6 +165,13 @@ export function ReviewProposal({ proposalId }: { proposalId?: string }) {
               {state.conversation.title}
             </Link>
           </p>
+        ) : null}
+        {state.round ? (
+          <p className="mt-2 text-sm text-zinc-500">
+            来源 Round：<Link className="font-medium text-zinc-800 hover:underline" href={`/conversation/${state.round.conversationId}?round=${encodeURIComponent(state.round.id)}#round-${state.round.id}`}>{state.round.title}</Link>
+          </p>
+        ) : state.proposal.sourceRoundId ? (
+          <p className="mt-2 text-sm text-amber-700">来源 Round 已不可用；Evidence 快照仍保留。</p>
         ) : null}
       </div>
 
@@ -217,7 +230,7 @@ export function ReviewProposal({ proposalId }: { proposalId?: string }) {
             {state.proposal.suggestedAction ?? "legacy"}
           </dd>
         </div>
-        {analysisMode === "messages" ? (
+        {analysisMode === "messages" || analysisMode === "round" ? (
           <div>
             <dt className="text-zinc-500">Selected message count</dt>
             <dd className="mt-1 font-medium text-zinc-900">

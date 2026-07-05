@@ -15,6 +15,7 @@ import type { ImportedSource } from "@/core/entities/imported-source";
 import type { KnowledgeCard } from "@/core/entities/knowledge-card";
 import type { Message, MessageRole } from "@/core/entities/message";
 import type { Proposal } from "@/core/entities/proposal";
+import type { Round } from "@/core/entities/round";
 import type { ProviderCapability } from "@/core/entities/provider-capability";
 import { DEFAULT_WORKSPACE_ID, type Workspace } from "@/core/entities/workspace";
 import { AnalyzerExecutionService } from "@/core/services/analyzer-execution";
@@ -43,6 +44,7 @@ import { BrowserTaskStorage } from "@/infrastructure/storage/browser-task-storag
 import { BrowserWorkspaceStorage } from "@/infrastructure/storage/browser-workspace-storage";
 import { ProposalWorkspace } from "./proposal-workspace";
 import { ConversationAssets } from "./conversation-assets";
+import { RoundWorkspace } from "./round-workspace";
 import { CapabilityBadges } from "@/app/capability-badges";
 
 type ConversationDetailProps = {
@@ -164,6 +166,7 @@ export function ConversationDetail({
   );
   const [messageSearchQuery, setMessageSearchQuery] = useState("");
   const [messageView, setMessageView] = useState<MessageView>("timeline");
+  const [isMessageDataVisible, setIsMessageDataVisible] = useState(false);
   const [qaPairSearchQuery, setQAPairSearchQuery] = useState("");
   const [qaPairSort, setQAPairSort] = useState<QAPairSort>("order");
   const [collapsedQAPairIds, setCollapsedQAPairIds] = useState<Set<string>>(
@@ -457,12 +460,33 @@ export function ConversationDetail({
       return;
     }
 
-    new BrowserProposalStorage().saveCurrent(result.proposal);
+    const conversationProposal: Proposal = {
+      ...result.proposal,
+      sourceType: "conversation",
+    };
+    new BrowserProposalStorage().saveCurrent(conversationProposal);
     setAnalyzerError(null);
     setState({
       ...state,
-      proposals: [result.proposal, ...state.proposals],
+      proposals: [conversationProposal, ...state.proposals],
     });
+  }
+
+  async function runRoundAnalyzer(round: Round) {
+    if (state.status !== "ready") return;
+    const messageIdSet = new Set(round.messageIds);
+    const roundMessages = state.messages.filter((message) => messageIdSet.has(message.id));
+    const result = await createAnalyzerExecutionService().runRound(round, roundMessages);
+    setLatestAnalyzerRun(result.run);
+    if (!result.proposal) {
+      setAnalyzerError(result.run.error?.message ?? "Round Analyzer 运行失败。");
+      return;
+    }
+    const proposalStorage = new BrowserProposalStorage();
+    proposalStorage.save(result.proposal);
+    proposalStorage.saveCurrent(result.proposal);
+    setAnalyzerError(null);
+    setState({ ...state, proposals: [result.proposal, ...state.proposals] });
   }
 
   function createTaskFromConversation() {
@@ -853,7 +877,7 @@ export function ConversationDetail({
     }
 
     const confirmed = window.confirm(
-      `Restore Snapshot「${version.name}」？当前 Conversation 与 ${state.messages.length} 条 Messages 将被替换，恢复后的 Messages 会生成新 ID。Proposal、Knowledge、AnalyzerRun、Tag、Provider 与所有 Snapshots 不会改变。`,
+      `恢复到版本记录「${version.name}」？当前 Conversation 与 ${state.messages.length} 条 Messages 将被替换，恢复后的 Messages 会生成新 ID。Proposal、Knowledge、AnalyzerRun、Tag、Provider 与其他恢复点不会改变。`,
     );
 
     if (!confirmed) {
@@ -1169,7 +1193,7 @@ export function ConversationDetail({
             </dd>
           </div>
           <div>
-            <dt className="text-zinc-500">Snapshots</dt>
+            <dt className="text-zinc-500">History</dt>
             <dd className="mt-1 font-medium text-zinc-900">
               {state.versions.length} 个
             </dd>
@@ -1232,8 +1256,8 @@ export function ConversationDetail({
 
       <section className="detail-section">
         <div className="detail-section-heading">
-          <p className="detail-kicker">03 · Conversation Version</p>
-          <h2 className="detail-title">Conversation Snapshots</h2>
+          <p className="detail-kicker">03 · History / 版本记录</p>
+          <h2 className="detail-title">Conversation History</h2>
           <p className="detail-description">
             保存当前 Conversation 与 Messages；不包含 Proposal、Knowledge、AnalyzerRun、Tag 或 Provider。
           </p>
@@ -1249,7 +1273,7 @@ export function ConversationDetail({
           ) : null}
           <div className="grid gap-3 rounded-xl border border-zinc-200 bg-white p-5 sm:grid-cols-2">
             <label className="text-xs font-medium text-zinc-600">
-              Snapshot 名称
+              恢复点名称
               <input
                 className="mt-1.5 w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm text-zinc-900 outline-none focus:border-zinc-400 focus:ring-2 focus:ring-zinc-100"
                 onChange={(event) => setSnapshotName(event.target.value)}
@@ -1273,7 +1297,7 @@ export function ConversationDetail({
                 onClick={createSnapshot}
                 type="button"
               >
-                Create Snapshot
+                创建恢复点
               </button>
             </div>
           </div>
@@ -1305,7 +1329,7 @@ export function ConversationDetail({
                         onClick={() => restoreSnapshot(version)}
                         type="button"
                       >
-                        Restore
+                        恢复此版本
                       </button>
                     </div>
                   </div>
@@ -1317,7 +1341,7 @@ export function ConversationDetail({
             </ol>
           ) : (
             <p className="mt-4 rounded-xl border border-dashed border-zinc-300 bg-zinc-50 p-5 text-sm text-zinc-500">
-              尚未创建 Snapshot。
+              尚未创建恢复点。
             </p>
           )}
         </div>
@@ -1368,15 +1392,18 @@ export function ConversationDetail({
         </div>
       </section>
 
+      <RoundWorkspace conversationId={conversationId} onAnalyzeRound={runRoundAnalyzer} />
+
       <section className="detail-section">
         <div className="detail-section-heading">
-          <p className="detail-kicker">05 · Messages</p>
+          <p className="detail-kicker">06 · Messages (underlying data)</p>
           <h2 className="detail-title">Message Timeline</h2>
           <p className="detail-description">
-            按发言标记拆分原始文本，不调用 AI API。
+            底层原始数据默认折叠；旧 Message / Q&amp;A Pair 功能继续可用。
           </p>
         </div>
-        <div>
+        <button aria-expanded={isMessageDataVisible} className="mb-4 rounded-lg border border-zinc-200 bg-white px-4 py-2.5 text-sm font-medium text-zinc-700 hover:bg-zinc-50" onClick={() => setIsMessageDataVisible((visible) => !visible)} type="button">{isMessageDataVisible ? "折叠 Message Timeline" : `展开 Message Timeline（${state.messages.length}）`}</button>
+        {isMessageDataVisible ? <div>
           <div className="flex flex-wrap items-center justify-between gap-3">
             <p className="text-sm text-zinc-500">
               {state.messages.length > 0
@@ -1765,7 +1792,7 @@ export function ConversationDetail({
               </p>
             </div>
           )}
-        </div>
+        </div> : <p className="text-sm text-zinc-500">Message Timeline 已折叠。Round 是默认阅读与操作入口。</p>}
       </section>
 
       <section className="detail-section">

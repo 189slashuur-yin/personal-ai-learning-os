@@ -5,6 +5,7 @@ import type { AnalyzerRun } from "@/core/entities/analyzer-run";
 import type { ImportedSource } from "@/core/entities/imported-source";
 import type { Message } from "@/core/entities/message";
 import type { Proposal } from "@/core/entities/proposal";
+import type { Round } from "@/core/entities/round";
 import { AnalyzerOutputValidationError } from "@/core/services/analyzer-output-validator";
 import { PromptTemplateService } from "@/core/services/prompt-template-service";
 
@@ -92,8 +93,68 @@ export class AnalyzerExecutionService {
     );
   }
 
+  async runRound(
+    round: Round,
+    messages: Message[],
+    options: AnalyzerExecutionOptions = {},
+  ): Promise<AnalyzerExecutionResult> {
+    const timestamp = new Date().toISOString();
+    const analysisMessages = messages.length
+      ? messages
+      : [
+          ...(round.question
+            ? [{
+                id: `round-question-${round.id}`,
+                conversationId: round.conversationId,
+                role: "user" as const,
+                content: round.question,
+                order: 0,
+                createdAt: timestamp,
+                updatedAt: timestamp,
+              }]
+            : []),
+          ...(round.answer
+            ? [{
+                id: `round-answer-${round.id}`,
+                conversationId: round.conversationId,
+                role: "assistant" as const,
+                content: round.answer,
+                order: 1,
+                createdAt: timestamp,
+                updatedAt: timestamp,
+              }]
+            : []),
+        ];
+
+    return this.execute(
+      {
+        conversationId: round.conversationId,
+        roundId: round.id,
+        messageIds: round.messageIds,
+      },
+      "messages",
+      async () => {
+        const proposal = await this.provider.analyzeMessages(
+          round.conversationId,
+          analysisMessages,
+        );
+        return {
+          ...proposal,
+          sourceType: "round",
+          sourceRoundId: round.id,
+          sourceMessageIds: [...round.messageIds],
+          sourceEvidence: {
+            ...proposal.sourceEvidence,
+            sourceName: `Round ${round.order}: ${round.title}`,
+          },
+        };
+      },
+      options,
+    );
+  }
+
   private async execute(
-    source: Pick<AnalyzerRun, "conversationId" | "sourceId" | "messageIds">,
+    source: Pick<AnalyzerRun, "conversationId" | "sourceId" | "roundId" | "messageIds">,
     mode: "source" | "messages",
     analyze: () => Promise<Proposal>,
     options: AnalyzerExecutionOptions,

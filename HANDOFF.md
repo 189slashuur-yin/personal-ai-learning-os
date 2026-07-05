@@ -1,4 +1,70 @@
-# v1.0 Phase0 — Architecture Freeze Candidate
+# v1.0 Phase1 — Conversation / Round Implementation Handoff
+
+## 当前状态
+
+- 日期：2026-07-05
+- 版本：v1.0 alpha draft
+- 范围：Epic A–L implemented；M–Z/AA 未进入
+- Git：未创建 commit、未 push
+- 数据：未删除旧数据；未对用户浏览器实际执行 migration
+- 验证：Epic A–L checkpoint 与最终 `npm run lint`、`npm run build`、`git diff --check` 均通过
+- 人工 QA：尚未执行，因此不能标记正式 v1.0 release-ready
+
+## Epic A–L 结果
+
+- A Round Domain：新增 Round Entity、RoundStorage、BrowserRoundStorage、RoundService。
+- B Migration：新增 deterministic preview/apply、migration summary、collision blocking 与 idempotent no-op；不删除或改写 Message，Q&A Pair 保持兼容。
+- C Parser Pipeline：新增 ChatGPT、Claude、Gemini、DeepSeek、Markdown、TXT、Manual pure/versioned Parser；Confirm 通过 ImportService 写 canonical records。
+- D Import UX：`/import` 提供 Paste、TXT、JSON 占位、Parser Preview、Round Preview、Confirm Import，完成后进入 Conversation。
+- E Round-first UI：默认 Round 列表，支持搜索、折叠、Note、手动新增与编辑 Q/A；Message Timeline 默认折叠但旧功能保留。
+- F Operations：支持删除、合并、拆分、上下重排、messageIds 重新绑定与受影响记录 updatedAt。
+- G Proposal：新增 round/conversation/source/messages 来源；Round Analyze 为主入口之一，Conversation Summary 保留；Review 显示来源 Round。
+- H Knowledge：新 Knowledge 可保存 sourceRoundId；旧 Knowledge 不回填；详情回链 Round，Round 显示 Knowledge 数量。
+- I Search：新增 Round/Asset SearchDocument；默认 Conversation、Knowledge、Round、Proposal、Task、Asset，Raw Message 高级模式；Round 深链定位。
+- J History：用户文案使用 History / 版本记录 / 恢复点；底层 ConversationVersion/Snapshot 方法未改名。
+- K Compatibility：旧 Message/Q&A/Proposal/Knowledge/Search 可读；无 Round Conversation 可显式预检生成；Conversation copy/delete 协调 Round 和 provenance ID。
+- L Documentation：同步核心文档、QA、alpha release draft 与 Migration Report。
+
+## 关键文件
+
+- Domain/Storage：`src/core/entities/round.ts`、`src/core/contracts/round-storage.ts`、`src/infrastructure/storage/browser-round-storage.ts`、`src/core/services/round-service.ts`
+- Migration：`src/core/services/message-to-round-migration.ts`、`docs/migrations/Message-to-Round-v1.0-Phase1.md`
+- Import：`src/core/entities/import-parser.ts`、`src/core/contracts/conversation-parser.ts`、`src/core/services/import-parser-pipeline.ts`、`src/core/services/import-service.ts`、`src/app/import/import-workbench.tsx`
+- Round UI：`src/app/conversation/[id]/round-workspace.tsx`、`src/app/conversation/[id]/conversation-detail.tsx`
+- Provenance/Search：Proposal、KnowledgeCard、AnalyzerExecution、Review、Knowledge Detail、SearchIndexService 与 SearchExperience 的对应文件
+- Release：`docs/releases/v1.0-alpha.md`、`docs/QA_CHECKLIST.md`
+
+## Breaking Changes
+
+None。所有新 provenance 字段为 optional；旧 Message、Q&A Pair、Proposal、KnowledgeCard、ConversationVersion 与旧 Search type 仍可读取。新 Round 使用独立 LocalStorage key，迁移不自动执行。
+
+## Known Issues
+
+- 当前 additive apply 不是 Phase0 设计中的完整 recovery-export/staging/commit-marker transaction；不得用于破坏性 schema 替换。
+- Provider parser 当前是确定性 labeled-text parser，不解析原生 ChatGPT/Claude/Gemini/DeepSeek JSON export；JSON UI 明确只占位。
+- Round Q/A/messageIds 是兼容投影；后续 Message 编辑不会自动反向同步 Round。
+- Split 使用文本与 messageIds 中点，需要人工复核。
+- 现有 Conversation 删除对独立 Proposal/Knowledge 的级联语义未在本 Phase1 改写，仍是后续架构对齐项。
+- 没有自动化测试套件；人工 QA 未执行。
+
+## Manual QA
+
+1. 先用可丢弃浏览器 profile 或测试数据执行 `docs/QA_CHECKLIST.md` 的 V10-01–12。
+2. 对 answered/unanswered/orphan/context/unknown/empty 旧 Conversation 比对迁移前后 Message ID、内容、顺序。
+3. 逐一验证七种 Parser、TXT、取消 Confirm、JSON 占位与导入后跳转。
+4. 覆盖全部 Round 操作、Round Analyze → Review → Knowledge、Search 深链与 History restore。
+5. 回归 v0.9 Search/Asset、旧 Q&A Pair、Proposal Evidence、Knowledge Source、Task SourceRef 与 Conversation copy/delete。
+
+## Remaining TODO
+
+- 执行并记录 Phase1 人工 QA；在通过前保持 alpha draft。
+- 完成 recovery export/staging/checksum/commit marker/rollback 后，才能讨论任何破坏性 schema migration。
+- 原生 provider JSON parsers、projection 同步策略、独立 Proposal/Knowledge 删除语义需要新批准范围。
+- 停止在 Epic L；不要进入 M–Z/AA，不要创建 commit。
+
+---
+
+# Previous Handoff — v1.0 Phase0 Architecture Freeze Candidate
 
 ## 当前状态
 

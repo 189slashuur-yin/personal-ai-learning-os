@@ -59,6 +59,7 @@ export class OllamaProvider implements AnalyzerProvider {
 
     return {
       id: `source-proposal-${crypto.randomUUID()}`,
+      sourceType: "source",
       sourceId: source.id,
       conversationId: source.conversationId,
       title: output.title,
@@ -106,6 +107,7 @@ export class OllamaProvider implements AnalyzerProvider {
 
     return {
       id: `message-proposal-${crypto.randomUUID()}`,
+      sourceType: "messages",
       conversationId,
       sourceMessageIds: orderedMessages.map((message) => message.id),
       title: output.title,

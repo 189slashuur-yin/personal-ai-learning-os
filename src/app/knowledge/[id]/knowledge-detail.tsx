@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type FormEvent, useEffect, useState } from "react";
 import type { KnowledgeCard } from "@/core/entities/knowledge-card";
+import type { Round } from "@/core/entities/round";
 import { CapabilityBadges } from "@/app/capability-badges";
 import type { Tag } from "@/core/entities/tag";
 import {
@@ -19,6 +20,7 @@ import { BrowserProposalStorage } from "@/infrastructure/storage/browser-proposa
 import { BrowserTagStorage } from "@/infrastructure/storage/browser-tag-storage";
 import { BrowserTaskStorage } from "@/infrastructure/storage/browser-task-storage";
 import { BrowserWorkspaceStorage } from "@/infrastructure/storage/browser-workspace-storage";
+import { BrowserRoundStorage } from "@/infrastructure/storage/browser-round-storage";
 
 type Draft = Pick<
   KnowledgeCard,
@@ -44,6 +46,8 @@ export function KnowledgeDetail({ cardId }: { cardId: string }) {
   const [card, setCard] = useState<KnowledgeCard | null | undefined>(undefined);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [sourceConversationTitle, setSourceConversationTitle] = useState<string | null>(null);
+  const [sourceRound, setSourceRound] = useState<Round | null>(null);
+  const [sourceRoundId, setSourceRoundId] = useState<string | null>(null);
   const [sourceMessageCount, setSourceMessageCount] = useState<number | null>(null);
   const [missingSourceMessageCount, setMissingSourceMessageCount] = useState(0);
   const [sourceEvidenceExcerpt, setSourceEvidenceExcerpt] = useState<string | null>(null);
@@ -67,9 +71,13 @@ export function KnowledgeDetail({ cardId }: { cardId: string }) {
       const conversation = conversationId
         ? new BrowserConversationStorage().getById(conversationId)
         : null;
+      const roundId = storedCard?.sourceRoundId ?? proposal?.sourceRoundId ?? null;
+      const round = roundId ? new BrowserRoundStorage().getById(roundId) : null;
       setCard(storedCard);
       setTags(new BrowserTagStorage().getAll());
       setSourceConversationTitle(conversation?.title ?? null);
+      setSourceRoundId(roundId);
+      setSourceRound(round);
       setSourceMessageCount(
         storedCard?.sourceMessageCount ?? proposal?.sourceMessageIds?.length ?? null,
       );
@@ -375,6 +383,14 @@ export function KnowledgeDetail({ cardId }: { cardId: string }) {
                 <dt className="font-medium text-zinc-500">来源 Conversation</dt>
                 <dd className="mt-1.5 text-zinc-900">{sourceConversationTitle}</dd>
               </div>
+            ) : null}
+            {sourceRound ? (
+              <div>
+                <dt className="font-medium text-zinc-500">来源 Round</dt>
+                <dd className="mt-1.5 text-zinc-900"><Link className="font-medium hover:underline" href={`/conversation/${sourceRound.conversationId}?round=${encodeURIComponent(sourceRound.id)}#round-${sourceRound.id}`}>{sourceRound.title}</Link></dd>
+              </div>
+            ) : sourceRoundId ? (
+              <div><dt className="font-medium text-zinc-500">来源 Round</dt><dd className="mt-1.5 text-amber-700">Round 已不可用；Knowledge 内容未受影响</dd></div>
             ) : null}
             {sourceMessageCount ? (
               <div>

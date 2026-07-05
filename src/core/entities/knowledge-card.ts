@@ -9,6 +9,7 @@ export type KnowledgeCard = {
   sourceFile: string;
   sourceId?: string;
   sourceConversationId?: string;
+  sourceRoundId?: string;
   sourceMessageIds?: string[];
   sourceMessageCount?: number;
   sourceEvidenceExcerpt?: string;
