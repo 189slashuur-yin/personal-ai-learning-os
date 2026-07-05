@@ -1,5 +1,20 @@
 # Data Lifecycle
 
+## v1.0 Phase0 target lifecycle
+
+| Entity | Creation / transition | Deletion / retention |
+| --- | --- | --- |
+| Conversation | Create manually or from confirmed Import; append only with preview; copy/remap children; restore rebuilds live Round/Message | Deletes owned Source/Round/Message/Version/Note and owner metadata; Proposal/Knowledge/Task/Receipt survive with degraded references |
+| Round | Parser, migration or explicit Conversation edit creates stable child; split/merge may later remap Message membership | Removed only through Conversation use case; not independently owned outside Conversation |
+| Message | Parser/manual/restore creates canonical utterance in one Round | Removed/replaced only through Conversation use case; snapshots in independent aggregates remain |
+| Proposal | Successful AnalyzerRun creates Pending; human ReviewDecision accepts/rejects; accepted may apply once | Independent of source deletion; permanent delete never deletes Knowledge already applied |
+| ReviewDecision | User creates one terminal accepted/rejected record | Immutable audit record; correction uses a new Proposal |
+| Knowledge | Applied accepted Proposal creates revision 1; later Proposal apply or user edit appends revision; Active ↔ Archived | Source deletion only degrades provenance; permanent Knowledge deletion does not delete source/Proposal/Task |
+| ImportReceipt | Confirmed successful import writes metadata/audit record | Conversation deletion leaves missing reference; receipt deletion never deletes Conversation |
+| SearchDocument / Result | Built at runtime from canonical records | Never persisted or migrated; disappears with runtime state |
+
+The target lifecycle requires explicit implementation and migration approval. Current v0.9 behavior below remains runtime truth until then.
+
 ## General rules
 
 - Core entities own business state; BrowserStorage owns keys, serialization, normalization, and compatibility.
@@ -18,7 +33,7 @@
 | KnowledgeCard | Service creates exactly one from an Accepted Proposal after human Review. | User edits, tags, archives, or restores/archive state according to current UI. | Explicit delete removes KnowledgeCard but not its Tag identities; planned linked Tasks survive with source shown as `deleted`. |
 | Tag | User creates a reusable classification. | Rename; associate/disassociate with KnowledgeCard. | Explicit delete removes Tag identity and unlinks its ID from KnowledgeCards; KnowledgeCards remain. |
 | Workspace | System ensures Inbox; user creates regular Workspace. | Edit metadata, archive, restore; Conversation and planned Task can move between Workspaces. | Inbox cannot be deleted. Deleting a regular Workspace first rehomes Conversations and planned Tasks to Inbox, then removes only the Workspace. |
-| Task (planned) | User explicitly creates a standalone Task or confirms an AI suggestion. | Edit; move Workspace; add/change date; open ↔ completed with timestamps; optional source may become missing. | Explicit Task delete affects no source. Conversation/Knowledge deletion never cascades to Task. Workspace deletion rehomes Task to Inbox. |
+| Task | User explicitly creates a standalone or source-linked Task. AI suggestion is not implemented. | Edit; move Workspace; change due date; complete/reopen/archive/restore; optional source may become missing. | Explicit Task delete affects no source. Conversation/Knowledge deletion never cascades to Task. Workspace deletion rehomes Task to Inbox. |
 | Activity (planned) | A successful, meaningful domain transition emits a factual record after the business write succeeds. | Append-only; corrections are additional records rather than mutations. | Retention/deletion policy is not approved and must be frozen before Activity implementation. Activity never becomes current business state. |
 | Conversation Note | User edits an optional field on Conversation. | Save trims content and updates Conversation `updatedAt`; cancel restores current value. | Removed with Conversation; does not mutate Source, Message, Proposal, or Knowledge. |
 | SearchDocument | Built at runtime from canonical collections. | Rebuilt on page load; query adds score, snippet, matched fields and match mode. | Never persisted in v0.9; disappears with runtime state and never owns source data. |

@@ -1,4 +1,96 @@
-# v0.9 Release Blocker Fix — Asset owner lifecycle
+# v1.0 Phase0 — Architecture Freeze Candidate
+
+## 当前状态
+
+Part0–Part7 的文档级 Architecture Freeze candidate 已完成。Conversation、Round、Proposal、Knowledge、Search 与 Import 的最终关系已无未解决的所有权冲突，但仍等待人工整体批准。当前 runtime 仍是 v0.9 draft；没有实现 Round、没有执行 Message migration、没有修改 LocalStorage、没有创建 commit。
+
+## 最终架构结论
+
+- Conversation 表示一个逻辑对话线程，不表示 Import、主题或项目；Workspace 表达项目/主题，一次 Import 可创建多个 Conversation。
+- Conversation 保持 Aggregate Root。Round 是有稳定 ID 的子实体，负责 Message 分组；Question/Answer 是投影，不单独持久化。
+- Round 不拥有 Proposal、Knowledge 或 Task。三者保留独立生命周期，通过 typed reference 与 evidence/source snapshot 关联来源。
+- 不新增 Session；Conversation、Round、Workspace、ImportReceipt 已覆盖候选语义。
+- Review 成为不可变的人工 ReviewDecision；Accepted Proposal 仍需显式幂等 apply，才能创建 Knowledge 或追加 KnowledgeRevision。
+- Search 默认结果冻结为 Conversation、Knowledge、Round、Proposal、Task、Asset、Raw Message；Search 仍是非持久化只读模型。
+- Import Parser 纯函数化、版本化；Clipboard 是 channel，GPT Export、Claude Export、Markdown、TXT、JSON 是 format；必须 Preview + 人工确认后写入。
+- Conversation 默认删除只删除其 Source/Round/Message/Version/Note 与 owner metadata；Proposal、Knowledge、Task、ImportReceipt 保留并降级 live reference。Privacy erasure 必须是独立、显式、展示完整影响的操作。
+
+## Part0–Part7 结果
+
+- Part0 Architecture Review：阅读核心文档、全部 RFC/ADR、QA/Release，并只读核对 Entity/Service/Storage 当前关系；输出 `Architecture-Review-v1.0-Phase0.md`。
+- Part1 Conversation Definition：冻结为一个逻辑对话线程，明确排除 import/topic/project 含义。
+- Part2 Round Definition：输出 RFC-005 与 ADR-004；Round 不是 Aggregate Root，不引入 Session。
+- Part3 Migration Design：输出 Message → Round migration design；包含 deterministic grouping、dry-run、recovery snapshot、staging、validation、commit marker、rollback、idempotency 与 legacy compatibility。
+- Part4 Search Design：RFC-007 统一 Search Result contract、默认七类结果、facet/context/anchor/missing-reference 语义。
+- Part5 Import Design：RFC-006 定义六类输入、Parser contract、preview/diagnostics、ImportReceipt 与 failure/recovery。
+- Part6 Knowledge Lifecycle：RFC-008 定义 Proposal、ReviewDecision、Knowledge、KnowledgeRevision 与 provenance 生命周期。
+- Part7 Architecture Freeze：同步 Architecture、Project、Roadmap、architecture pack、RFC/ADR、Changelog、README 与 Handoff；输出 Freeze Report。
+
+## 新增文件
+
+- `docs/reviews/Architecture-Review-v1.0-Phase0.md`
+- `docs/reviews/Architecture-Freeze-v1.0-Phase0.md`
+- `docs/rfc/RFC-005-conversation-round-model.md`
+- `docs/rfc/RFC-006-import-parser-contract.md`
+- `docs/rfc/RFC-007-search-result-contract.md`
+- `docs/rfc/RFC-008-proposal-review-knowledge-lifecycle.md`
+- `docs/adr/ADR-004-conversation-remains-aggregate-root.md`
+- `docs/design/Message-to-Round-Migration-v1.0.md`
+
+## 修改文件
+
+- `README.md`
+- `PROJECT.md`
+- `ARCHITECTURE.md`
+- `ROADMAP.md`
+- `CHANGELOG.md`
+- `HANDOFF.md`
+- `docs/design/V1.0-Product-Backlog.md`
+- `docs/rfc/RFC-003-task-domain.md`
+- `docs/rfc/RFC-004-data-and-search-foundation.md`
+- `docs/adr/ADR-002-human-review-required.md`
+- `docs/architecture/DOMAIN_MODEL.md`
+- `docs/architecture/DOMAIN_BOUNDARIES.md`
+- `docs/architecture/DATA_LIFECYCLE.md`
+- `docs/architecture/architecture-diagram.md`
+
+## 人工批准清单
+
+必须整体确认以下决定，不能只批准其中一部分后直接实现：
+
+1. Conversation = 一个逻辑对话线程。
+2. Round = Conversation 子实体，不是 Aggregate Root。
+3. 不引入 Session。
+4. Proposal/Knowledge 默认不随 source 删除。
+5. ReviewDecision 与 KnowledgeRevision 进入 target Domain。
+6. Search 使用七类默认结果。
+7. Import 使用 pure/versioned Parser + Preview/Confirm。
+8. Migration 只有在 recovery export、staging、validation、rollback 完成后才能运行。
+
+如任何一项不同意，应重新打开 Phase0；批准前不要创建实现 Sprint。
+
+## 范围与限制
+
+- 未修改 `src/`、package、依赖或 runtime。
+- 未实现 Round、Parser、ReviewDecision、KnowledgeRevision 或新 SearchResult。
+- 未新增/修改 LocalStorage key，未执行 migration。
+- 未实现 RAG、Embedding、Agent、Calendar、Reminder、Cloud Sync、数据库或云 Provider。
+- 未创建 commit 或推送。
+- v0.9 release-blocking 人工 QA 仍待执行；本轮文档检查不等于手工产品验收。
+
+## 质量检查
+
+- `npm run lint`：通过。
+- `npm run build`：通过；Next.js production build 成功生成 16 个路由。
+- `git diff --check`：通过。
+
+## 下一步
+
+停止并等待人工批准。批准后也不要直接实现全部模型；先把 recovery/export prerequisite 与 Message → Round migration acceptance criteria 拆成单独 Sprint，再按冻结边界逐步实施。
+
+---
+
+# Previous Handoff — v0.9 Release Blocker Fix / Asset owner lifecycle
 
 ## 当前状态
 

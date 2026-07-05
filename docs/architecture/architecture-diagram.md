@@ -1,5 +1,36 @@
 # Architecture Diagram
 
+## v1.0 Phase0 freeze candidate
+
+```mermaid
+flowchart TD
+  W[Workspace] --> C[Conversation]
+  C --> R[Round]
+  R --> M[Message]
+  C --> S[ImportedSource]
+  C --> V[ConversationVersion]
+  I[ImportArtifact] --> P0[Parser + Preview]
+  P0 --> C
+  S --> A[AnalyzerRun]
+  R --> A
+  M --> A
+  A --> P[Proposal]
+  P --> D[ReviewDecision]
+  D --> K[Knowledge]
+  K --> KR[KnowledgeRevision]
+  X[Search read model] --> C
+  X --> R
+  X --> M
+  X --> P
+  X --> K
+  X --> T[Task]
+  X --> AS[Asset metadata]
+```
+
+Conversation remains the aggregate root; Round is a stable child. Proposal, Knowledge and Task are independent. Parser and Search are non-owning boundaries. This diagram is approval-pending and has no runtime implementation yet.
+
+## v0.9 runtime history
+
 Epic B 将 Workspace 引入为 Conversation 的顶层归属，但仍保持 local-first、模块化单体和人工审核边界。
 
 ```mermaid

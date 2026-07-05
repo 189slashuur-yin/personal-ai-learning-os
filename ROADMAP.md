@@ -7,8 +7,34 @@
 - Current Version：v0.9 draft
 - Phase：Phase2
 - Current Epic：Epic D（Completed）
-- Current Focus：Data Foundation & Search；实现完成，手工 QA 待执行。
-- Next Recommended Phase：v1.0 planning（范围与验收标准待批准）。
+- Current Focus：v1.0 Phase0 Architecture Freeze candidate；v0.9 手工 QA 仍待执行。
+- Next Recommended Phase：人工批准 Phase0；批准前不实现 Round、不执行迁移。
+
+## v1.0 Phase0 — Architecture Freeze（Approval pending）
+
+### 已完成的文档设计
+
+- Part0：完成全仓架构资料、RFC/ADR、QA/Release 与当前 Entity/Service 关系审查。
+- Part1：将 Conversation 定义为一个逻辑对话线程；Workspace 表达项目/主题，Import 表达导入过程。
+- Part2：RFC-005 定义 Round 为 Conversation 子实体，不是 Aggregate Root；Question/Answer 为投影，不引入 Session。
+- Part3：完成 Message → Round 的确定性、分阶段、可回滚迁移设计；未写迁移代码。
+- Part4：RFC-007 将默认 Search 结果冻结为 Conversation、Knowledge、Round、Proposal、Task、Asset、Raw Message。
+- Part5：RFC-006 定义 Clipboard、GPT Export、Claude Export、Markdown、TXT、JSON 的 Parser/Preview/Confirm 边界。
+- Part6：RFC-008 定义 Proposal → ReviewDecision → Knowledge/KnowledgeRevision 生命周期。
+- Part7：完成 Architecture/Project/Roadmap/RFC/ADR/architecture pack 与 Handoff 同步，并输出 Freeze Report。
+
+### 批准门槛
+
+- 人工整体批准 RFC-005、RFC-006、RFC-007、RFC-008、ADR-004 与 Freeze Report。
+- 批准前不新增 Round Entity/Storage，不执行 Message migration，不改变 Conversation delete cascade。
+- 批准后 v1.x 只允许在冻结边界内实施；不再调整 Domain relationship。
+- 每个实现 Sprint 仍需单独确认范围、兼容策略、验收标准和回滚方案。
+
+### Phase0 明确非目标
+
+- 不实现 Round、Parser、ReviewDecision、KnowledgeRevision 或新 SearchResult。
+- 不运行迁移、不改 LocalStorage、不引入数据库。
+- 不实现 RAG、Embedding、Agent、Calendar、Reminder、Cloud Sync 或云 Provider。
 
 ## v0.9 — Data Foundation & Search
 

@@ -1,5 +1,47 @@
 # Domain Model
 
+## v1.0 Phase0 freeze candidate
+
+本节在人工批准后取代旧的顶层关系；当前 v0.9 runtime 仍使用下方 implemented addendum。Phase0 没有运行时修改。
+
+```mermaid
+flowchart LR
+  W[Workspace] -->|places| C[Conversation AR]
+  C -->|owns| S[ImportedSource segment]
+  C -->|owns| R[Round]
+  R -->|groups/owns| M[Message]
+  C -->|owns| V[ConversationVersion]
+
+  I[ImportArtifact] --> Parser[Versioned Parser]
+  Parser --> Preview[ImportPreview]
+  Preview -->|explicit confirm| Receipt[ImportReceipt]
+  Receipt -. references .-> C
+
+  Provider[Provider] --> Run[AnalyzerRun]
+  S --> Run
+  R --> Run
+  M --> Run
+  Run --> P[Proposal AR]
+  P --> Review[ReviewDecision]
+  Review -->|accepted + apply| K[Knowledge AR]
+  K --> KR[KnowledgeRevision]
+
+  P -. target + snapshot .-> R
+  K -. provenance + snapshot .-> R
+  Task[Task AR] -. SourceRef + snapshot .-> R
+  Search[Search read model] --> C
+  Search --> R
+  Search --> M
+  Search --> P
+  Search --> K
+  Search --> Task
+  Search --> Asset[Asset metadata]
+```
+
+Aggregate roots are Conversation, Proposal, Knowledge, Task, Workspace and Asset metadata. Round is a stable Conversation child, not an aggregate root. ImportReceipt is an immutable application/audit record. SearchDocument/SearchResult, Question and Answer are projections. Session is intentionally absent.
+
+Target invariants and compatibility are defined in RFC-005–008 and ADR-004. Until human approval, this is a candidate rather than implementation authority.
+
 ## v0.9 implemented addendum
 
 `Task` 已实现但在 v0.9 降低主流程优先级。v0.9 新增 `Asset` metadata 实体和运行时 `SearchDocument` 读模型：Asset 可引用 Conversation、KnowledgeCard、Task 或 Workspace，但不拥有文件内容；SearchDocument 从 canonical collections 派生，不持久化、不修改源实体。Q&A Pair 仍从 Messages 派生。
@@ -91,7 +133,7 @@ The arrows describe allowed relationships, not ownership by the target. In parti
 | Tag | Reusable classification associated with KnowledgeCard. |
 | Provider | Replaceable analysis capability; Demo is default and Ollama is optional/local. |
 | Search | Read model over existing collections; it owns no source entity or index today. |
-| Task (planned) | Independent action with optional Conversation/Knowledge SourceRef and Workspace placement. |
+| Task | Independent implemented action aggregate with optional source snapshot and Workspace placement. |
 | Activity (planned) | Append-only record of meaningful user/domain events; not immediate Epic D scope. |
 | Memory (future) | Unapproved future context/retention capability, pending separate RFC and privacy model. |
 | Agent (future) | Unapproved future actor capability, pending explicit authority and safety design. |

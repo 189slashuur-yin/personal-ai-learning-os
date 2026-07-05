@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted for v0.9 implementation. This RFC freezes the data, search, and asset boundaries before runtime work begins.
+Accepted for v0.9 implementation. Its durable Raw/Interpreted, runtime-index and Asset boundaries remain valid. The v1.0 result vocabulary and Round-based anchors are superseded by RFC-005 and RFC-007 after human approval.
 
 ## Context
 
@@ -88,3 +88,6 @@ Asset paths should prefer a portable relative path when possible and may retain 
 - Real cloud Provider APIs or API keys
 - Automatic local-file copying, scanning, or arbitrary filesystem reads
 
+## v1.0 Phase0 addendum
+
+RFC-004's `SearchDocument` remains an internal non-persistent read model. The public v1.0 search surface is frozen by RFC-007 to Conversation, Knowledge, Round, Proposal, Task, Asset and Raw Message. Workspace/Tag become facets, Q&A Pair is superseded by Round, and ImportedSource is advanced provenance search. This addendum does not authorize implementation.

@@ -3,10 +3,44 @@
 ## Current release context
 
 - Current Version：v0.9 draft
-- Current Focus：Data Foundation & Search stabilization and manual QA
-- Next Recommended Phase：v1.0 planning
+- Current Focus：v1.0 Phase0 Architecture Freeze candidate；v0.9 manual QA pending
+- Next Recommended Phase：人工批准 Phase0；批准前不实现 Round、不执行迁移
 
 当前架构结论仍受单浏览器、小数据量与 LocalStorage 边界约束。v1.0 候选必须先完成范围和验收评审，不能从本文的演进 seam 推定为已批准实现。
+
+## v1.0 Phase0 architecture freeze candidate
+
+本节描述目标 Domain；后续 v0.9 章节仍描述当前 runtime。目标 Domain 只有在人工整体批准 Freeze Report 后才生效。
+
+```text
+Workspace → Conversation (Aggregate Root)
+                 ├─ ImportedSource segment[]
+                 ├─ Round[] → Message[]
+                 └─ ConversationVersion[]
+
+Provider → AnalyzerRun → Proposal → ReviewDecision
+                                    └─ explicit apply → Knowledge → KnowledgeRevision[]
+
+ImportArtifact → Parser → Preview → Confirm → ImportReceipt + Conversation[]
+
+SearchDocument → SearchResult（read-only）
+```
+
+冻结规则：
+
+- Conversation 代表一个逻辑对话线程，不代表 Import、主题或项目。
+- Round 是 Conversation 内稳定的交互单元和 Message 分组；不是 Aggregate Root。
+- Question/Answer 是 Round Messages 的投影，不是独立持久化实体；现有 Q&A Pair 是迁移兼容读模型。
+- Proposal、Knowledge、Task 不属于 Round；它们用 typed reference 与 snapshot 关联来源并拥有独立生命周期。
+- ReviewDecision 是不可变人工决定；Accepted Proposal 必须显式、幂等 apply 才能创建 Knowledge 或追加 KnowledgeRevision。
+- Workspace 继续提供 Conversation/Task 归属；Round 继承 Conversation 上下文。
+- Search 默认返回 Conversation、Knowledge、Round、Proposal、Task、Asset、Raw Message，不拥有数据。
+- Import Parser 纯函数化、版本化，不写 Storage；Preview + 人工确认后才由 ImportService 持久化。
+- 不引入 Session；Conversation、Round、Workspace、ImportReceipt 已覆盖其候选职责。
+
+所有权边界：Conversation 只拥有 Source segment、Round、Message、Version、Note 与对应 owner metadata。删除 Conversation 后，Proposal、Knowledge、Task、ImportReceipt 默认保留并显示 live reference missing；需要删除派生副本时必须使用独立 privacy-erasure 用例并展示影响。
+
+详细决策见 [RFC-005](./docs/rfc/RFC-005-conversation-round-model.md)、[RFC-006](./docs/rfc/RFC-006-import-parser-contract.md)、[RFC-007](./docs/rfc/RFC-007-search-result-contract.md)、[RFC-008](./docs/rfc/RFC-008-proposal-review-knowledge-lifecycle.md)、[ADR-004](./docs/adr/ADR-004-conversation-remains-aggregate-root.md) 与 [Freeze Report](./docs/reviews/Architecture-Freeze-v1.0-Phase0.md)。Phase0 没有实现或迁移。
 
 ## v0.9 Data Foundation & Search baseline
 
@@ -32,7 +66,7 @@ Epic D 第一阶段只实现 Task。Activity 为 planned / not immediate；Memor
 
 项目是一个 local-first 的模块化单体，采用五类清晰职责：Entity、Contract、BrowserStorage、Service、Page。
 
-当前运行时的顶层领域关系为 `Workspace → Conversation → Source / Message / ConversationVersion → AnalyzerRun → Proposal → Review → KnowledgeCard → Tag / Search`，旁侧包含独立 `Task → Today / Tasks / Search` 行动链路。Activity 仍仅为 planned；完整冻结模型见 [docs/architecture/DOMAIN_MODEL.md](./docs/architecture/DOMAIN_MODEL.md)。
+当前 v0.9 运行时的顶层领域关系为 `Workspace → Conversation → Source / Message / ConversationVersion → AnalyzerRun → Proposal → Review → KnowledgeCard → Tag / Search`，旁侧包含独立 `Task → Today / Tasks / Search` 行动链路。Phase0 目标关系见上节；Activity 仍仅为 planned。完整模型见 [docs/architecture/DOMAIN_MODEL.md](./docs/architecture/DOMAIN_MODEL.md)。
 
 ```text
 Page ───────────────→ Service ───────────────→ Contract

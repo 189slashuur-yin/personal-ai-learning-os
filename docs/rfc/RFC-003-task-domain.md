@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted for Epic D architecture. This RFC freezes the domain boundary; it does not mean Task has been implemented.
+Accepted historical architecture for Epic D. Task has since been implemented and its concrete status/type/SourceRef shape evolved in v0.7; those implementation-era field limits are no longer normative. The durable decisions remain: Task is an independent aggregate, source deletion does not delete it, Workspace deletion rehomes it, and AI cannot mutate it autonomously. RFC-005 may add Round as a future SourceRef target only through a separately approved implementation scope.
 
 ## Context: why Task Domain is needed
 
@@ -100,7 +100,7 @@ AI cannot directly create, complete, reopen, reschedule, move, or delete a Task.
 - D1 must add a Core contract and BrowserStorage adapter; Page, Component, Service, and Provider must not access LocalStorage directly.
 - Missing new fields in existing browser data require safe normalization; no migration may clear Sprint1–Sprint11 data.
 - Cross-domain deletion and Workspace fallback belong in Services that depend on Contracts.
-- Task is planned and must not be added to existing runtime claims until D1 is implemented and verified.
+- Historical implementation gate (satisfied by D1–D4): Task could not be added to runtime claims until its Contract, BrowserStorage, Service and compatibility behavior were implemented and verified.
 
 ## Non-goals
 
@@ -112,4 +112,3 @@ AI cannot directly create, complete, reopen, reschedule, move, or delete a Task.
 - Workflow or automation engine
 - Agent
 - RAG
-

@@ -1,5 +1,7 @@
 # Project Status
 
+> Historical engineering snapshot captured for v0.6 on 2026-07-03. It is not the current release/domain status. Current runtime is v0.9 draft; v1.0 Phase0 Architecture Freeze candidate is awaiting human approval. See `PROJECT.md` and the Phase0 Freeze Report.
+
 - 统计日期：2026-07-03
 - Current Version：v0.6
 - Current Phase：Phase2

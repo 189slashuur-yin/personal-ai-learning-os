@@ -2,7 +2,19 @@
 
 本文件记录当前仓库已经完成的 Sprint 与关键提交。日期使用仓库 commit date。
 
-当前口径：Current Version 为 v0.9 draft；Current Focus 为 Data Foundation & Search stabilization and manual QA；Next Recommended Phase 为 v1.0 planning。
+当前口径：Runtime Version 为 v0.9 draft；Current Focus 为 v1.0 Phase0 Architecture Freeze candidate；Next Recommended Phase 为人工批准 Phase0。批准前不实现 Round、不执行迁移。
+
+## 2026-07-05 — v1.0 Phase0: Architecture Freeze Candidate
+
+状态：文档设计完成，等待人工整体批准；没有修改 runtime、LocalStorage 或 package，没有执行迁移，没有创建 commit。
+
+- 完成 Conversation/Message/Q&A Pair/Proposal/Knowledge/Workspace/Task/Search/Provider/Asset/Import 的 Architecture Review。
+- RFC-005 将 Conversation 定义为逻辑对话线程，将 Round 定义为稳定子实体；不新增 Session。
+- 完成 Message → Round 的确定性、staging、validation、rollback 与 legacy compatibility 迁移设计；未实现。
+- RFC-006 定义 Clipboard、GPT/Claude Export、Markdown、TXT、JSON 的纯/versioned Parser 与 Preview/Confirm 边界。
+- RFC-007 冻结七类默认 Search Result；RFC-008 冻结 Proposal → ReviewDecision → Knowledge/KnowledgeRevision 生命周期。
+- ADR-004 决定 Conversation 保持 Aggregate Root；Round 不拥有 Proposal、Knowledge 或 Task。
+- 输出 Architecture Freeze Report，并同步 README、PROJECT、ARCHITECTURE、ROADMAP、architecture pack 与 HANDOFF。
 
 ## 2026-07-05 — v0.9 Draft: Data Foundation & Search
 
@@ -14,7 +26,7 @@
 - 新增项目文档/data 手动备份脚本，以及 Settings / Help Data Management 说明。
 - 降低 Conversation Task 入口优先级；未增强 Task 催办能力。
 - 新增 Release Review、50 条 Manual QA Execution Plan、Architecture Risk Review 与 v1.0 Product Backlog；人工测试仍待实际执行。
-- Review 发现 Conversation copy/delete 尚未协调 Asset metadata：删除会留下 orphan，复制不会复制 metadata；作为 release blocker 待后续实现任务处理，本轮未修改业务代码。
+- Review 曾发现 Conversation copy/delete 未协调 Asset metadata；后续修复已让复制重建 owner metadata、删除清理对应 metadata，真实文件始终不被复制或删除。完整人工 QA 仍待执行。
 - 未实现 RAG、Embedding、Agent、Calendar、Reminder、Cloud Sync、数据库迁移或真实云 Provider API。
 
 ## 2026-07-04 — v0.8 Draft: Product Onboarding + Conversation Q&A Pair UX
