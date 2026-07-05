@@ -13,7 +13,7 @@ function isAnalyzerRun(value: unknown): value is AnalyzerRun {
     typeof run.id === "string" &&
     typeof run.providerId === "string" &&
     typeof run.providerName === "string" &&
-    ["idle", "running", "success", "failed"].includes(run.status ?? "") &&
+    ["idle", "queued", "running", "completed", "success", "failed", "timeout"].includes(run.status ?? "") &&
     typeof run.startedAt === "string"
   );
 }
@@ -41,7 +41,9 @@ export class BrowserAnalyzerRunStorage implements AnalyzerRunStorage {
 
     try {
       const parsed: unknown = JSON.parse(storedRuns);
-      return (Array.isArray(parsed) ? parsed.filter(isAnalyzerRun) : []).sort(
+      return (Array.isArray(parsed) ? parsed.filter(isAnalyzerRun) : [])
+        .map((run) => ({ ...run, status: run.status === ("success" as AnalyzerRun["status"]) ? "completed" as const : run.status }))
+        .sort(
         (left, right) => right.startedAt.localeCompare(left.startedAt),
       );
     } catch {

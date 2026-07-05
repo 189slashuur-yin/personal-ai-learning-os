@@ -198,8 +198,9 @@ export class AnalyzerExecutionService {
       const proposal = await analyze();
       const successfulRun: AnalyzerRun = {
         ...running,
-        status: "success",
+        status: "completed",
         finishedAt: new Date().toISOString(),
+        latencyMs: Date.now() - Date.parse(startedAt),
       };
       this.runs.save(successfulRun);
       return { run: successfulRun, proposal };
@@ -207,8 +208,9 @@ export class AnalyzerExecutionService {
       const finishedAt = new Date().toISOString();
       const failedRun: AnalyzerRun = {
         ...running,
-        status: "failed",
+        status: error instanceof DOMException && error.name === "AbortError" ? "timeout" : "failed",
         finishedAt,
+        latencyMs: Date.now() - Date.parse(startedAt),
         error: toAnalyzerError(error, finishedAt),
       };
       this.runs.save(failedRun);

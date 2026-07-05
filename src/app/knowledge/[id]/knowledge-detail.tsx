@@ -13,6 +13,7 @@ import {
   removeTagFromKnowledgeCard,
 } from "@/core/services/tag-management";
 import { TaskService } from "@/core/services/task-service";
+import { RoundKnowledgeService } from "@/core/services/round-knowledge-service";
 import { BrowserConversationStorage } from "@/infrastructure/storage/browser-conversation-storage";
 import { BrowserKnowledgeCardStorage } from "@/infrastructure/storage/browser-knowledge-card-storage";
 import { BrowserMessageStorage } from "@/infrastructure/storage/browser-message-storage";
@@ -164,6 +165,17 @@ export function KnowledgeDetail({ cardId }: { cardId: string }) {
     router.push("/knowledge");
   }
 
+  function duplicateKnowledge() {
+    if (!card) return;
+    const copy = new RoundKnowledgeService(
+      new BrowserKnowledgeCardStorage(),
+      new BrowserProposalStorage(),
+    ).duplicate(card);
+    router.push(`/knowledge/${copy.id}`);
+  }
+
+  function exportKnowledge() { if (!card || !draft) return; const content = `# ${draft.title}\n\n${draft.summary}\n\n${draft.content}`; const blob = new Blob([content], { type: "text/markdown" }); const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = `${draft.title}.md`; link.click(); URL.revokeObjectURL(link.href); }
+
   function createTaskFromKnowledge() {
     if (!card || !draft) return;
 
@@ -263,6 +275,8 @@ export function KnowledgeDetail({ cardId }: { cardId: string }) {
           >
             Create Task
           </button>
+          <button className="rounded-lg border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-700" onClick={duplicateKnowledge} type="button">Duplicate Knowledge</button>
+          <button className="rounded-lg border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-700" onClick={exportKnowledge} type="button">Export Markdown</button>
         </div>
       </div>
 
@@ -417,6 +431,7 @@ export function KnowledgeDetail({ cardId }: { cardId: string }) {
             ) : null}
             <div><dt className="font-medium text-zinc-500">状态</dt><dd className="mt-1.5 text-zinc-900">{draft.status}</dd></div>
           </dl>
+          {card.previousContentSnapshots?.length ? <section className="mt-8 border-t border-zinc-100 pt-6"><h2 className="text-sm font-semibold">Previous content snapshots</h2><div className="mt-3 space-y-3">{card.previousContentSnapshots.map((snapshot) => <details className="rounded-lg border border-zinc-200 p-3" key={snapshot.capturedAt}><summary className="cursor-pointer text-xs font-semibold text-zinc-600">更新前快照 · {formatDate(snapshot.capturedAt)}</summary><p className="mt-3 whitespace-pre-wrap text-sm text-zinc-700">{snapshot.content}</p></details>)}</div></section> : null}
           {missingSourceMessageCount > 0 && sourceEvidenceExcerpt ? (
             <section className="mt-6 rounded-xl border border-amber-200 bg-amber-50 p-4">
               <h2 className="text-sm font-semibold text-amber-950">

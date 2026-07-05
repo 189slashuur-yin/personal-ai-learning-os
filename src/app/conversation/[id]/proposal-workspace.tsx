@@ -37,7 +37,7 @@ export function ProposalWorkspace({
   if (proposals.length === 0) {
     return (
       <div className="rounded-xl border border-dashed border-zinc-300 bg-zinc-50 p-5 text-sm leading-6 text-zinc-500">
-        尚无 Proposal。可从原始 Source 或选中的 Messages 生成整理建议。
+        尚无 AI 整理建议。可从原始 Source、Round 或选中的 Messages 生成草稿。
       </div>
     );
   }
@@ -167,17 +167,17 @@ export function ProposalWorkspace({
               className="rounded-lg bg-zinc-950 px-3.5 py-2 text-sm font-medium text-white hover:bg-zinc-800"
               href={`/review?proposalId=${encodeURIComponent(proposal.id)}`}
             >
-              前往 Review
+              确认加入知识库
             </Link>
             <button
               className="rounded-lg px-3.5 py-2 text-sm font-medium text-red-600 hover:bg-red-50"
               onClick={() => onDelete(proposal)}
               type="button"
             >
-              删除 Proposal
+              删除整理建议
             </button>
             <span className="text-xs text-zinc-500">
-              删除 Proposal 不会删除已生成知识卡
+              删除整理建议不会删除已确认知识
             </span>
           </div>
         </li>

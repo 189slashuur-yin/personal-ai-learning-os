@@ -16,9 +16,17 @@ export type Conversation = {
   title: string;
   sourceType: ConversationSourceType;
   workspaceId?: string;
+  order?: number;
   importProfileId?: string;
   note?: string;
   createdAt: string;
   updatedAt: string;
   lastOpenedAt: string;
+  summary?: string;
+  conclusion?: string;
+  pendingQuestions?: string;
+  externalSource?: "chatgpt";
+  externalConversationId?: string;
+  importedAt?: string;
+  lastExternalUpdateTime?: string;
 };

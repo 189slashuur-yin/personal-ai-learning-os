@@ -1,6 +1,6 @@
 # Manual QA Checklist
 
-本清单包含 v1.0 Phase1 与既有版本回归。它是手工验收基线，不代表测试已经执行，不包含自动化测试。
+本清单包含 v1.0 Phase1/Phase2 与既有版本回归。它是手工验收基线，不代表测试已经执行，不包含自动化测试。完整 Phase2 执行计划见 `docs/qa/V10-MANUAL-QA-PLAN.md`。
 
 ## v1.0 Phase1 — Conversation / Round
 
@@ -9,7 +9,7 @@
 | V10-01 | 用旧数据打开无 Round 的 Conversation。 | Message/Q&A 可读；Round 空状态可预检生成；不自动写入。 | 旧数据崩溃或被清空。 | Compatibility |
 | V10-02 | 预检并确认旧 Message→Round，再重复执行。 | 首次显示 summary 并生成；Message ID/内容不变；第二次 no-op，不重复。 | 数据丢失或重复 Round。 | Migration |
 | V10-03 | 粘贴七种 parser 对应文本。 | Confirm 前只 Preview；显示 parser/version、Message/Round 数与 Round 内容。 | Preview 前写入。 | Parser / Import |
-| V10-04 | 导入 TXT，并打开 JSON 入口。 | TXT Preview/Confirm 后进入 Conversation；JSON 仅占位且不猜 schema。 | JSON 被部分写入。 | Import UX |
+| V10-04 | 导入 TXT，并打开 ChatGPT Export JSON 入口。 | TXT Preview/Confirm 后进入 Conversation；JSON 只接受 conversations.json，并先列出对话预览。 | 未预览即写入或猜测其它 JSON schema。 | Import UX |
 | V10-05 | 搜索、折叠、编辑 Q/A/Note、新增 Round。 | 刷新后保留；updatedAt 更新；Message Timeline 默认折叠且可展开。 | Round 丢失或旧 Message 不可用。 | Round UI |
 | V10-06 | 删除、合并、拆分、上下移动、重绑 messageIds。 | order 连续；重复绑定从兄弟 Round 移除；删除 Round 不删 Message。 | Message 被删或 order/绑定损坏。 | Round Operations |
 | V10-07 | Analyze 当前 Round 与 Conversation Summary。 | Proposal 分别记录 round/conversation 来源；Review 显示 Round 回链。 | 来源错误或绕过 Review。 | Proposal |
@@ -18,6 +18,17 @@
 | V10-10 | 创建/恢复版本记录。 | UI 使用 History/版本记录/恢复点；底层恢复行为不回归。 | 仍以 Snapshot 为主文案或恢复损坏。 | History |
 | V10-11 | 复制、删除带 Round 的 Conversation。 | 复制生成新 Round/Message ID 并重映射 provenance；删除清理子 Round。 | 交叉引用旧 ID。 | Workspace Service |
 | V10-12 | 刷新浏览器并回归旧 Proposal/Knowledge/Search URL。 | optional 新字段缺失不崩溃；旧 URL/证据仍可读。 | 兼容读取失败。 | Regression |
+
+## v1.0 Phase2 — Export / Restore / ChatGPT Import
+
+- [ ] Settings Export App Data 包含 PALOS keys，Import Preview 显示 key / entity count，并可按领域选择。
+- [ ] Import App Data 未经二次确认不写入；无效文件与写入失败不清空原数据。
+- [ ] Conversation Markdown/JSON、Round Markdown、Knowledge Markdown、Workspace/Folder JSON 可导出。
+- [ ] 选择 ChatGPT Export zip 解压后的 `conversations.json` 后列出 title、message count、create/update time。
+- [ ] User / Assistant 文本沿 current-node branch 线性化；附件、图片、tool call、canvas、voice 等 unsupported 内容被跳过且不阻断导入。
+- [ ] 首次导入生成 Conversation / Messages / Rounds，并保存 external Conversation/Message metadata。
+- [ ] 再次导入相同 Conversation 不重复创建 Conversation，不重复 Message，只 append 新 Message。
+- [ ] 增量导入显示 existing/new/skipped，明确不覆盖旧 Rounds，并提示手动 regenerate。
 
 ## 测试准备
 

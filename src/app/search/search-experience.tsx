@@ -29,11 +29,11 @@ type SearchTypeFilter = "all" | SearchDocumentEntityType;
 
 const groups: { type: SearchDocumentEntityType; label: string }[] = [
   { type: "conversation", label: "Conversations" },
-  { type: "knowledge", label: "Knowledge" },
+  { type: "knowledge", label: "已确认知识" },
   { type: "round", label: "Rounds" },
-  { type: "proposal", label: "Proposals" },
-  { type: "task", label: "Tasks" },
+  { type: "proposal", label: "AI 整理建议" },
   { type: "asset", label: "Assets" },
+  { type: "task", label: "Tasks" },
   { type: "message", label: "Raw Messages (advanced)" },
 ];
 
@@ -42,8 +42,8 @@ const defaultSearchTypes: SearchDocumentEntityType[] = [
   "knowledge",
   "round",
   "proposal",
-  "task",
   "asset",
+  "task",
 ];
 
 const resultTypeLabels: Record<SearchDocumentEntityType, string> = {
@@ -53,8 +53,8 @@ const resultTypeLabels: Record<SearchDocumentEntityType, string> = {
   source: "Source",
   message: "Message",
   "qa-pair": "Q&A Pair",
-  proposal: "Proposal",
-  knowledge: "Knowledge",
+  proposal: "AI 整理建议 · 未确认",
+  knowledge: "已确认知识",
   task: "Task",
   asset: "Asset",
   tag: "Tag",
@@ -120,9 +120,8 @@ function formatDate(timestamp: string) {
 
 function ResultCard({ result, query }: { result: SearchDocumentMatch; query: string }) {
   return (
-    <Link
+    <article
       className="group block border-t border-zinc-100 px-5 py-5 first:border-t-0 hover:bg-zinc-50"
-      href={result.href}
     >
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0 flex-1">
@@ -142,9 +141,9 @@ function ResultCard({ result, query }: { result: SearchDocumentMatch; query: str
               </span>
             ) : null}
           </div>
-          <h3 className="mt-2 font-semibold text-zinc-950">
+          <Link className="mt-2 block font-semibold text-zinc-950" href={result.href}>
             <Highlight query={query} text={result.title} />
-          </h3>
+          </Link>
           {result.sourcePath ? (
             <p className="mt-1 text-xs font-medium text-sky-700">{result.sourcePath}</p>
           ) : null}
@@ -159,10 +158,11 @@ function ResultCard({ result, query }: { result: SearchDocumentMatch; query: str
               <span>匹配字段 · {result.matchedFields.join("、")}</span>
             ) : null}
           </div>
+          {result.entityType === "knowledge" && typeof result.metadata?.sourceRoundId === "string" && typeof result.metadata?.conversationId === "string" ? <Link className="mt-3 inline-block text-xs font-semibold text-sky-700" href={`/conversation/${result.metadata.conversationId}?mode=workspace&round=${encodeURIComponent(result.metadata.sourceRoundId)}`}>查看来源 Round →</Link> : null}
         </div>
-        <span className="mt-1 text-zinc-400 transition group-hover:translate-x-0.5">→</span>
+        <Link aria-label={`打开 ${result.title}`} className="mt-1 text-zinc-400 transition group-hover:translate-x-0.5" href={result.href}>→</Link>
       </div>
-    </Link>
+    </article>
   );
 }
 
@@ -242,7 +242,7 @@ export function SearchExperience({
             autoFocus
             className="min-w-0 flex-1 border-0 bg-transparent px-1 py-3 text-base text-zinc-950 outline-none placeholder:text-zinc-400"
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="搜索 Conversation、Knowledge、Round、Proposal、Task、Asset…"
+            placeholder="搜索 Conversation、已确认知识、Round、AI 整理建议、Asset…"
             type="search"
             value={query}
           />
@@ -281,6 +281,7 @@ export function SearchExperience({
           <input checked={advancedMode} onChange={(event) => { setAdvancedMode(event.target.checked); if (!event.target.checked && typeFilter === "message") setTypeFilter("all"); }} type="checkbox" />
           高级模式：包含 Raw Message
         </label>
+        <p className="mt-2 text-xs text-zinc-500">Fuzzy 是字符子序列匹配，不是语义搜索、Embedding 或 RAG。</p>
         {query || hasFilters ? (
           <button
             className="mt-4 rounded-lg px-3 py-2 text-sm font-medium text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900"

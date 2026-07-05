@@ -8,7 +8,7 @@ export type CreateRoundInput = Pick<
   Partial<Pick<Round, "title" | "note" | "order">>;
 
 export type UpdateRoundInput = Partial<
-  Pick<Round, "title" | "question" | "answer" | "messageIds" | "note">
+  Pick<Round, "title" | "question" | "answer" | "messageIds" | "note" | "summary">
 >;
 
 function normalizeOptional(value?: string) {
@@ -89,6 +89,8 @@ export class RoundService {
           ? round.messageIds
           : uniqueMessageIds(input.messageIds),
       note: input.note === undefined ? round.note : normalizeOptional(input.note),
+      summary:
+        input.summary === undefined ? round.summary : normalizeOptional(input.summary),
       updatedAt: new Date().toISOString(),
     };
 

@@ -1,29 +1,15 @@
 "use client";
 
-import Link from "next/link";
-import { type FormEvent, useEffect, useState } from "react";
-import type { Conversation } from "@/core/entities/conversation";
-import type { KnowledgeCard } from "@/core/entities/knowledge-card";
-import type { Proposal } from "@/core/entities/proposal";
-import {
-  DEFAULT_WORKSPACE_ID,
-  type Workspace,
-} from "@/core/entities/workspace";
+import { type FormEvent, useEffect, useMemo, useState } from "react";
+import { DEFAULT_WORKSPACE_ID, type Workspace } from "@/core/entities/workspace";
 import { WorkspaceService } from "@/core/services/workspace-service";
 import { BrowserConversationStorage } from "@/infrastructure/storage/browser-conversation-storage";
-import { BrowserKnowledgeCardStorage } from "@/infrastructure/storage/browser-knowledge-card-storage";
-import { BrowserProposalStorage } from "@/infrastructure/storage/browser-proposal-storage";
 import { BrowserTaskStorage } from "@/infrastructure/storage/browser-task-storage";
 import { BrowserWorkspaceStorage } from "@/infrastructure/storage/browser-workspace-storage";
 
-type WorkspaceItem = {
-  workspace: Workspace;
-  conversationCount: number;
-  knowledgeCount: number;
-  taskCount: number;
-};
+type TreeItem = { workspace: Workspace; depth: number; conversationCount: number };
 
-function createWorkspaceService() {
+function service() {
   return new WorkspaceService(
     new BrowserWorkspaceStorage(),
     new BrowserConversationStorage(),
@@ -31,234 +17,48 @@ function createWorkspaceService() {
   );
 }
 
-function resolveKnowledgeWorkspaceId(
-  card: KnowledgeCard,
-  proposalById: Map<string, Proposal>,
-  conversationById: Map<string, Conversation>,
-) {
-  const proposal = proposalById.get(card.proposalId);
-  const conversationId = card.sourceConversationId ?? proposal?.conversationId;
-  return conversationId
-    ? conversationById.get(conversationId)?.workspaceId ?? DEFAULT_WORKSPACE_ID
-    : null;
-}
-
-function loadWorkspaceItems(): WorkspaceItem[] {
-  const workspaces = createWorkspaceService().listWorkspaces();
-  const conversations = new BrowserConversationStorage().getAll();
-  const proposals = new BrowserProposalStorage().getAll();
-  const knowledgeCards = new BrowserKnowledgeCardStorage().getAll();
-  const tasks = new BrowserTaskStorage().getAll();
-  const conversationById = new Map(
-    conversations.map((conversation) => [conversation.id, conversation]),
-  );
-  const proposalById = new Map(
-    proposals.map((proposal) => [proposal.id, proposal]),
-  );
-
-  return workspaces.map((workspace) => ({
-    workspace,
-    conversationCount: conversations.filter(
-      (conversation) =>
-        (conversation.workspaceId ?? DEFAULT_WORKSPACE_ID) === workspace.id,
-    ).length,
-    knowledgeCount: knowledgeCards.filter(
-      (card) =>
-        resolveKnowledgeWorkspaceId(
-          card,
-          proposalById,
-          conversationById,
-        ) === workspace.id,
-    ).length,
-    taskCount: tasks.filter(
-      (task) => (task.workspaceId ?? DEFAULT_WORKSPACE_ID) === workspace.id,
-    ).length,
-  }));
-}
-
-function formatDate(timestamp: string) {
-  return new Intl.DateTimeFormat("zh-CN", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(new Date(timestamp));
-}
-
-function WorkspaceCard({
-  item,
-  onChange,
-}: {
-  item: WorkspaceItem;
-  onChange: () => void;
-}) {
-  const { workspace, conversationCount, knowledgeCount, taskCount } = item;
-  const [name, setName] = useState(workspace.name);
-  const [description, setDescription] = useState(workspace.description ?? "");
-  const [color, setColor] = useState(workspace.color ?? "#71717a");
-  const [error, setError] = useState<string | null>(null);
-  const isInbox = workspace.id === DEFAULT_WORKSPACE_ID;
-
-  function saveWorkspace(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
-    try {
-      createWorkspaceService().updateWorkspace(workspace.id, {
-        name,
-        description,
-        color,
+function flattenTree(workspaces: Workspace[], conversationCounts: Map<string, number>) {
+  const result: TreeItem[] = [];
+  const byParent = new Map<string, Workspace[]>();
+  workspaces.forEach((workspace) => {
+    const parent = workspace.parentId ?? "root";
+    byParent.set(parent, [...(byParent.get(parent) ?? []), workspace]);
+  });
+  const append = (parentId: string, depth: number) => {
+    (byParent.get(parentId) ?? [])
+      .sort((left, right) => left.order - right.order)
+      .forEach((workspace) => {
+        result.push({
+          workspace,
+          depth,
+          conversationCount: conversationCounts.get(workspace.id) ?? 0,
+        });
+        if (!workspace.collapsed) append(workspace.id, depth + 1);
       });
-      setError(null);
-      onChange();
-    } catch {
-      setError("Workspace 名称不能为空。");
-    }
-  }
-
-  function archiveWorkspace() {
-    createWorkspaceService().archiveWorkspace(workspace.id);
-    onChange();
-  }
-
-  function restoreWorkspace() {
-    createWorkspaceService().restoreWorkspace(workspace.id);
-    onChange();
-  }
-
-  function deleteWorkspace() {
-    const firstConfirmed = window.confirm(
-      `删除「${workspace.name}」？其中 ${conversationCount} 个 Conversation 和 ${taskCount} 个 Task 不会删除，会自动回到 Inbox。`,
-    );
-
-    if (!firstConfirmed) {
-      return;
-    }
-
-    const secondConfirmed = window.confirm(
-      "请再次确认：Workspace 本身会永久删除，此操作无法撤销。",
-    );
-
-    if (!secondConfirmed) {
-      return;
-    }
-
-    createWorkspaceService().deleteWorkspace(workspace.id);
-    onChange();
-  }
-
-  return (
-    <article className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="flex min-w-0 items-center gap-3">
-          <span
-            aria-hidden="true"
-            className="h-4 w-4 shrink-0 rounded-full border border-black/10"
-            style={{ backgroundColor: workspace.color ?? "#d4d4d8" }}
-          />
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <h2 className="truncate font-semibold text-zinc-950">
-                {workspace.name}
-              </h2>
-              {isInbox ? (
-                <span className="rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-semibold text-indigo-700">
-                  Default
-                </span>
-              ) : workspace.archivedAt ? (
-                <span className="rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-semibold text-zinc-600">
-                  Archived
-                </span>
-              ) : null}
-            </div>
-            <p className="mt-1 text-xs text-zinc-500">
-              更新于 {formatDate(workspace.updatedAt)}
-            </p>
-          </div>
-        </div>
-        <div className="text-right text-sm text-zinc-600">
-          <div className="flex gap-4">
-            <span><strong className="text-zinc-950">{conversationCount}</strong> Conversation</span>
-            <span><strong className="text-zinc-950">{knowledgeCount}</strong> Knowledge</span>
-            <span><strong className="text-zinc-950">{taskCount}</strong> Task</span>
-          </div>
-          <Link
-            className="mt-2 inline-block text-xs font-semibold text-zinc-600 hover:text-zinc-950"
-            href={`/search?workspaceId=${encodeURIComponent(workspace.id)}`}
-          >
-            搜索此 Workspace →
-          </Link>
-        </div>
-      </div>
-
-      <form className="mt-5 grid gap-4 border-t border-zinc-100 pt-5" onSubmit={saveWorkspace}>
-        <label className="text-sm font-medium text-zinc-700">
-          名称
-          <input
-            className="mt-2 w-full rounded-lg border border-zinc-300 px-3 py-2.5 outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-100"
-            onChange={(event) => setName(event.target.value)}
-            value={name}
-          />
-        </label>
-        <label className="text-sm font-medium text-zinc-700">
-          描述
-          <textarea
-            className="mt-2 min-h-20 w-full resize-y rounded-lg border border-zinc-300 px-3 py-2.5 outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-100"
-            onChange={(event) => setDescription(event.target.value)}
-            placeholder="这个 Workspace 用来整理什么？"
-            value={description}
-          />
-        </label>
-        <label className="flex items-center gap-3 text-sm font-medium text-zinc-700">
-          颜色
-          <input
-            aria-label={`${workspace.name} 颜色`}
-            className="h-9 w-14 rounded border border-zinc-300 bg-white p-1"
-            onChange={(event) => setColor(event.target.value)}
-            type="color"
-            value={color}
-          />
-          <span className="font-mono text-xs font-normal text-zinc-500">{color}</span>
-        </label>
-        {error ? <p className="text-sm text-red-600" role="alert">{error}</p> : null}
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <button
-            className="rounded-lg bg-zinc-950 px-4 py-2.5 text-sm font-medium text-white hover:bg-zinc-800"
-            type="submit"
-          >
-            保存修改
-          </button>
-          {!isInbox ? (
-            <div className="flex gap-3">
-              {workspace.archivedAt ? (
-                <button className="text-sm font-medium text-emerald-700 hover:text-emerald-900" onClick={restoreWorkspace} type="button">
-                  Restore
-                </button>
-              ) : (
-                <button className="text-sm font-medium text-zinc-600 hover:text-zinc-950" onClick={archiveWorkspace} type="button">
-                  Archive
-                </button>
-              )}
-              <button className="text-sm font-medium text-red-600 hover:text-red-800" onClick={deleteWorkspace} type="button">
-                Delete
-              </button>
-            </div>
-          ) : (
-            <p className="text-xs text-zinc-500">Inbox 不可归档或删除。</p>
-          )}
-        </div>
-      </form>
-    </article>
-  );
+  };
+  append("root", 0);
+  return result;
 }
 
 export function WorkspaceManager() {
-  const [items, setItems] = useState<WorkspaceItem[] | null>(null);
-  const [filter, setFilter] = useState<"Active" | "Archived" | "All">("Active");
+  const [workspaces, setWorkspaces] = useState<Workspace[] | null>(null);
+  const [conversationCounts, setConversationCounts] = useState(new Map<string, number>());
+  const [filter, setFilter] = useState<"active" | "archived" | "all">("active");
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
-  const [color, setColor] = useState("#6366f1");
+  const [parentId, setParentId] = useState("");
+  const [type, setType] = useState<Workspace["type"]>("workspace");
   const [error, setError] = useState<string | null>(null);
 
   function reload() {
-    setItems(loadWorkspaceItems());
+    const nextWorkspaces = service().listWorkspaces();
+    const counts = new Map<string, number>();
+    new BrowserConversationStorage().getAll().forEach((conversation) => {
+      const workspaceId = conversation.workspaceId ?? DEFAULT_WORKSPACE_ID;
+      counts.set(workspaceId, (counts.get(workspaceId) ?? 0) + 1);
+    });
+    setWorkspaces(nextWorkspaces);
+    setConversationCounts(counts);
   }
 
   useEffect(() => {
@@ -266,80 +66,94 @@ export function WorkspaceManager() {
     return () => window.clearTimeout(timer);
   }, []);
 
-  function createWorkspace(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  const visibleTree = useMemo(() => {
+    if (!workspaces) return [];
+    const visible = workspaces.filter((workspace) =>
+      filter === "all" ? true : filter === "archived" ? workspace.archivedAt : !workspace.archivedAt,
+    );
+    return flattenTree(visible, conversationCounts);
+  }, [conversationCounts, filter, workspaces]);
 
+  function createNode(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
     try {
-      createWorkspaceService().createWorkspace({ name, description, color });
+      service().createWorkspace({
+        name,
+        description,
+        parentId: parentId || undefined,
+        type,
+      });
       setName("");
       setDescription("");
+      setParentId("");
       setError(null);
       reload();
-    } catch {
-      setError("Workspace 名称不能为空。");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "无法创建 Workspace / Folder。");
     }
   }
 
-  if (!items) {
-    return <p className="mt-10 text-sm text-zinc-500" role="status">正在读取 Workspace…</p>;
+  function rename(workspace: Workspace) {
+    const nextName = window.prompt("新名称", workspace.name)?.trim();
+    if (!nextName) return;
+    service().updateWorkspace(workspace.id, { name: nextName });
+    reload();
   }
 
-  const visibleItems = items.filter(({ workspace }) => {
-    if (filter === "All") return true;
-    if (filter === "Archived") return Boolean(workspace.archivedAt);
-    return !workspace.archivedAt;
-  });
+  function remove(workspace: Workspace, conversationCount: number) {
+    const fallback = workspace.parentId
+      ? workspaces?.find((item) => item.id === workspace.parentId)?.name ?? "Inbox"
+      : "Inbox";
+    if (!window.confirm(`删除「${workspace.name}」？${conversationCount} 个 Conversation 会移动到 ${fallback}，子 Folder 会提升，不会删除任何 Conversation。`)) return;
+    service().deleteWorkspace(workspace.id);
+    reload();
+  }
+
+  function exportWorkspaceBundle() { if (!workspaces) return; const conversations = new BrowserConversationStorage().getAll(); const bundle = { workspaces, conversations: conversations.filter((conversation) => workspaces.some((workspace) => workspace.id === conversation.workspaceId)), exportedAt: new Date().toISOString() }; const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: "application/json" }); const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = "palos-workspace-folder-bundle.json"; link.click(); URL.revokeObjectURL(link.href); }
+
+  if (!workspaces) return <p className="mt-10 text-sm text-zinc-500">正在读取 Workspace 树…</p>;
 
   return (
     <>
-      <form className="mt-8 rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm" onSubmit={createWorkspace}>
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500">New Workspace</p>
-          <h2 className="mt-2 text-lg font-semibold text-zinc-950">创建学习空间</h2>
+      <form className="mt-8 rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm" onSubmit={createNode}>
+        <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500">Hierarchy Workspace</p>
+        <h2 className="mt-2 text-lg font-semibold text-zinc-950">创建 Workspace / Folder</h2>
+        <div className="mt-5 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          <label className="text-sm font-medium text-zinc-700">名称<input className="mt-2 w-full rounded-lg border border-zinc-300 px-3 py-2.5" onChange={(event) => setName(event.target.value)} value={name} /></label>
+          <label className="text-sm font-medium text-zinc-700">类型<select className="mt-2 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2.5" onChange={(event) => setType(event.target.value as Workspace["type"])} value={type}><option value="workspace">Workspace</option><option value="folder">Folder</option></select></label>
+          <label className="text-sm font-medium text-zinc-700">上级<select className="mt-2 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2.5" onChange={(event) => setParentId(event.target.value)} value={parentId}><option value="">顶层</option>{workspaces.filter((workspace) => !workspace.archivedAt && workspace.id !== DEFAULT_WORKSPACE_ID).map((workspace) => <option key={workspace.id} value={workspace.id}>{workspace.name}</option>)}</select></label>
+          <label className="text-sm font-medium text-zinc-700">描述<input className="mt-2 w-full rounded-lg border border-zinc-300 px-3 py-2.5" onChange={(event) => setDescription(event.target.value)} value={description} /></label>
         </div>
-        <div className="mt-5 grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)_auto]">
-          <label className="text-sm font-medium text-zinc-700">
-            名称
-            <input className="mt-2 w-full rounded-lg border border-zinc-300 px-3 py-2.5 outline-none focus:border-zinc-500" onChange={(event) => setName(event.target.value)} placeholder="例如：产品研究" value={name} />
-          </label>
-          <label className="text-sm font-medium text-zinc-700">
-            描述
-            <input className="mt-2 w-full rounded-lg border border-zinc-300 px-3 py-2.5 outline-none focus:border-zinc-500" onChange={(event) => setDescription(event.target.value)} placeholder="可选" value={description} />
-          </label>
-          <label className="text-sm font-medium text-zinc-700">
-            颜色
-            <input className="mt-2 block h-11 w-16 rounded border border-zinc-300 bg-white p-1" onChange={(event) => setColor(event.target.value)} type="color" value={color} />
-          </label>
-        </div>
-        {error ? <p className="mt-3 text-sm text-red-600" role="alert">{error}</p> : null}
-        <button className="mt-5 rounded-lg bg-zinc-950 px-4 py-2.5 text-sm font-medium text-white hover:bg-zinc-800" type="submit">
-          创建 Workspace
-        </button>
+        {error ? <p className="mt-3 text-sm text-red-600">{error}</p> : null}
+        <button className="mt-5 rounded-lg bg-zinc-950 px-4 py-2.5 text-sm font-medium text-white" type="submit">创建</button>
       </form>
 
-      <div className="mt-8 flex items-center justify-between gap-4">
-        <div>
-          <h2 className="text-lg font-semibold text-zinc-950">所有 Workspace</h2>
-          <div className="mt-3 flex rounded-lg bg-zinc-200/70 p-1">
-            {(["Active", "Archived", "All"] as const).map((item) => (
-              <button className={`rounded-md px-3 py-1.5 text-sm font-medium ${filter === item ? "bg-white text-zinc-950 shadow-sm" : "text-zinc-600"}`} key={item} onClick={() => setFilter(item)} type="button">{item}</button>
-            ))}
-          </div>
-        </div>
-        <p className="text-sm text-zinc-500">{visibleItems.length} 个</p>
+      <div className="mt-8 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex gap-2">{(["active", "archived", "all"] as const).map((value) => <button className={`rounded-lg px-3 py-2 text-sm ${filter === value ? "bg-zinc-950 text-white" : "bg-white text-zinc-600"}`} key={value} onClick={() => setFilter(value)} type="button">{value}</button>)}</div>
+        <div className="flex items-center gap-3"><button className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs font-semibold" onClick={exportWorkspaceBundle} type="button">Export Workspace/Folder JSON</button><p className="text-xs text-zinc-500">手动排序先用上移 / 下移；未来可接拖拽。</p></div>
       </div>
-      {visibleItems.length ? (
-        <div className="mt-4 grid gap-5 lg:grid-cols-2">
-          {visibleItems.map((item) => (
-            <WorkspaceCard item={item} key={item.workspace.id} onChange={reload} />
-          ))}
-        </div>
-      ) : (
-        <div className="mt-4 rounded-2xl border border-dashed border-zinc-300 bg-white p-10 text-center">
-          <h3 className="font-semibold text-zinc-950">此筛选下没有 Workspace</h3>
-          <p className="mt-2 text-sm text-zinc-500">创建新 Workspace，或切换 Active / Archived / All 查看其它空间。</p>
-        </div>
-      )}
+
+      <div className="mt-4 grid gap-3">
+        {visibleTree.map(({ workspace, depth, conversationCount }) => (
+          <article className="rounded-xl border border-zinc-200 bg-white p-4" key={workspace.id} style={{ marginLeft: `${Math.min(depth, 5) * 20}px` }}>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <button className="min-w-0 text-left" disabled={workspace.id === DEFAULT_WORKSPACE_ID} onClick={() => { service().updateWorkspace(workspace.id, { collapsed: !workspace.collapsed }); reload(); }} type="button">
+                <span className="mr-2 text-zinc-400">{workspace.collapsed ? "▸" : "▾"}</span>
+                <span className="font-semibold text-zinc-950">{workspace.type === "folder" ? "📁" : "🗂️"} {workspace.name}</span>
+                <span className="ml-3 text-xs text-zinc-500">{conversationCount} Conversation{workspace.archivedAt ? " · Archived" : ""}</span>
+              </button>
+              {workspace.id !== DEFAULT_WORKSPACE_ID ? <div className="flex flex-wrap items-center gap-2 text-xs">
+                <button onClick={() => rename(workspace)} type="button">重命名</button>
+                <button onClick={() => { service().reorderWorkspace(workspace.id, "up"); reload(); }} type="button">上移</button>
+                <button onClick={() => { service().reorderWorkspace(workspace.id, "down"); reload(); }} type="button">下移</button>
+                <select aria-label={`移动 ${workspace.name}`} className="rounded border border-zinc-200 bg-white px-2 py-1" onChange={(event) => { service().moveWorkspace(workspace.id, event.target.value || undefined); reload(); }} value={workspace.parentId ?? ""}><option value="">移动到顶层</option>{workspaces.filter((candidate) => candidate.id !== workspace.id && candidate.id !== DEFAULT_WORKSPACE_ID && !candidate.archivedAt).map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.name}</option>)}</select>
+                {workspace.archivedAt ? <button onClick={() => { service().restoreWorkspace(workspace.id); reload(); }} type="button">恢复</button> : <button onClick={() => { service().archiveWorkspace(workspace.id); reload(); }} type="button">归档</button>}
+                <button className="text-red-600" onClick={() => remove(workspace, conversationCount)} type="button">删除</button>
+              </div> : <span className="text-xs text-zinc-500">默认归属，不可删除</span>}
+            </div>
+          </article>
+        ))}
+      </div>
     </>
   );
 }

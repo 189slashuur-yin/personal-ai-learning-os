@@ -5,10 +5,22 @@
 ## Current release
 
 - Current Version：v1.0 alpha draft
-- Phase：v1.0 Phase1
-- Current Epic：Conversation / Round Epic A–L（Implementation complete）
-- Current Focus：人工 QA 与 alpha 稳定化
-- Next Recommended Phase：验证 A–L；不要进入 M–Z/AA
+- Phase：v1.0 Phase2
+- Current Epic：Second Brain Workspace Epic M–AB（Implementation complete）
+- Current Focus：AC Docs / Alpha Review 与 AD Final Stabilization
+- Next Recommended Phase：执行 V10 Manual QA；在人工验收前保持 alpha
+
+## v1.0 Phase2 — Second Brain Workspace（M–AB implemented）
+
+- M–O：多层 Workspace/Folder、Conversation Explorer、Classic/Workspace 三栏模式。
+- P–R：Round/Conversation Summary、易懂的 Proposal/Knowledge UX、Round 多 Knowledge 与更新快照。
+- S–T：多轮 Import UX 与 Manual Round Builder。
+- U–V：Analyzer 状态/错误恢复与 Analyze 区域临时 Provider Selector。
+- W–X：Search Anchors/来源路径与 Conversation/Round Asset metadata UX。
+- Y–AA：Recipe foundation、Feedback/AppEventLog/Data Health、导航/Command Palette/Context Help。
+- AB：PALOS App Data Export/Import、Entity Export，以及 ChatGPT `conversations.json` 最小导入与增量去重。
+
+Phase2 不包含 RAG、Agent、Calendar、Reminder、数据库、云同步、真实 OpenAI/Claude API、浏览器插件或完整 ChatGPT zip 自动解析。
 
 ## v1.0 Phase1 — Conversation / Round Implementation（A–L completed）
 
@@ -20,7 +32,7 @@
 - Epic J–K：History 用户命名与旧 Message/QAPair/Proposal/Knowledge/Search 兼容。
 - Epic L：Migration Report、release draft、QA 与 Handoff。自动 gate 已通过各 checkpoint；人工 QA 待执行。
 
-Phase1 到此停止；M–Z/AA 未授权、未开始。
+Phase1 A–L 是 Phase2 的兼容基线；旧 Message 与无新增 optional 字段的数据继续可读。
 
 ## v1.0 Phase0 — Architecture Freeze（Approved / completed）
 

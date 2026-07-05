@@ -14,38 +14,38 @@ const PARSER_VERSION = "1.0.0";
 
 const aliasesByParser: Record<ConversationParserId, ImportRoleAliases> = {
   chatgpt: {
-    user: ["User", "You", "Human", "用户", "我"],
-    assistant: ["ChatGPT", "GPT", "Assistant"],
+    user: ["User", "You", "Human", "用户", "我", "问"],
+    assistant: ["ChatGPT", "GPT", "Assistant", "AI", "答"],
     system: ["System"],
   },
   claude: {
-    user: ["User", "You", "Human", "用户", "我"],
-    assistant: ["Claude", "Assistant"],
+    user: ["User", "You", "Human", "用户", "我", "问"],
+    assistant: ["Claude", "Assistant", "AI", "答"],
     system: ["System"],
   },
   gemini: {
-    user: ["User", "You", "Human", "用户", "我"],
-    assistant: ["Gemini", "Assistant"],
+    user: ["User", "You", "Human", "用户", "我", "问"],
+    assistant: ["Gemini", "Assistant", "AI", "答"],
     system: ["System"],
   },
   deepseek: {
-    user: ["User", "You", "Human", "用户", "我"],
-    assistant: ["DeepSeek", "Assistant"],
+    user: ["User", "You", "Human", "用户", "我", "问"],
+    assistant: ["DeepSeek", "Assistant", "AI", "答"],
     system: ["System"],
   },
   markdown: {
-    user: ["User", "You", "Human", "用户", "我"],
-    assistant: ["Assistant", "AI", "ChatGPT", "Claude", "Gemini", "DeepSeek"],
+    user: ["User", "You", "Human", "用户", "我", "问"],
+    assistant: ["Assistant", "AI", "ChatGPT", "GPT", "Claude", "Gemini", "DeepSeek", "答"],
     system: ["System"],
   },
   txt: {
-    user: ["User", "You", "Human", "用户", "我"],
-    assistant: ["Assistant", "AI", "ChatGPT", "Claude", "Gemini", "DeepSeek"],
+    user: ["User", "You", "Human", "用户", "我", "问"],
+    assistant: ["Assistant", "AI", "ChatGPT", "GPT", "Claude", "Gemini", "DeepSeek", "答"],
     system: ["System"],
   },
   manual: {
-    user: ["User", "You", "Human", "用户", "我"],
-    assistant: ["Assistant", "AI"],
+    user: ["User", "You", "Human", "用户", "我", "问"],
+    assistant: ["Assistant", "AI", "GPT", "答"],
     system: ["System"],
   },
 };

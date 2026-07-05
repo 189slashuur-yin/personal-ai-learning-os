@@ -37,17 +37,21 @@ export class BrowserMessageStorage implements MessageStorage {
     this.persist(nextMessages);
   }
 
-  getAll() {
+  getAll(): Message[] {
     const storedMessages = window.localStorage.getItem(MESSAGES_KEY);
 
     if (!storedMessages) {
       return [];
     }
 
-    return (JSON.parse(storedMessages) as Message[]).map((message) => ({
-      ...message,
-      updatedAt: message.updatedAt ?? message.createdAt,
-    }));
+    return (JSON.parse(storedMessages) as Message[]).map(
+      (message): Message => ({
+        ...message,
+        updatedAt: message.updatedAt ?? message.createdAt,
+        externalMessageId: message.externalMessageId?.trim() || undefined,
+        contentHash: message.contentHash?.trim() || undefined,
+      }),
+    );
   }
 
   getByConversationId(conversationId: string) {

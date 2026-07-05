@@ -2,7 +2,19 @@
 
 本文件记录当前仓库已经完成的 Sprint 与关键提交。日期使用仓库 commit date。
 
-当前口径：Runtime Version 为 v1.0 alpha draft；Phase1 Epic A–L 已实现并通过自动门禁；人工 QA 待执行，M–Z/AA 未开始。
+当前口径：Runtime Version 为 v1.0 alpha draft；Phase2 Epic M–AB 已实现并通过自动门禁；人工 QA 待执行。
+
+## 2026-07-06 — v1.0 Phase2 Alpha: Second Brain Workspace
+
+状态：Epic M–AB implementation complete；各 Epic lint/build/diff-check checkpoint 已通过；未创建 commit，人工 QA 待执行。
+
+- Workspace 升级为多层 Workspace/Folder，并新增 Conversation Explorer 与三栏 Workspace Mode。
+- Round/Conversation Summary、AI 整理建议/已确认知识术语、Round 多 Knowledge 与更新快照落地。
+- Import 支持多轮别名、Manual Round Builder，以及 ChatGPT `conversations.json` 最小导入。
+- ChatGPT 重复导入复用 Conversation，按 external ID/content hash 去重，只 append 新 Message，不覆盖旧 Rounds。
+- Analyzer 状态、临时 Provider Selector、Search Anchors、Asset status/relink、Recipe、Feedback/Data Health、Cmd+K 完成。
+- Settings 支持 PALOS App Data JSON 导出、分类预览/二次确认导入与失败回滚；保留备份脚本。
+- 不支持 ChatGPT 附件、图片、tool call、canvas、voice、shared link 或完整 zip 自动解析。
 
 ## 2026-07-05 — v1.0 Phase1 Alpha: Conversation / Round
 

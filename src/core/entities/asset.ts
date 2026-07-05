@@ -1,5 +1,6 @@
 export const assetEntityTypes = [
   "conversation",
+  "round",
   "knowledge",
   "task",
   "workspace",
@@ -19,7 +20,7 @@ export type Asset = {
   localPath?: string;
   relativePath?: string;
   note?: string;
+  status?: "ok" | "missing" | "unknown";
   createdAt: string;
   updatedAt: string;
 };
-

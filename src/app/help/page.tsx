@@ -1,17 +1,22 @@
 import Link from "next/link";
 
 const concepts = [
-  ["Workspace", "项目或大分类。用它把不同主题的 Conversation、Knowledge 和 Tasks 放在各自的上下文中。"],
-  ["Import", "把外部内容导入 Learning OS。目前支持 TXT 和剪贴板纯文本，并保留原始内容。"],
-  ["Conversation", "一段对话或材料的工作区。这里可以查看原文、拆分 Messages、分析并追踪整理结果。"],
+  ["Workspace / Folder", "多层组织树。Conversation 只归属一个节点；删除 Folder 不会删除 Conversation。"],
+  ["Import", "支持 TXT、粘贴文本，以及 ChatGPT 官方 Export zip 解压后的 conversations.json 最小导入。不会自动解析完整 zip。"],
+  ["Conversation", "一个可长期追加的长对话线程。可以在 Workspace Mode 中按 Round 持续整理。"],
+  ["Round", "一轮问答，也是备注、总结、建议、知识与附件的最小整理单位。"],
   ["Messages", "从原始内容拆分出的对话轮次，保留 User、Assistant、Unknown 等角色和原始顺序。"],
   ["Q&A Pair", "由一问一答组成的整理单元，从 Messages 自动派生，帮助按问题阅读和选择内容。"],
-  ["Proposal / 整理建议", "AI 生成的候选总结。它只是待审核建议，不会自动进入 Knowledge。"],
-  ["Review", "人工审核整理建议。只有你接受 Proposal 后，系统才会创建 Knowledge。"],
-  ["Knowledge", "经过人工确认、适合长期保留的知识，可继续编辑、归档、搜索和追溯来源。"],
+  ["Proposal / AI 整理建议", "AI 生成的草稿。它可保留、拒绝或确认，但不会自动写入知识库。"],
+  ["Review / 确认加入知识库", "人工确认整理建议。只有你接受 Proposal 后，系统才会创建 Knowledge。"],
+  ["Knowledge / 已确认知识", "由你确认、适合长期保留的知识，可继续编辑、归档、搜索和追溯来源。"],
   ["Tags", "知识标签，用于给 Knowledge 分类和筛选。"],
   ["Tasks / Today", "Tasks 是可选行动项；Today 汇总今天、逾期和近期事项，但它们不是 Import → Analyze → Review → Knowledge 主流程的必需步骤。"],
   ["Ollama Provider", "运行在本机的 AI，只在 Analyze / 生成整理建议时使用。它不是导入来源，也不会替你导入聊天记录。"],
+  ["Provider 额度", "ChatGPT Plus 订阅额度不等于 OpenAI API 额度。本版本不会调用 OpenAI 或 Claude 真实 API。"],
+  ["Asset / 附件", "当前只记录文件名、路径和说明，不读取或删除真实文件。文件移动后需要 Relink；未来可接本地脚本复制到 data/assets。"],
+  ["Recipe", "本地工作流模板，用来记录步骤；它不是 Agent，本版本不会自动执行或调用 Ollama 跑流程。"],
+  ["ChatGPT Export", "当前只支持 conversations.json 中的 User / Assistant 文本。附件、图片、tool call、canvas、voice、shared link 会跳过或不处理；重复导入按 external message id，缺失时按 content hash 增量去重。"],
 ] as const;
 
 const flow = [
@@ -33,6 +38,7 @@ export default function HelpPage() {
       <p className="page-description max-w-3xl">
         Learning OS 把外部对话或材料变成可审核、可追溯的长期知识。第一次使用时，按下面的推荐流程走一遍即可。
       </p>
+      <section className="mt-6 rounded-xl border border-sky-200 bg-sky-50 p-5"><h2 className="font-semibold text-sky-950">Context Help</h2><p className="mt-2 text-sm text-sky-800">每个主页面右上角的“?”回到这里。先在 Import 导入，在 Conversation 按 Round 整理，再确认 AI 整理建议进入 Knowledge。常见误区：Proposal 不是已确认知识；Recipe 不是 Agent；附件路径不代表文件已复制。</p></section>
 
       <section className="mt-10 rounded-2xl border border-sky-200 bg-sky-50 p-6">
         <p className="text-sm font-semibold text-sky-950">推荐流程</p>

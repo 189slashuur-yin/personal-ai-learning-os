@@ -202,7 +202,7 @@ export function AnalysisResult() {
           新增 Proposal：1
         </p>
         <p className="mt-2 text-xs font-medium uppercase tracking-wider text-emerald-700">
-          最近 AnalyzerRun：{latestRun?.status ?? "success"}
+          最近 AnalyzerRun：{latestRun?.status ?? "completed"}
         </p>
       </div>
 

@@ -11,6 +11,7 @@ function normalizeRound(round: Round): Round {
     answer: round.answer ?? "",
     messageIds: Array.isArray(round.messageIds) ? round.messageIds : [],
     note: round.note?.trim() || undefined,
+    summary: round.summary?.trim() || undefined,
     updatedAt: round.updatedAt ?? round.createdAt,
   };
 }

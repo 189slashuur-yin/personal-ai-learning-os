@@ -56,6 +56,9 @@ export class BrowserKnowledgeCardStorage implements KnowledgeCardStorage {
       tagIds: card.tagIds ?? [],
       updatedAt: card.updatedAt ?? card.createdAt,
       status: card.status === "Archived" ? "Archived" : "Active",
+      previousContentSnapshots: Array.isArray(card.previousContentSnapshots)
+        ? card.previousContentSnapshots
+        : [],
     }));
   }
 

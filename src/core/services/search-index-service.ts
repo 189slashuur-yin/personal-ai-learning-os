@@ -97,6 +97,15 @@ export class SearchIndexService {
       this.data.proposals.map((proposal) => [proposal.id, proposal]),
     );
     const tagById = new Map(this.data.tags.map((tag) => [tag.id, tag]));
+    const workspacePath = (workspaceId?: string) => {
+      const parts: string[] = [];
+      let current = workspaceId ? workspaceById.get(workspaceId) : undefined;
+      while (current && parts.length < 12) {
+        parts.unshift(current.name);
+        current = current.parentId ? workspaceById.get(current.parentId) : undefined;
+      }
+      return parts.join(" > ");
+    };
 
     const getWorkspace = (conversationId?: string) => {
       const workspaceId = conversationId
@@ -146,14 +155,17 @@ export class SearchIndexService {
           workspaceId: workspace.id,
           workspaceName: workspace.name,
           title: conversation.title,
-          body: conversation.note ?? "",
+          body: [conversation.note, conversation.summary, conversation.conclusion, conversation.pendingQuestions].filter(Boolean).join("\n"),
           sourceLabel: conversation.sourceType,
-          sourcePath: conversation.title,
+          sourcePath: [workspacePath(workspace.id), conversation.title].filter(Boolean).join(" > "),
           updatedAt: conversation.updatedAt,
           href: `/conversation/${conversation.id}`,
           fields: {
             title: conversation.title,
             note: conversation.note ?? "",
+            summary: conversation.summary ?? "",
+            conclusion: conversation.conclusion ?? "",
+            pendingQuestions: conversation.pendingQuestions ?? "",
             sourceType: conversation.sourceType,
             workspace: workspace.name ?? "",
           },
@@ -232,16 +244,17 @@ export class SearchIndexService {
         workspaceId: workspace.id,
         workspaceName: workspace.name,
         title: round.title || `${conversation?.title ?? "Conversation"} · Round ${round.order}`,
-        body: [round.question, round.answer, round.note].filter(Boolean).join("\n"),
+        body: [round.question, round.answer, round.note, round.summary].filter(Boolean).join("\n"),
         sourceLabel: "Round",
-        sourcePath: `${conversation?.title ?? "Conversation"} > Round ${round.order}`,
+        sourcePath: `${workspacePath(workspace.id)}${workspace.id ? " > " : ""}${conversation?.title ?? "Conversation"} > Round ${round.order}`,
         updatedAt: round.updatedAt,
-        href: `/conversation/${round.conversationId}?round=${encodeURIComponent(round.id)}#round-${round.id}`,
+        href: `/conversation/${round.conversationId}?mode=workspace&round=${encodeURIComponent(round.id)}#round-${round.id}`,
         fields: {
           title: round.title,
           question: round.question,
           answer: round.answer,
           note: round.note ?? "",
+          summary: round.summary ?? "",
           conversation: conversation?.title ?? "",
           workspace: workspace.name ?? "",
         },
@@ -320,6 +333,7 @@ export class SearchIndexService {
         },
         metadata: {
           conversationId,
+          sourceRoundId: proposal.sourceRoundId,
           sourceId: proposal.sourceId,
           sourceMessageIds: proposal.sourceMessageIds,
           status: proposal.status,
@@ -369,6 +383,7 @@ export class SearchIndexService {
         metadata: {
           proposalId: card.proposalId,
           conversationId,
+          sourceRoundId: card.sourceRoundId,
           status: card.status,
         },
       };

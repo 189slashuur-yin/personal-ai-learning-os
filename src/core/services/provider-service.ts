@@ -60,6 +60,10 @@ export class ProviderService {
     return provider;
   }
 
+  getProviderForRun(providerId: string) {
+    return this.createRegistry(providerId).getCurrentProvider();
+  }
+
   selectProvider(providerId: string) {
     const providerInfo = this.getProviders().find(
       (provider) => provider.id === providerId,

@@ -22,6 +22,7 @@ import { BrowserSourceStorage } from "@/infrastructure/storage/browser-source-st
 import { BrowserTagStorage } from "@/infrastructure/storage/browser-tag-storage";
 import { BrowserTaskStorage } from "@/infrastructure/storage/browser-task-storage";
 import { BrowserWorkspaceStorage } from "@/infrastructure/storage/browser-workspace-storage";
+import { BrowserAnalyzerRunStorage } from "@/infrastructure/storage/browser-analyzer-run-storage";
 
 type DashboardData = {
   conversationCount: number;
@@ -46,6 +47,7 @@ type DashboardData = {
   latestOpenedAt: string | null;
   providerName: string;
   providerLastTest: string;
+  recentAnalyzeProvider: string;
 };
 
 function formatDashboardTime(timestamp: string | null) {
@@ -176,6 +178,7 @@ export function DashboardOverview() {
         providerLastTest: providerConfiguration?.lastTestTime
           ? `${providerConfiguration.lastTestStatus} · ${formatDashboardTime(providerConfiguration.lastTestTime)}`
           : (providerConfiguration?.lastTestStatus ?? "Never Tested"),
+        recentAnalyzeProvider: new BrowserAnalyzerRunStorage().getLatest()?.providerName ?? "—",
       });
     }, 0);
 
@@ -193,6 +196,7 @@ export function DashboardOverview() {
   const stats = [
     { label: "当前 Provider", value: data.providerName },
     { label: "Last Test", value: data.providerLastTest },
+    { label: "最近 Analyze Provider", value: data.recentAnalyzeProvider },
     { label: "Conversation", value: data.conversationCount },
     { label: "Workspace", value: data.workspaceCount },
     { label: "Messages", value: data.messageCount },

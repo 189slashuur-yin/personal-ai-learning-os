@@ -34,8 +34,21 @@ export class BrowserConversationStorage implements ConversationStorage {
       .map((conversation) => ({
         ...conversation,
         workspaceId: conversation.workspaceId ?? DEFAULT_WORKSPACE_ID,
+        order: Number.isFinite(conversation.order) ? conversation.order : undefined,
         note: typeof conversation.note === "string" ? conversation.note : undefined,
         lastOpenedAt: conversation.lastOpenedAt ?? conversation.updatedAt,
+        summary: conversation.summary?.trim() || undefined,
+        conclusion: conversation.conclusion?.trim() || undefined,
+        pendingQuestions: conversation.pendingQuestions?.trim() || undefined,
+        externalSource:
+          conversation.externalSource === "chatgpt"
+            ? ("chatgpt" as const)
+            : undefined,
+        externalConversationId:
+          conversation.externalConversationId?.trim() || undefined,
+        importedAt: conversation.importedAt || undefined,
+        lastExternalUpdateTime:
+          conversation.lastExternalUpdateTime || undefined,
       }))
       .sort(
         (left, right) =>

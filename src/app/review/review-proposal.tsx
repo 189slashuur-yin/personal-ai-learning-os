@@ -8,6 +8,7 @@ import type { Conversation } from "@/core/entities/conversation";
 import type { Message } from "@/core/entities/message";
 import type { Round } from "@/core/entities/round";
 import { createKnowledgeCard } from "@/core/services/knowledge-card-creation";
+import { RoundKnowledgeService } from "@/core/services/round-knowledge-service";
 import {
   acceptProposal,
   applyProposal,
@@ -18,6 +19,7 @@ import { BrowserConversationStorage } from "@/infrastructure/storage/browser-con
 import { BrowserMessageStorage } from "@/infrastructure/storage/browser-message-storage";
 import { BrowserProposalStorage } from "@/infrastructure/storage/browser-proposal-storage";
 import { BrowserRoundStorage } from "@/infrastructure/storage/browser-round-storage";
+import { BrowserAppEventLogStorage } from "@/infrastructure/storage/browser-feedback-storage";
 import { CapabilityBadges } from "@/app/capability-badges";
 
 type ReviewState =
@@ -75,7 +77,7 @@ export function ReviewProposal({ proposalId }: { proposalId?: string }) {
   if (state.status === "loading") {
     return (
       <p className="mt-8 text-sm text-zinc-500" role="status">
-        正在读取 Proposal…
+        正在读取 AI 整理建议…
       </p>
     );
   }
@@ -83,7 +85,7 @@ export function ReviewProposal({ proposalId }: { proposalId?: string }) {
   if (state.status === "missing-proposal") {
     return (
       <section className="mt-8 max-w-2xl rounded-xl border border-amber-200 bg-amber-50 p-6">
-        <p className="font-medium text-amber-950">尚未找到 Proposal</p>
+        <p className="font-medium text-amber-950">尚未找到 AI 整理建议</p>
         <p className="mt-2 text-sm leading-6 text-amber-800">
           请先完成 TXT 导入和 Demo Analyzer 分析，再回来审核。
         </p>
@@ -104,6 +106,14 @@ export function ReviewProposal({ proposalId }: { proposalId?: string }) {
 
     const proposalStorage = new BrowserProposalStorage();
     const knowledgeStorage = new BrowserKnowledgeCardStorage();
+    if (state.proposal.purpose === "knowledge-update" && state.proposal.targetKnowledgeId) {
+      const updated = new RoundKnowledgeService(knowledgeStorage, proposalStorage).applyUpdate(state.proposal);
+      if (updated) {
+        proposalStorage.saveCurrent(applyProposal(acceptProposal(state.proposal)));
+        router.push(`/knowledge/${updated.id}`);
+        return;
+      }
+    }
     const existingCard = knowledgeStorage.getByProposalId(state.proposal.id);
 
     if (existingCard) {
@@ -115,10 +125,12 @@ export function ReviewProposal({ proposalId }: { proposalId?: string }) {
     }
 
     const acceptedProposal = acceptProposal(state.proposal);
+    new BrowserAppEventLogStorage().record("proposal accepted", state.proposal.id);
     const knowledgeCard = createKnowledgeCard(acceptedProposal);
 
     if (knowledgeCard) {
       knowledgeStorage.save(knowledgeCard);
+      new BrowserAppEventLogStorage().record("knowledge created", knowledgeCard.id);
       proposalStorage.saveCurrent(applyProposal(acceptedProposal));
       router.push(`/knowledge/${knowledgeCard.id}`);
       return;
@@ -290,7 +302,7 @@ export function ReviewProposal({ proposalId }: { proposalId?: string }) {
           onClick={handleAccept}
           type="button"
         >
-          {isPending ? "接受并生成 KnowledgeCard" : `已处理：${state.proposal.status}`}
+          {isPending ? "确认加入知识库" : `已处理：${state.proposal.status}`}
         </button>
         <button
           className="rounded-lg border border-red-200 px-5 py-3 text-sm font-medium text-red-700 disabled:cursor-not-allowed disabled:opacity-40"
@@ -298,7 +310,7 @@ export function ReviewProposal({ proposalId }: { proposalId?: string }) {
           onClick={handleReject}
           type="button"
         >
-          拒绝 Proposal
+          拒绝整理建议
         </button>
       </div>
     </article>

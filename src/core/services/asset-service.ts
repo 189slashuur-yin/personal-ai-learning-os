@@ -35,6 +35,7 @@ export class AssetService {
       localPath: input.localPath?.trim() || undefined,
       relativePath: input.relativePath?.trim() || undefined,
       note: input.note?.trim() || undefined,
+      status: input.localPath?.trim() ? "ok" : "unknown",
       mimeType: input.mimeType?.trim() || undefined,
       size: input.size,
       hash: input.hash?.trim() || undefined,
@@ -47,6 +48,22 @@ export class AssetService {
 
   removeMetadata(id: string): void {
     this.storage.remove(id);
+  }
+
+  relinkPath(id: string, localPath: string) {
+    const asset = this.storage.getById(id);
+    if (!asset) return null;
+    const updated: Asset = { ...asset, localPath: localPath.trim() || undefined, status: localPath.trim() ? "ok" : "unknown", updatedAt: new Date().toISOString() };
+    this.storage.save(updated);
+    return updated;
+  }
+
+  markMissing(id: string) {
+    const asset = this.storage.getById(id);
+    if (!asset) return null;
+    const updated: Asset = { ...asset, status: "missing", updatedAt: new Date().toISOString() };
+    this.storage.save(updated);
+    return updated;
   }
 
   removeForEntity(entityType: AssetEntityType, entityId: string): void {

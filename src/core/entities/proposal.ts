@@ -27,5 +27,7 @@ export type Proposal = {
   suggestedAction?: AnalyzerSuggestedAction;
   riskLevel?: AnalyzerRiskLevel;
   status: "Pending" | "Accepted" | "Rejected" | "Applied";
+  purpose?: "knowledge-create" | "knowledge-update" | "summary";
+  targetKnowledgeId?: string;
   createdAt: string;
 };

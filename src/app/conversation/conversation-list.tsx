@@ -17,6 +17,7 @@ import { BrowserKnowledgeCardStorage } from "@/infrastructure/storage/browser-kn
 import { BrowserMessageStorage } from "@/infrastructure/storage/browser-message-storage";
 import { BrowserProposalStorage } from "@/infrastructure/storage/browser-proposal-storage";
 import { BrowserSourceStorage } from "@/infrastructure/storage/browser-source-storage";
+import { BrowserTaskStorage } from "@/infrastructure/storage/browser-task-storage";
 import { BrowserWorkspaceStorage } from "@/infrastructure/storage/browser-workspace-storage";
 import { BrowserRoundStorage } from "@/infrastructure/storage/browser-round-storage";
 import { WorkspaceService } from "@/core/services/workspace-service";
@@ -129,6 +130,17 @@ export function ConversationList() {
     setItems(loadConversationData().items);
   }
 
+  function handleMove(conversationId: string, workspaceId: string) {
+    new WorkspaceService(
+      new BrowserWorkspaceStorage(),
+      new BrowserConversationStorage(),
+      new BrowserTaskStorage(),
+    ).moveConversation(conversationId, workspaceId);
+    const data = loadConversationData();
+    setItems(data.items);
+    setWorkspaces(data.workspaces);
+  }
+
   if (!items) {
     return (
       <p className="mt-10 text-sm text-zinc-500" role="status">
@@ -202,13 +214,20 @@ export function ConversationList() {
         </section>
       ) : (
         <div className="mt-6 grid gap-4 sm:grid-cols-2">
-            {visibleItems.map((item) => (
-            <ConversationCard
-              key={item.conversation.id}
-              onDelete={handleDelete}
-              onDuplicate={handleDuplicate}
-              {...item}
-            />
+          {visibleItems.map((item) => (
+            <div className="rounded-2xl border border-zinc-200 bg-white p-2" key={item.conversation.id}>
+              <ConversationCard
+                onDelete={handleDelete}
+                onDuplicate={handleDuplicate}
+                {...item}
+              />
+              <label className="mx-3 mb-3 block text-xs text-zinc-500">
+                移动到 Workspace / Folder
+                <select className="ml-2 rounded border border-zinc-200 bg-white px-2 py-1.5" onChange={(event) => handleMove(item.conversation.id, event.target.value)} value={item.conversation.workspaceId ?? DEFAULT_WORKSPACE_ID}>
+                  {workspaces.filter((workspace) => !workspace.archivedAt).map((workspace) => <option key={workspace.id} value={workspace.id}>{workspace.name}</option>)}
+                </select>
+              </label>
+            </div>
           ))}
         </div>
       )}

@@ -95,9 +95,10 @@ export function ConversationAssets({ conversationId }: { conversationId: string 
               <div className="min-w-0">
                 <p className="font-medium text-zinc-900">{asset.filename}</p>
                 <p className="mt-1 break-all text-xs text-zinc-500">{asset.localPath ?? "未记录路径"}</p>
+                <p className={`mt-1 text-xs font-semibold ${asset.status === "missing" ? "text-red-700" : asset.status === "ok" ? "text-emerald-700" : "text-zinc-500"}`}>Status: {asset.status ?? "unknown"}</p>
                 {asset.note ? <p className="mt-1 text-sm text-zinc-600">{asset.note}</p> : null}
               </div>
-              <button className="text-xs font-semibold text-red-700" onClick={() => removeAsset(asset)} type="button">删除 metadata</button>
+              <div className="flex gap-2"><button className="text-xs font-semibold text-sky-700" onClick={() => { const path = window.prompt("新的本地路径", asset.localPath ?? ""); if (path !== null) { service().relinkPath(asset.id, path); refresh(); } }} type="button">Relink Path</button><button className="text-xs font-semibold text-amber-700" onClick={() => { service().markMissing(asset.id); refresh(); }} type="button">Mark Missing</button><button className="text-xs font-semibold text-red-700" onClick={() => removeAsset(asset)} type="button">删除 metadata</button></div>
             </div>
           ))}
         </div>

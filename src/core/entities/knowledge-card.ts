@@ -22,4 +22,9 @@ export type KnowledgeCard = {
   updatedAt: string;
   archivedAt?: string;
   status: "Active" | "Archived";
+  previousContentSnapshots?: Array<{
+    content: string;
+    summary: string;
+    capturedAt: string;
+  }>;
 };

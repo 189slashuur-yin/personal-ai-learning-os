@@ -7,6 +7,7 @@ export type Round = {
   answer: string;
   messageIds: string[];
   note?: string;
+  summary?: string;
   createdAt: string;
   updatedAt: string;
 };

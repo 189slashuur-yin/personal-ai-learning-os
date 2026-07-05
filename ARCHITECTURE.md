@@ -3,10 +3,21 @@
 ## Current release context
 
 - Current Version：v1.0 alpha draft
-- Current Focus：Phase1 Conversation / Round runtime implemented；manual QA pending
-- Next Recommended Phase：验证 A–L，不进入 M–Z/AA
+- Current Focus：Phase2 Second Brain Workspace runtime implemented；manual QA pending
+- Next Recommended Phase：验证 M–AB 与旧数据回归；通过前保持 alpha
 
 当前架构结论仍受单浏览器、小数据量与 LocalStorage 边界约束。v1.0 候选必须先完成范围和验收评审，不能从本文的演进 seam 推定为已批准实现。
+
+## v1.0 Phase2 runtime delta
+
+- Workspace 兼容扩展 `parentId/order/type/collapsed`，形成多层 Workspace/Folder；Conversation 仍只归属一个节点。
+- Conversation Explorer 与 Workspace Mode 是 Page 级读写组合，不改变 Conversation/Round 的 Aggregate 边界。
+- Round 增加可选 summary；Conversation 增加可选 summary/conclusion/pendingQuestions。缺失字段按旧数据安全读取。
+- Proposal 仍是 AI 草稿，Knowledge 仍需人工确认；Knowledge update 保存 previous content snapshot。
+- Asset 仍只保存 metadata/path/status，不读取或删除真实文件。
+- Recipe 只记录本地手动步骤，不执行 Analyzer，不是 Agent。
+- App Data 导入导出由 BrowserAppDataStorage 集中拥有 PALOS keys，导入先校验/预览，失败回滚。
+- ChatGPT `conversations.json` 由 pure linearizer 读取 current-node 主分支，只接收 User/Assistant 文本。首次导入复用现有 Parser/ImportService 生成 Rounds；重复导入按 external ID/content hash append Message，绝不自动覆盖旧 Rounds。
 
 ## v1.0 Phase0 architecture freeze
 

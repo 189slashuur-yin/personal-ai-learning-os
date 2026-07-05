@@ -9,11 +9,15 @@ import {
 
 export type CreateWorkspaceInput = {
   name: string;
+  parentId?: string;
+  type?: Workspace["type"];
   description?: string;
   color?: string;
 };
 
-export type UpdateWorkspaceInput = Partial<CreateWorkspaceInput>;
+export type UpdateWorkspaceInput = Partial<CreateWorkspaceInput> & {
+  collapsed?: boolean;
+};
 
 export class WorkspaceService {
   constructor(
@@ -29,10 +33,19 @@ export class WorkspaceService {
 
   createWorkspace(input: CreateWorkspaceInput) {
     const name = this.requireName(input.name);
+    const parent = input.parentId ? this.workspaces.getById(input.parentId) : null;
+    if (input.parentId && !parent) throw new Error("Parent folder does not exist.");
     const timestamp = new Date().toISOString();
+    const siblings = this.workspaces.getAll().filter(
+      (workspace) => workspace.parentId === input.parentId,
+    );
     const workspace: Workspace = {
       id: crypto.randomUUID(),
       name,
+      parentId: input.parentId,
+      order: siblings.length + 1,
+      type: input.type ?? (input.parentId ? "folder" : "workspace"),
+      collapsed: false,
       description: this.normalizeOptional(input.description),
       color: this.normalizeOptional(input.color),
       createdAt: timestamp,
@@ -62,6 +75,7 @@ export class WorkspaceService {
         input.color === undefined
           ? workspace.color
           : this.normalizeOptional(input.color),
+      collapsed: input.collapsed ?? workspace.collapsed,
       updatedAt: new Date().toISOString(),
     };
 
@@ -106,8 +120,56 @@ export class WorkspaceService {
     return restoredWorkspace;
   }
 
+  moveWorkspace(id: string, parentId?: string) {
+    const workspace = this.workspaces.getById(id);
+    if (!workspace || id === DEFAULT_WORKSPACE_ID || id === parentId) return null;
+    if (parentId && !this.workspaces.getById(parentId)) return null;
+    const descendants = new Set(this.getDescendantIds(id));
+    if (parentId && descendants.has(parentId)) return null;
+    const siblings = this.workspaces.getAll().filter(
+      (item) => item.id !== id && item.parentId === parentId,
+    );
+    const moved = {
+      ...workspace,
+      parentId,
+      order: siblings.length + 1,
+      updatedAt: new Date().toISOString(),
+    };
+    this.workspaces.save(moved);
+    this.normalizeSiblingOrder(workspace.parentId);
+    return moved;
+  }
+
+  reorderWorkspace(id: string, direction: "up" | "down") {
+    const workspace = this.workspaces.getById(id);
+    if (!workspace) return null;
+    const siblings = this.workspaces.getAll()
+      .filter((item) => item.parentId === workspace.parentId)
+      .sort((left, right) => left.order - right.order);
+    const index = siblings.findIndex((item) => item.id === id);
+    const targetIndex = direction === "up" ? index - 1 : index + 1;
+    if (index < 0 || targetIndex < 0 || targetIndex >= siblings.length) return workspace;
+    [siblings[index], siblings[targetIndex]] = [siblings[targetIndex], siblings[index]];
+    const timestamp = new Date().toISOString();
+    siblings.forEach((item, itemIndex) => this.workspaces.save({
+      ...item,
+      order: itemIndex + 1,
+      updatedAt: timestamp,
+    }));
+    return this.workspaces.getById(id);
+  }
+
+  moveConversation(conversationId: string, workspaceId: string) {
+    const conversation = this.conversations.getById(conversationId);
+    if (!conversation || !this.workspaces.getById(workspaceId)) return null;
+    const moved = { ...conversation, workspaceId, updatedAt: new Date().toISOString() };
+    this.conversations.save(moved);
+    return moved;
+  }
+
   deleteWorkspace(id: string) {
-    if (id === DEFAULT_WORKSPACE_ID || !this.workspaces.getById(id)) {
+    const deletedWorkspace = this.workspaces.getById(id);
+    if (id === DEFAULT_WORKSPACE_ID || !deletedWorkspace) {
       return false;
     }
 
@@ -118,11 +180,14 @@ export class WorkspaceService {
     const taskStorage = this.tasks;
 
     const timestamp = new Date().toISOString();
+    const fallbackId = this.workspaces.getById(deletedWorkspace.parentId ?? "")
+      ? deletedWorkspace.parentId ?? DEFAULT_WORKSPACE_ID
+      : DEFAULT_WORKSPACE_ID;
     this.conversations.getAll().forEach((conversation) => {
       if (conversation.workspaceId === id) {
         this.conversations.save({
           ...conversation,
-          workspaceId: DEFAULT_WORKSPACE_ID,
+          workspaceId: fallbackId,
           updatedAt: timestamp,
         });
       }
@@ -136,7 +201,17 @@ export class WorkspaceService {
         });
       }
     });
+    this.workspaces.getAll().forEach((workspace) => {
+      if (workspace.parentId === id) {
+        this.workspaces.save({
+          ...workspace,
+          parentId: fallbackId === DEFAULT_WORKSPACE_ID ? undefined : fallbackId,
+          updatedAt: timestamp,
+        });
+      }
+    });
     this.workspaces.remove(id);
+    this.normalizeSiblingOrder(deletedWorkspace.parentId);
     return true;
   }
 
@@ -155,6 +230,9 @@ export class WorkspaceService {
     const defaultWorkspace: Workspace = {
       id: DEFAULT_WORKSPACE_ID,
       name: DEFAULT_WORKSPACE_NAME,
+      order: 0,
+      type: "workspace",
+      collapsed: false,
       description: "未分类与旧 Conversation 的默认归属。",
       createdAt: timestamp,
       updatedAt: timestamp,
@@ -175,5 +253,30 @@ export class WorkspaceService {
 
   private normalizeOptional(value?: string) {
     return value?.trim() || undefined;
+  }
+
+  private getDescendantIds(id: string) {
+    const all = this.workspaces.getAll();
+    const descendants: string[] = [];
+    const visit = (parentId: string) => {
+      all.filter((item) => item.parentId === parentId).forEach((item) => {
+        descendants.push(item.id);
+        visit(item.id);
+      });
+    };
+    visit(id);
+    return descendants;
+  }
+
+  private normalizeSiblingOrder(parentId?: string) {
+    const timestamp = new Date().toISOString();
+    this.workspaces.getAll()
+      .filter((workspace) => workspace.parentId === parentId)
+      .sort((left, right) => left.order - right.order)
+      .forEach((workspace, index) => {
+        if (workspace.order !== index + 1 && workspace.id !== DEFAULT_WORKSPACE_ID) {
+          this.workspaces.save({ ...workspace, order: index + 1, updatedAt: timestamp });
+        }
+      });
   }
 }

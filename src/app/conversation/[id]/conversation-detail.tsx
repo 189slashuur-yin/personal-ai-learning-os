@@ -39,12 +39,15 @@ import { BrowserMessageStorage } from "@/infrastructure/storage/browser-message-
 import { BrowserProposalStorage } from "@/infrastructure/storage/browser-proposal-storage";
 import { BrowserPromptTemplateStorage } from "@/infrastructure/storage/browser-prompt-template-storage";
 import { BrowserProviderConfigurationStorage } from "@/infrastructure/storage/browser-provider-configuration-storage";
+import { BrowserRoundStorage } from "@/infrastructure/storage/browser-round-storage";
 import { BrowserSourceStorage } from "@/infrastructure/storage/browser-source-storage";
 import { BrowserTaskStorage } from "@/infrastructure/storage/browser-task-storage";
 import { BrowserWorkspaceStorage } from "@/infrastructure/storage/browser-workspace-storage";
+import { BrowserAppEventLogStorage } from "@/infrastructure/storage/browser-feedback-storage";
 import { ProposalWorkspace } from "./proposal-workspace";
 import { ConversationAssets } from "./conversation-assets";
 import { RoundWorkspace } from "./round-workspace";
+import { ConversationWorkspaceMode } from "./conversation-workspace-mode";
 import { CapabilityBadges } from "@/app/capability-badges";
 
 type ConversationDetailProps = {
@@ -126,12 +129,13 @@ function excerpt(value: string, maxLength = 240) {
     : normalized;
 }
 
-function createAnalyzerExecutionService() {
-  const provider = new ProviderService(
+function createAnalyzerExecutionService(providerId?: string) {
+  const providerService = new ProviderService(
     new BrowserAIProviderStorage(),
     new BrowserProviderConfigurationStorage(),
     new BrowserPromptTemplateStorage(),
-  ).getCurrentProvider();
+  );
+  const provider = providerId ? providerService.getProviderForRun(providerId) : providerService.getCurrentProvider();
   return new AnalyzerExecutionService(
     provider,
     new PromptTemplateService(new BrowserPromptTemplateStorage()),
@@ -151,6 +155,9 @@ export function ConversationDetail({
   const [titleDraft, setTitleDraft] = useState("");
   const [isEditingNote, setIsEditingNote] = useState(false);
   const [noteDraft, setNoteDraft] = useState("");
+  const [summaryDraft, setSummaryDraft] = useState("");
+  const [conclusionDraft, setConclusionDraft] = useState("");
+  const [pendingQuestionsDraft, setPendingQuestionsDraft] = useState("");
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [selectedMessageIds, setSelectedMessageIds] = useState<Set<string>>(
     new Set(),
@@ -167,6 +174,7 @@ export function ConversationDetail({
   const [messageSearchQuery, setMessageSearchQuery] = useState("");
   const [messageView, setMessageView] = useState<MessageView>("timeline");
   const [isMessageDataVisible, setIsMessageDataVisible] = useState(false);
+  const [detailMode, setDetailMode] = useState<"classic" | "workspace">("classic");
   const [qaPairSearchQuery, setQAPairSearchQuery] = useState("");
   const [qaPairSort, setQAPairSort] = useState<QAPairSort>("order");
   const [collapsedQAPairIds, setCollapsedQAPairIds] = useState<Set<string>>(
@@ -178,6 +186,7 @@ export function ConversationDetail({
   const [taskError, setTaskError] = useState<string | null>(null);
   const [latestAnalyzerRun, setLatestAnalyzerRun] =
     useState<AnalyzerRun | null>(null);
+  const [analyzeProviderId, setAnalyzeProviderId] = useState("demo");
   const [providerDetails] = useState<{
     id: string;
     name: string;
@@ -270,6 +279,9 @@ export function ConversationDetail({
       const conversation = new BrowserConversationStorage().getById(
         conversationId,
       );
+      if (new URLSearchParams(window.location.search).get("mode") === "workspace") {
+        setDetailMode("workspace");
+      }
 
       if (!conversation) {
         setState({ status: "missing" });
@@ -324,12 +336,16 @@ export function ConversationDetail({
           conversationId,
         ),
       );
+      setAnalyzeProviderId(providerDetails.id);
 
       const sourceContent = source?.content ?? "";
       lastSavedContent.current = sourceContent;
       setDraft(sourceContent);
       setTitleDraft(openedConversation.title);
       setNoteDraft(openedConversation.note ?? "");
+      setSummaryDraft(openedConversation.summary ?? "");
+      setConclusionDraft(openedConversation.conclusion ?? "");
+      setPendingQuestionsDraft(openedConversation.pendingQuestions ?? "");
       setLastSavedAt(source?.updatedAt ?? null);
       setState({
         status: "ready",
@@ -344,7 +360,7 @@ export function ConversationDetail({
     }, 0);
 
     return () => window.clearTimeout(loadTimer);
-  }, [conversationId]);
+  }, [conversationId, providerDetails.id]);
 
   useEffect(() => {
     if (
@@ -450,12 +466,15 @@ export function ConversationDetail({
       return;
     }
 
-    const result = await createAnalyzerExecutionService().runSource(state.source, {
+    setLatestAnalyzerRun({ id: "pending", conversationId: state.conversation.id, sourceId: state.source.id, providerId: providerDetails.id, providerName: providerDetails.name, status: "running", startedAt: new Date().toISOString() });
+    new BrowserAppEventLogStorage().record("analyze started", state.conversation.id, analyzeProviderId);
+    const result = await createAnalyzerExecutionService(analyzeProviderId).runSource(state.source, {
       simulateRecoverableError: simulateFailure,
     });
     setLatestAnalyzerRun(result.run);
 
     if (!result.proposal) {
+      new BrowserAppEventLogStorage().record("analyze failed", state.conversation.id, result.run.error?.message);
       setAnalyzerError(result.run.error?.message ?? "Analyzer 运行失败。");
       return;
     }
@@ -474,9 +493,10 @@ export function ConversationDetail({
 
   async function runRoundAnalyzer(round: Round) {
     if (state.status !== "ready") return;
+    setLatestAnalyzerRun({ id: "pending", conversationId: state.conversation.id, roundId: round.id, providerId: providerDetails.id, providerName: providerDetails.name, status: "running", startedAt: new Date().toISOString() });
     const messageIdSet = new Set(round.messageIds);
     const roundMessages = state.messages.filter((message) => messageIdSet.has(message.id));
-    const result = await createAnalyzerExecutionService().runRound(round, roundMessages);
+    const result = await createAnalyzerExecutionService(analyzeProviderId).runRound(round, roundMessages);
     setLatestAnalyzerRun(result.run);
     if (!result.proposal) {
       setAnalyzerError(result.run.error?.message ?? "Round Analyzer 运行失败。");
@@ -487,6 +507,28 @@ export function ConversationDetail({
     proposalStorage.saveCurrent(result.proposal);
     setAnalyzerError(null);
     setState({ ...state, proposals: [result.proposal, ...state.proposals] });
+  }
+
+  async function runConversationSummaryAnalyzer() {
+    if (state.status !== "ready") return;
+    setLatestAnalyzerRun({ id: "pending", conversationId: state.conversation.id, providerId: providerDetails.id, providerName: providerDetails.name, status: "running", startedAt: new Date().toISOString() });
+    const rounds = new BrowserRoundStorage().getByConversationId(state.conversation.id);
+    const timestamp = new Date().toISOString();
+    const summaryMessages: Message[] = rounds.flatMap((round, index) => [
+      ...(round.question ? [{ id: `summary-q-${round.id}`, conversationId: state.conversation.id, role: "user" as const, content: round.question, order: index * 2 + 1, createdAt: timestamp, updatedAt: timestamp }] : []),
+      ...(round.answer ? [{ id: `summary-a-${round.id}`, conversationId: state.conversation.id, role: "assistant" as const, content: round.answer, order: index * 2 + 2, createdAt: timestamp, updatedAt: timestamp }] : []),
+    ]);
+    const result = await createAnalyzerExecutionService(analyzeProviderId).runMessages(state.conversation.id, summaryMessages);
+    setLatestAnalyzerRun(result.run);
+    if (!result.proposal) {
+      setAnalyzerError(result.run.error?.message ?? "Conversation Summary Analyzer 运行失败。");
+      return;
+    }
+    const proposal: Proposal = { ...result.proposal, sourceType: "conversation", sourceMessageIds: rounds.flatMap((round) => round.messageIds), title: `Conversation Summary Draft · ${state.conversation.title}` };
+    const storage = new BrowserProposalStorage();
+    storage.save(proposal);
+    storage.saveCurrent(proposal);
+    setState({ ...state, proposals: [proposal, ...state.proposals] });
   }
 
   function createTaskFromConversation() {
@@ -570,10 +612,11 @@ export function ConversationDetail({
       return;
     }
 
+    setLatestAnalyzerRun({ id: "pending", conversationId: state.conversation.id, providerId: providerDetails.id, providerName: providerDetails.name, status: "running", startedAt: new Date().toISOString() });
     const selectedMessages = state.messages.filter((message) =>
       selectedMessageIds.has(message.id),
     );
-    const result = await createAnalyzerExecutionService().runMessages(
+    const result = await createAnalyzerExecutionService(analyzeProviderId).runMessages(
       state.conversation.id,
       selectedMessages,
     );
@@ -660,6 +703,15 @@ export function ConversationDetail({
       ...state,
       proposals: [result.proposal, ...state.proposals],
     });
+  }
+
+  function switchToDemo() {
+    new ProviderService(
+      new BrowserAIProviderStorage(),
+      new BrowserProviderConfigurationStorage(),
+      new BrowserPromptTemplateStorage(),
+    ).selectProvider("demo");
+    window.location.reload();
   }
 
   function deleteProposal(proposal: Proposal) {
@@ -987,6 +1039,27 @@ export function ConversationDetail({
     setIsEditingNote(false);
   }
 
+  function saveConversationSummary() {
+    if (state.status !== "ready") return;
+    const nextConversation: Conversation = {
+      ...state.conversation,
+      summary: summaryDraft.trim() || undefined,
+      conclusion: conclusionDraft.trim() || undefined,
+      pendingQuestions: pendingQuestionsDraft.trim() || undefined,
+      updatedAt: new Date().toISOString(),
+    };
+    new BrowserConversationStorage().save(nextConversation);
+    setState({ ...state, conversation: nextConversation });
+  }
+
+  function exportConversation(format: "json" | "markdown") {
+    if (state.status !== "ready") return;
+    const rounds = new BrowserRoundStorage().getByConversationId(state.conversation.id);
+    const content = format === "json" ? JSON.stringify({ conversation: state.conversation, rounds, messages: state.messages }, null, 2) : `# ${state.conversation.title}\n\n${rounds.map((round) => `## Round ${round.order}: ${round.title}\n\n**Q:** ${round.question}\n\n**A:** ${round.answer}\n\n${round.summary ? `Summary: ${round.summary}\n` : ""}`).join("\n")}`;
+    const blob = new Blob([content], { type: format === "json" ? "application/json" : "text/markdown" });
+    const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = `${state.conversation.title}.${format === "json" ? "json" : "md"}`; link.click(); URL.revokeObjectURL(link.href);
+  }
+
   function handleTitleKeyDown(event: KeyboardEvent<HTMLInputElement>) {
     if (event.key === "Enter") {
       event.currentTarget.blur();
@@ -1034,6 +1107,9 @@ export function ConversationDetail({
             )}
           </div>
           <div className="flex flex-wrap items-center gap-3">
+            <button className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs font-semibold" onClick={() => exportConversation("markdown")} type="button">Export Markdown</button>
+            <button className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs font-semibold" onClick={() => exportConversation("json")} type="button">Export JSON</button>
+            <div className="flex rounded-lg border border-zinc-200 bg-white p-1 text-xs font-semibold"><button className={`rounded-md px-3 py-1.5 ${detailMode === "classic" ? "bg-zinc-950 text-white" : "text-zinc-600"}`} onClick={() => setDetailMode("classic")} type="button">Classic</button><button className={`rounded-md px-3 py-1.5 ${detailMode === "workspace" ? "bg-zinc-950 text-white" : "text-zinc-600"}`} onClick={() => setDetailMode("workspace")} type="button">Workspace Mode</button></div>
             <button
               className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs font-semibold text-zinc-600 shadow-sm hover:border-zinc-300 hover:text-zinc-950"
               onClick={createTaskFromConversation}
@@ -1392,12 +1468,14 @@ export function ConversationDetail({
         </div>
       </section>
 
-      <RoundWorkspace conversationId={conversationId} onAnalyzeRound={runRoundAnalyzer} />
+      <section className="detail-section"><div className="detail-section-heading"><p className="detail-kicker">Summary</p><h2 className="detail-title">Conversation Summary</h2><p className="detail-description">总结、最终结论与待确认点由你确认后保存；Analyzer 只生成 Proposal 草稿。</p></div><div className="rounded-xl border border-zinc-200 bg-white p-5"><div className="grid gap-4 lg:grid-cols-3"><label className="text-sm font-semibold">总结<textarea className="mt-2 min-h-28 w-full rounded-lg border border-zinc-200 p-3 font-normal" onChange={(event) => setSummaryDraft(event.target.value)} value={summaryDraft} /></label><label className="text-sm font-semibold">最终结论<textarea className="mt-2 min-h-28 w-full rounded-lg border border-zinc-200 p-3 font-normal" onChange={(event) => setConclusionDraft(event.target.value)} value={conclusionDraft} /></label><label className="text-sm font-semibold">待确认点<textarea className="mt-2 min-h-28 w-full rounded-lg border border-zinc-200 p-3 font-normal" onChange={(event) => setPendingQuestionsDraft(event.target.value)} value={pendingQuestionsDraft} /></label></div><div className="mt-4 flex flex-wrap gap-3"><button className="rounded-lg bg-zinc-950 px-4 py-2.5 text-sm font-semibold text-white" onClick={saveConversationSummary} type="button">确认保存</button><button className="rounded-lg border border-zinc-200 px-4 py-2.5 text-sm font-semibold" onClick={runConversationSummaryAnalyzer} type="button">从所有 Rounds 生成 Summary Proposal</button></div></div></section>
+
+      {detailMode === "workspace" ? <ConversationWorkspaceMode conversationId={conversationId} onAnalyzeRound={runRoundAnalyzer} /> : <RoundWorkspace conversationId={conversationId} onAnalyzeRound={runRoundAnalyzer} />}
 
       <section className="detail-section">
         <div className="detail-section-heading">
           <p className="detail-kicker">06 · Messages (underlying data)</p>
-          <h2 className="detail-title">Message Timeline</h2>
+          <h2 className="detail-title">Advanced / Raw Data · Message Timeline</h2>
           <p className="detail-description">
             底层原始数据默认折叠；旧 Message / Q&amp;A Pair 功能继续可用。
           </p>
@@ -1812,6 +1890,7 @@ export function ConversationDetail({
             <div className="mb-3 flex justify-end">
               <CapabilityBadges capabilities={providerDetails.capabilities} />
             </div>
+            <label className="mb-3 block text-xs font-semibold text-zinc-600">本次 Analyze Provider<select className="ml-2 rounded-lg border border-zinc-200 bg-white px-3 py-2" onChange={(event) => setAnalyzeProviderId(event.target.value)} value={analyzeProviderId}><option value="demo">Demo</option><option value="ollama">Ollama</option><option disabled value="openai">OpenAI（disabled）</option><option disabled value="claude">Claude（disabled）</option></select></label>
             <button
               className="rounded-lg border border-zinc-200 bg-white px-4 py-2.5 text-sm font-medium text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-40"
               disabled={!source || saveStatus === "editing"}
@@ -1840,6 +1919,7 @@ export function ConversationDetail({
             <p className="mt-1 text-xs text-zinc-500">
               {latestAnalyzerRun.providerName} · {latestAnalyzerRun.startedAt}
             </p>
+            {latestAnalyzerRun.latencyMs !== undefined ? <p className="mt-1 text-xs text-zinc-500">Latency: {latestAnalyzerRun.latencyMs} ms</p> : null}
             {latestAnalyzerRun.error ? (
               <p className="mt-2 text-red-700">
                 {latestAnalyzerRun.error.code}：{latestAnalyzerRun.error.message}
@@ -1855,11 +1935,12 @@ export function ConversationDetail({
                 Retry
               </button>
             ) : null}
+            {(latestAnalyzerRun.status === "failed" || latestAnalyzerRun.status === "timeout") ? <div className="mt-3 flex flex-wrap gap-2"><button className="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-xs font-semibold" onClick={switchToDemo} type="button">Switch to Demo</button><Link className="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-xs font-semibold" href="/settings">Increase Timeout</Link></div> : null}
           </div>
         ) : null}
         {analyzerError ? (
           <div className="mb-5 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800">
-            <p>未生成 Proposal：{analyzerError}</p>
+            <p>未生成 AI 整理建议：{analyzerError}</p><p className="mt-2">本次失败不写入任何 Proposal 或 Knowledge。</p>
             {latestAnalyzerRun?.providerId === "ollama" ? (
               <p className="mt-2 leading-6">
                 本次失败未写入 Proposal。你可以前往{" "}

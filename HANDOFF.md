@@ -1,4 +1,40 @@
-# v1.0 Phase1 — Conversation / Round Implementation Handoff
+# v1.0 Phase2 — Second Brain Workspace Handoff
+
+## 2026-07-06 Epic AB checkpoint
+
+- AB App Data Export/Import、Entity Export、ChatGPT `conversations.json` 最小导入与增量/去重已实现。
+- App Data 导入支持 key/entity count Preview、按领域选择、二次确认与写入失败回滚；备份脚本保留。
+- Conversation 支持 Markdown/JSON，Round/Knowledge 支持 Markdown，Workspace/Folder 支持 JSON bundle。
+- ChatGPT 首次导入沿 current-node 主分支线性化 User/Assistant 文本，并经现有 Parser/ImportService 创建 Conversation/Messages/Rounds。
+- 重复导入复用 `externalConversationId`，Message 优先按 `externalMessageId`、缺失时按 `contentHash` 去重；只 append 新 Message，不覆盖旧 Rounds。
+- unsupported 附件、图片、tool call、canvas、voice/shared link 被跳过或不处理，不阻断文本导入。
+- AB checkpoint：`npm run lint`、`npm run build`、`git diff --check` 全部通过。
+- 修复记录：BrowserConversationStorage 显式收窄 `externalSource`；BrowserMessageStorage `getAll(): Message[]` 保持 external 字段 optional。
+- Git：未创建 commit、未 push；旧数据未删除。
+
+## 2026-07-06 Epic AC checkpoint
+
+- 新增 `docs/reviews/Release-v1.0-alpha-Review.md` 与 `docs/qa/V10-MANUAL-QA-PLAN.md`，更新 v1.0 alpha release notes。
+- README、PROJECT、ARCHITECTURE、ROADMAP、CHANGELOG、HANDOFF、QA_CHECKLIST 与 Help 已统一 Phase2 产品语言和 ChatGPT Import 边界。
+- Release Review 判断：达到 alpha candidate，但人工 QA 未执行，暂不标记正式 release-ready。
+- AC checkpoint：`npm run lint`、`npm run build`、`git diff --check` 全部通过。
+- 未创建 commit；未删除旧数据；未加入 API key。
+
+## 2026-07-06 Epic AD final stabilization
+
+- Final gates：`npm run lint`、`npm run build`、`git diff --check` 全部通过；production build 生成 19 个路由。
+- Browser smoke：Dashboard、Import、Conversation、Search、Knowledge、Settings、Workspace、Recipes、Feedback、Data Health、Help 均加载预期 H1，console 无 error。
+- Compatibility audit：Round Entity/Storage/Service 存在；BrowserStorage 对新增 optional 字段执行安全归一化；ChatGPT 增量路径不调用 remove/clear/replace。
+- Analyzer failure UX：显示失败原因、Retry、Switch to Demo、Increase Timeout，并明确不写 Proposal/Knowledge。
+- Security audit：App/Core 无直接 LocalStorage；未发现真实 OpenAI/Claude API key；云 Provider 仍 disabled。
+- ChatGPT Import audit：Preview 显示 title/message/create/update 与 existing/new/skipped；首次导入生成 Rounds，重复导入 append-only 并提示手动 regenerate。
+- Manual blocker：当前 in-app 浏览器测试 profile 中没有旧 Conversation/Round 数据，因此旧数据真实浏览器回归与完整 ChatGPT/App Data fixture QA 尚未执行。详见 `docs/qa/V10-MANUAL-QA-PLAN.md`。
+- Release decision：建议作为 v1.0 alpha candidate 进入人工 QA；通过 P0 前不标记正式 release-ready。
+- Git：未创建 commit、未 push。
+
+---
+
+# Previous Handoff — v1.0 Phase1 Conversation / Round
 
 ## 当前状态
 

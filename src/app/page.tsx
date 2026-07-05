@@ -1,5 +1,6 @@
 import { DashboardOverview } from "./dashboard-overview";
 import { DashboardSearch } from "./dashboard-search";
+import { ConversationExplorer } from "./conversation/conversation-explorer";
 
 export default function Home() {
   return (
@@ -14,6 +15,7 @@ export default function Home() {
         </p>
         <DashboardSearch />
       </div>
+      <ConversationExplorer compact />
       <DashboardOverview />
     </main>
   );

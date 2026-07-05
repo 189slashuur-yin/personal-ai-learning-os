@@ -3,9 +3,13 @@ import type { Workspace } from "@/core/entities/workspace";
 
 const WORKSPACES_KEY = "ai-learning-os.workspaces";
 
-function normalizeWorkspace(workspace: Workspace): Workspace {
+function normalizeWorkspace(workspace: Workspace, index = 0): Workspace {
   return {
     ...workspace,
+    parentId: workspace.parentId || undefined,
+    order: Number.isFinite(workspace.order) ? workspace.order : index + 1,
+    type: workspace.type === "folder" ? "folder" : "workspace",
+    collapsed: Boolean(workspace.collapsed),
     description: workspace.description?.trim() || undefined,
     color: workspace.color?.trim() || undefined,
     archivedAt: workspace.archivedAt || undefined,
@@ -38,7 +42,11 @@ export class BrowserWorkspaceStorage implements WorkspaceStorage {
 
     return (JSON.parse(storedWorkspaces) as Workspace[])
       .map(normalizeWorkspace)
-      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+      .sort((left, right) =>
+        (left.parentId ?? "").localeCompare(right.parentId ?? "") ||
+        left.order - right.order ||
+        left.createdAt.localeCompare(right.createdAt),
+      );
   }
 
   getById(id: string) {

@@ -8,6 +8,7 @@ import { BrowserKnowledgeCardStorage } from "@/infrastructure/storage/browser-kn
 import { BrowserConversationStorage } from "@/infrastructure/storage/browser-conversation-storage";
 import { BrowserMessageStorage } from "@/infrastructure/storage/browser-message-storage";
 import { MessageToRoundMigrationService } from "@/core/services/message-to-round-migration";
+import { BrowserAppEventLogStorage } from "@/infrastructure/storage/browser-feedback-storage";
 
 type RoundWorkspaceProps = {
   conversationId: string;
@@ -75,6 +76,7 @@ export function RoundWorkspace({ conversationId, onAnalyzeRound }: RoundWorkspac
       answer: "",
       messageIds: [],
     });
+    new BrowserAppEventLogStorage().record("round created", round.id, conversationId);
     reload();
     startEditing(round);
   }

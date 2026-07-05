@@ -34,6 +34,7 @@ function normalizeAsset(value: unknown): Asset | null {
       typeof asset.originalName === "string" && asset.originalName
         ? asset.originalName
         : asset.filename,
+    status: asset.status === "ok" || asset.status === "missing" ? asset.status : "unknown",
     createdAt,
     updatedAt:
       typeof asset.updatedAt === "string" ? asset.updatedAt : createdAt,
