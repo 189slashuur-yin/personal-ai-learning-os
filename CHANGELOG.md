@@ -2,6 +2,8 @@
 
 本文件记录当前仓库已经完成的 Sprint 与关键提交。日期使用仓库 commit date。
 
+当前口径：Current Version 为 v0.9 draft；Current Focus 为 Data Foundation & Search stabilization and manual QA；Next Recommended Phase 为 v1.0 planning。
+
 ## 2026-07-05 — v0.9 Draft: Data Foundation & Search
 
 状态：Part 0–9 已实现，自动门禁执行完成；手工 QA 待执行，未创建 Git commit。
@@ -11,6 +13,8 @@
 - 新增 Asset metadata Entity / Contract / BrowserStorage / Service 与 Conversation Assets UI。
 - 新增项目文档/data 手动备份脚本，以及 Settings / Help Data Management 说明。
 - 降低 Conversation Task 入口优先级；未增强 Task 催办能力。
+- 新增 Release Review、50 条 Manual QA Execution Plan、Architecture Risk Review 与 v1.0 Product Backlog；人工测试仍待实际执行。
+- Review 发现 Conversation copy/delete 尚未协调 Asset metadata：删除会留下 orphan，复制不会复制 metadata；作为 release blocker 待后续实现任务处理，本轮未修改业务代码。
 - 未实现 RAG、Embedding、Agent、Calendar、Reminder、Cloud Sync、数据库迁移或真实云 Provider API。
 
 ## 2026-07-04 — v0.8 Draft: Product Onboarding + Conversation Q&A Pair UX

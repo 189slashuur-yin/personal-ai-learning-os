@@ -48,5 +48,31 @@ export class AssetService {
   removeMetadata(id: string): void {
     this.storage.remove(id);
   }
-}
 
+  removeForEntity(entityType: AssetEntityType, entityId: string): void {
+    this.storage
+      .getByEntity(entityType, entityId)
+      .forEach((asset) => this.storage.remove(asset.id));
+  }
+
+  duplicateForEntity(
+    entityType: AssetEntityType,
+    sourceEntityId: string,
+    targetEntityId: string,
+  ): Asset[] {
+    const timestamp = new Date().toISOString();
+
+    return this.storage.getByEntity(entityType, sourceEntityId).map((asset) => {
+      const duplicatedAsset: Asset = {
+        ...asset,
+        id: `asset-${crypto.randomUUID()}`,
+        entityId: targetEntityId,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      };
+
+      this.storage.save(duplicatedAsset);
+      return duplicatedAsset;
+    });
+  }
+}

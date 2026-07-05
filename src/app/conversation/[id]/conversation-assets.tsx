@@ -66,7 +66,8 @@ export function ConversationAssets({ conversationId }: { conversationId: string 
         <p className="detail-kicker">02 · Local Assets</p>
         <h2 className="detail-title">Assets</h2>
         <p className="detail-description">
-          浏览器版本只记录文件路径和 metadata；不会复制、上传或读取本机文件。
+          浏览器版本只记录文件路径和 metadata；不会复制、上传或读取本机文件。删除
+          Conversation 会删除其 Asset metadata，但不会删除真实本地文件。
         </p>
       </div>
       <div className="rounded-xl border border-zinc-200 bg-white p-5">

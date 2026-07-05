@@ -1,4 +1,5 @@
 import type { AnalyzerRunStorage } from "@/core/contracts/analyzer-run-storage";
+import type { AssetStorage } from "@/core/contracts/asset-storage";
 import type { ConversationStorage } from "@/core/contracts/conversation-storage";
 import type { ConversationVersionStorage } from "@/core/contracts/conversation-version-storage";
 import type { KnowledgeCardStorage } from "@/core/contracts/knowledge-card-storage";
@@ -6,6 +7,7 @@ import type { MessageStorage } from "@/core/contracts/message-storage";
 import type { ProposalStorage } from "@/core/contracts/proposal-storage";
 import type { SourceStorage } from "@/core/contracts/source-storage";
 import type { Conversation } from "@/core/entities/conversation";
+import { AssetService } from "@/core/services/asset-service";
 
 export type ConversationWorkspaceStorages = {
   conversations: ConversationStorage;
@@ -15,7 +17,22 @@ export type ConversationWorkspaceStorages = {
   messages: MessageStorage;
   analyzerRuns?: AnalyzerRunStorage;
   versions?: ConversationVersionStorage;
+  assets?: AssetStorage;
 };
+
+function runAssetLifecycle(
+  storage: AssetStorage | undefined,
+  operation: (service: AssetService) => void,
+): void {
+  if (!storage) return;
+
+  try {
+    operation(new AssetService(storage));
+  } catch {
+    // Asset metadata is best-effort for legacy/corrupt optional storage and
+    // must not prevent the canonical Conversation operation from completing.
+  }
+}
 
 export function deleteConversationWorkspace(
   conversationId: string,
@@ -41,6 +58,9 @@ export function deleteConversationWorkspace(
   storages.messages.removeByConversationId(conversationId);
   storages.analyzerRuns?.removeByConversationId(conversationId);
   storages.versions?.removeByConversationId(conversationId);
+  runAssetLifecycle(storages.assets, (service) => {
+    service.removeForEntity("conversation", conversationId);
+  });
   storages.conversations.remove(conversationId);
 }
 
@@ -145,6 +165,14 @@ export function duplicateConversationWorkspace(
       proposalId: duplicatedProposalId,
       createdAt: timestamp,
     });
+  });
+
+  runAssetLifecycle(storages.assets, (service) => {
+    service.duplicateForEntity(
+      "conversation",
+      conversationId,
+      duplicatedConversation.id,
+    );
   });
 
   return duplicatedConversation;

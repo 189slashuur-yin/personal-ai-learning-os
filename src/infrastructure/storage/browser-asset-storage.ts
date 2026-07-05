@@ -7,6 +7,39 @@ import {
 
 const ASSETS_KEY = "ai-learning-os.assets";
 
+function normalizeAsset(value: unknown): Asset | null {
+  if (!value || typeof value !== "object") return null;
+
+  const asset = value as Partial<Asset>;
+  if (
+    typeof asset.id !== "string" ||
+    typeof asset.entityId !== "string" ||
+    typeof asset.filename !== "string" ||
+    typeof asset.entityType !== "string" ||
+    !assetEntityTypes.includes(asset.entityType as AssetEntityType)
+  ) {
+    return null;
+  }
+
+  const createdAt =
+    typeof asset.createdAt === "string" ? asset.createdAt : "";
+
+  return {
+    ...asset,
+    id: asset.id,
+    entityType: asset.entityType as AssetEntityType,
+    entityId: asset.entityId,
+    filename: asset.filename,
+    originalName:
+      typeof asset.originalName === "string" && asset.originalName
+        ? asset.originalName
+        : asset.filename,
+    createdAt,
+    updatedAt:
+      typeof asset.updatedAt === "string" ? asset.updatedAt : createdAt,
+  };
+}
+
 export class BrowserAssetStorage implements AssetStorage {
   save(asset: Asset): void {
     const assets = this.getAll();
@@ -20,18 +53,18 @@ export class BrowserAssetStorage implements AssetStorage {
     const stored = window.localStorage.getItem(ASSETS_KEY);
     if (!stored) return [];
 
-    return (JSON.parse(stored) as Asset[])
-      .filter(
-        (asset) =>
-          typeof asset.id === "string" &&
-          typeof asset.entityId === "string" &&
-          assetEntityTypes.includes(asset.entityType),
-      )
-      .map((asset) => ({
-        ...asset,
-        originalName: asset.originalName || asset.filename,
-        updatedAt: asset.updatedAt ?? asset.createdAt,
-      }))
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(stored);
+    } catch {
+      return [];
+    }
+
+    if (!Array.isArray(parsed)) return [];
+
+    return parsed
+      .map(normalizeAsset)
+      .filter((asset): asset is Asset => asset !== null)
       .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
   }
 
@@ -53,4 +86,3 @@ export class BrowserAssetStorage implements AssetStorage {
     window.localStorage.setItem(ASSETS_KEY, JSON.stringify(assets));
   }
 }
-

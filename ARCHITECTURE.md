@@ -1,5 +1,13 @@
 # Architecture
 
+## Current release context
+
+- Current Version：v0.9 draft
+- Current Focus：Data Foundation & Search stabilization and manual QA
+- Next Recommended Phase：v1.0 planning
+
+当前架构结论仍受单浏览器、小数据量与 LocalStorage 边界约束。v1.0 候选必须先完成范围和验收评审，不能从本文的演进 seam 推定为已批准实现。
+
 ## v0.9 Data Foundation & Search baseline
 
 v0.9 新增运行时 `SearchDocument` 读模型与 `SearchIndexService`，从 Workspace、Conversation、Source、Message、派生 Q&A Pair、Proposal、KnowledgeCard、Task、Tag 构建全文文档。索引不持久化、不拥有源数据；搜索使用标准化 contains、简单评分与低权重 subsequence fuzzy，并返回 snippet、matched fields、Workspace 和来源路径。

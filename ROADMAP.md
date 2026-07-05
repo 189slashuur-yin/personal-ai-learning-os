@@ -4,10 +4,11 @@
 
 ## Current release
 
-- Version：v0.9 draft
+- Current Version：v0.9 draft
 - Phase：Phase2
 - Current Epic：Epic D（Completed）
-- Release theme：Data Foundation & Search；实现完成，手工 QA 待执行。
+- Current Focus：Data Foundation & Search；实现完成，手工 QA 待执行。
+- Next Recommended Phase：v1.0 planning（范围与验收标准待批准）。
 
 ## v0.9 — Data Foundation & Search
 
@@ -42,7 +43,7 @@
 | Epic | 状态 | 范围 |
 | --- | --- | --- |
 | Epic D | 已完成 | Task Domain、Today / Task UI、Source-linked Task、Task Search 与 v0.7 稳定化。 |
-| Epic E | 建议下一步 | Knowledge Productivity；开始前确认范围与验收标准。 |
+| Epic E | v1.0 候选 | Knowledge Productivity；只考虑一个受控最小切片，开始前确认范围与验收标准。 |
 | Epic F | 未开始 | 待产品负责人确认范围与验收标准。 |
 
 ## Epic D — Task / Productivity Layer（Completed）
@@ -57,9 +58,9 @@
 - AI 只能建议 Task；不能直接 Create / Complete / Delete Task。
 - Task UI 与 Search 仍是单浏览器、小数据量的本地线性读取；Task 结果按标题跳到 `/tasks`，暂不按 ID 精确定位。
 
-## Next suggestion — Epic E Knowledge Productivity
+## v1.0 planning candidate — Epic E Knowledge Productivity
 
-下一版本建议评估 Knowledge Productivity，优先改善 Knowledge 的复习、组织与复用体验。范围、数据模型和验收标准需单独批准；不得默认扩展到 Activity、Agent、RAG、Calendar 或自动化。
+v1.0 planning 可评估 Knowledge Productivity，优先改善 Knowledge 的复习、组织与复用体验。它不是唯一或默认的下一项；Local Data Export / Import 与 Search Precision / Anchors 应一并评审。范围、数据模型和验收标准需单独批准；不得默认扩展到 Activity、Agent、RAG、Calendar 或自动化。
 
 正式范围和验收序列见 [docs/design/Epic-D-Design.md](./docs/design/Epic-D-Design.md)，领域决策见 [RFC-003](./docs/rfc/RFC-003-task-domain.md)。
 

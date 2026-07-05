@@ -1,4 +1,113 @@
-# v0.9 Draft — Data Foundation & Search Handoff
+# v0.9 Release Blocker Fix — Asset owner lifecycle
+
+## 当前状态
+
+Conversation / Asset owner lifecycle 的已知 release blocker 已完成代码修复与文档同步。复制 Conversation 现在会复制其 Asset metadata，为每条副本生成新 ID，并将 `entityId` 指向新 Conversation；删除 Conversation 会删除其关联 Asset metadata。两项操作都不会复制、读取或删除真实文件，也不会影响 Knowledge、Task 或 Workspace 的 Asset metadata。版本仍为 v0.9 draft，等待 EDGE-12 与完整人工 QA。
+
+## Part 1 / 2 / 3 完成情况
+
+- Part 1 — Lifecycle：`AssetService` 新增按 owner 删除和复制 metadata 的规则；副本保留文件名、原始名称、路径、备注、hash、MIME 与 size，并刷新 ID、owner 和时间。
+- Part 2 — Service 集成：Conversation Workspace Service 通过可选 `AssetStorage` 协调 delete / duplicate；BrowserAssetStorage 对缺失、非数组、损坏 JSON 和异常记录安全降级，Asset 异常不会阻断 Conversation 主操作。
+- Part 3 — UI / 文档 / QA：Conversation Detail 明确删除 owner 只删除 metadata、不删除真实文件；EDGE-12 更新为 copy + delete blocker 复测；两份 Review 已记录 blocker 修复状态。
+
+## 新增文件
+
+- 无。
+
+## 修改文件
+
+- `src/core/services/asset-service.ts`
+- `src/core/services/conversation-workspace.ts`
+- `src/infrastructure/storage/browser-asset-storage.ts`
+- `src/app/conversation/conversation-list.tsx`
+- `src/app/conversation/[id]/conversation-assets.tsx`
+- `docs/qa/V09-MANUAL-QA-PLAN.md`
+- `docs/reviews/Release-v0.9-Review.md`
+- `docs/reviews/Architecture-Risk-Review-v0.9.md`
+- `HANDOFF.md`
+
+## 手动复测步骤
+
+1. 在 Conversation A 登记至少两条 Asset metadata，分别包含路径、备注，并用只读 Application 面板记录 ID；如使用 fixture，再覆盖 originalName、hash、MIME 与 size。
+2. 另建 Knowledge、Task、Workspace owner 的 Asset metadata 作为隔离样本。
+3. 复制 Conversation A，确认副本 Asset 数量一致、每条 ID 全新、`entityId` 指向副本 Conversation，且 metadata 字段保持；确认未复制或读取真实文件。
+4. 删除原 Conversation A，确认其 Asset metadata 被清理；副本和 Knowledge、Task、Workspace metadata 保留，真实本地文件仍存在。
+5. 用无 Asset key、缺字段记录、非数组 JSON 与损坏 Asset JSON 的旧数据 profile 分别执行复制/删除，确认 Conversation 主操作不白屏且其它集合未被清空。
+6. 按 `docs/qa/V09-MANUAL-QA-PLAN.md` 执行更新后的 EDGE-12，再继续完整 release-blocking 人工 QA。
+
+## Release blocker 与 commit 建议
+
+- 已知 Asset owner lifecycle release blocker：已修复，等待 EDGE-12 人工复测确认。
+- 其它 release blocker：当前代码/文档核查未发现；完整人工 QA 尚未执行，因此不能声明 release-ready。
+- Commit：本轮按要求未创建。建议 EDGE-12 及完整阻塞项人工 QA 通过后，再创建聚焦的 v0.9 stabilization commit。
+
+## 质量检查
+
+- Part 1：`npm run lint`、`npm run build`、`git diff --check` 通过。
+- Part 2：`npm run lint`、`npm run build`、`git diff --check` 通过。
+- Part 3：`npm run lint`、`npm run build`、`git diff --check` 通过。
+- 最终：`npm run lint`、`npm run build`、`git diff --check` 通过。
+
+---
+
+# Previous Handoff — v0.9 Release Stabilization & QA Review
+
+## 当前状态
+
+- Current Version：v0.9 draft
+- Current Focus：Data Foundation & Search stabilization and manual QA
+- Next Recommended Phase：v1.0 planning
+- Release Review 结论：v0.9 数据与搜索主目标基本满足，但只读核查发现 Conversation copy/delete 未协调 Asset metadata；删除会留下 UI 不可达的 orphan，复制不会带入 metadata。该问题与尚未执行的 50 条人工 QA 共同阻塞正式发布，因此继续保持 draft。
+- 本轮仅新增/修改文档；未修改 `src/`、package，未删除文件，未创建 commit。
+
+## Part 1–5 完成情况
+
+- Part 1 — Release Review：完成 `Release-v0.9-Review.md`，覆盖 v0.9 范围、数据/搜索架构、Note、SearchDocument、fuzzy、Asset、备份、Data Management、限制、技术债与目标判断。
+- Part 2 — Manual QA Execution Plan：完成 10 条 Smoke、20 条 Regression、20 条 Edge Case；每条均含操作、预期、失败影响、release blocker 与人工/自动化标记。
+- Part 3 — v1.0 Product Backlog：完成非目标、必须解决问题和五个候选 Epic；推荐 Export / Import 与 Search Anchors，限制 Asset 托管与真实云 Provider 扩张。
+- Part 4 — Architecture Risk Review：完成稳定边界、失控点、LocalStorage、Asset、Search、Provider、数据库迁移及修复顺序评审。
+- Part 5 — Documentation Consistency Check：统一 README、PROJECT、ARCHITECTURE、ROADMAP、CHANGELOG、HANDOFF 的版本、当前重点与下一阶段口径。
+
+## 新增文件
+
+- `docs/reviews/Release-v0.9-Review.md`
+- `docs/qa/V09-MANUAL-QA-PLAN.md`
+- `docs/design/V1.0-Product-Backlog.md`
+- `docs/reviews/Architecture-Risk-Review-v0.9.md`
+
+## 修改文件
+
+- `README.md`
+- `PROJECT.md`
+- `ARCHITECTURE.md`
+- `ROADMAP.md`
+- `CHANGELOG.md`
+- `HANDOFF.md`
+
+## 范围确认
+
+- 没有修改 `src/`。
+- 没有修改 `package.json`、lockfile 或依赖。
+- 没有新增业务功能或运行时行为。
+- 没有删除文件。
+- 没有创建 commit 或推送。
+- 只读检查了 Asset Service、BrowserAssetStorage 与 Conversation Workspace Service，用于确认 blocker；没有修改业务代码。
+
+## 检查结果
+
+- Part 1：`npm run lint`、`npm run build`、`git diff --check` 通过。
+- Part 2：`npm run lint`、`npm run build`、`git diff --check` 通过。
+- Part 3：`npm run lint`、`npm run build`、`git diff --check` 通过。
+- Part 4：`npm run lint`、`npm run build`、`git diff --check` 通过。
+- Part 5 最终：`npm run lint`、`npm run build`、`git diff --check` 通过。
+- 首次 Part 1 build 在受限沙箱内因 Turbopack 无法绑定本地端口失败；使用相同 `npm run build` 在允许构建的环境重跑后通过。Part 5 首次 build 又遇到 `.next` 增量目录瞬时 `ENOTEMPTY`，未删除文件，原命令重跑后通过；各 Part 最终 build 结果均通过。
+- 这些是自动质量门禁结果，不代表 50 条人工 QA 已执行。
+
+## 明天建议先做什么
+
+明天先为 Conversation copy/delete 与 Asset metadata 生命周期单独确认产品语义和验收标准：建议删除 owner 时只清理 metadata、绝不删除外部文件；复制是否复制 metadata 引用需明确决定。完成对应业务代码任务后，先复测 EDGE-12，再按 `docs/qa/V09-MANUAL-QA-PLAN.md` 在全新浏览器 profile 执行 SMK-01–10。Smoke 全过后再进入旧数据 Regression 和异常 profile Edge Case；任何数据丢失、失败写 Proposal、删除本地文件、旧数据清空或误导完整备份的问题都应立即阻塞 release。全部阻塞项通过后，再决定把版本从 `v0.9 draft` 切为 `v0.9`，并召开 v1.0 planning 范围评审。
+
+# Previous Handoff — v0.9 Draft Data Foundation & Search
 
 ## 当前状态
 

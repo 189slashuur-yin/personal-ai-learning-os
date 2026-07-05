@@ -12,6 +12,7 @@ import {
 import { BrowserConversationStorage } from "@/infrastructure/storage/browser-conversation-storage";
 import { BrowserConversationVersionStorage } from "@/infrastructure/storage/browser-conversation-version-storage";
 import { BrowserAnalyzerRunStorage } from "@/infrastructure/storage/browser-analyzer-run-storage";
+import { BrowserAssetStorage } from "@/infrastructure/storage/browser-asset-storage";
 import { BrowserKnowledgeCardStorage } from "@/infrastructure/storage/browser-knowledge-card-storage";
 import { BrowserMessageStorage } from "@/infrastructure/storage/browser-message-storage";
 import { BrowserProposalStorage } from "@/infrastructure/storage/browser-proposal-storage";
@@ -39,6 +40,7 @@ function createWorkspaceStorages(): ConversationWorkspaceStorages {
     messages: new BrowserMessageStorage(),
     analyzerRuns: new BrowserAnalyzerRunStorage(),
     versions: new BrowserConversationVersionStorage(),
+    assets: new BrowserAssetStorage(),
   };
 }
 
@@ -109,7 +111,7 @@ export function ConversationList() {
 
   function handleDelete(conversation: Conversation) {
     const confirmed = window.confirm(
-      `确定删除「${conversation.title}」吗？关联的 Messages、Source、Proposal、KnowledgeCard、AnalyzerRun 与 Conversation Snapshot 也会删除；关联 Task 会保留，并显示 source missing。`,
+      `确定删除「${conversation.title}」吗？关联的 Messages、Source、Proposal、KnowledgeCard、AnalyzerRun、Conversation Snapshot 与 Asset metadata 也会删除；真实本地文件不会删除，关联 Task 会保留并显示 source missing。`,
     );
 
     if (!confirmed) {
