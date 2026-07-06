@@ -190,6 +190,14 @@ export function ConversationDetail({
   const [latestAnalyzerRun, setLatestAnalyzerRun] =
     useState<AnalyzerRun | null>(null);
   const [analyzeProviderId, setAnalyzeProviderId] = useState("demo");
+  const [analyzerElapsed, setAnalyzerElapsed] = useState(0);
+  const analyzerTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // K3: Summary undo/redo
+  const [summaryUndoStack, setSummaryUndoStack] = useState<string[]>([]);
+  const [summaryRedoStack, setSummaryRedoStack] = useState<string[]>([]);
+  const [summaryModified, setSummaryModified] = useState(false);
+  const [summaryLastSaved, setSummaryLastSaved] = useState<string | null>(null);
   const [providerDetails] = useState<{
     id: string;
     name: string;
@@ -454,14 +462,53 @@ export function ConversationDetail({
           ? 4
           : 2;
   const flowSteps = [
-    "导入",
-    "浏览 Rounds",
-    "写 Summary/Note",
-    "可选 Analyze",
-    "可选 Review",
-    "Knowledge",
-    "Search",
+    { label: "导入", href: "/import" },
+    { label: "浏览 Rounds", anchor: "section-rounds" },
+    { label: "写 Summary/Note", anchor: "section-summary" },
+    { label: "可选 Analyze", anchor: "section-proposal" },
+    { label: "可选 Review", href: "/review" },
+    { label: "Knowledge", anchor: "section-knowledge" },
+    { label: "Search", href: "/search" },
   ];
+
+  function scrollToAnchor(anchorId: string) {
+    const element = document.getElementById(anchorId);
+    if (element) {
+      element.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }
+
+  // K3: Summary undo/redo
+  function pushSummaryUndo(value: string) {
+    setSummaryUndoStack((prev) => [...prev.slice(-19), value]);
+    setSummaryRedoStack([]);
+  }
+
+  function undoSummary() {
+    if (summaryUndoStack.length === 0) return;
+    const previous = summaryUndoStack[summaryUndoStack.length - 1];
+    setSummaryRedoStack((prev) => [...prev, summaryDraft]);
+    setSummaryUndoStack((prev) => prev.slice(0, -1));
+    setSummaryDraft(previous);
+    setSummaryModified(true);
+  }
+
+  function redoSummary() {
+    if (summaryRedoStack.length === 0) return;
+    const next = summaryRedoStack[summaryRedoStack.length - 1];
+    setSummaryUndoStack((prev) => [...prev, summaryDraft]);
+    setSummaryRedoStack((prev) => prev.slice(0, -1));
+    setSummaryDraft(next);
+    setSummaryModified(true);
+  }
+
+  function resetSummary() {
+    if (state.status !== "ready") return;
+    const original = state.conversation.summary ?? "";
+    pushSummaryUndo(original);
+    setSummaryDraft(original);
+    setSummaryModified(false);
+  }
 
   async function runSourceAnalyzer(simulateFailure = false) {
     if (state.status !== "ready" || !state.source) {
@@ -469,11 +516,15 @@ export function ConversationDetail({
     }
 
     setAnalyzerSuccess(null);
+    setAnalyzerElapsed(0);
+    if (analyzerTimerRef.current) clearInterval(analyzerTimerRef.current);
+    analyzerTimerRef.current = setInterval(() => setAnalyzerElapsed((prev) => prev + 1), 1000);
     setLatestAnalyzerRun({ id: "pending", conversationId: state.conversation.id, sourceId: state.source.id, providerId: providerDetails.id, providerName: providerDetails.name, status: "running", startedAt: new Date().toISOString() });
     new BrowserAppEventLogStorage().record("analyze started", state.conversation.id, analyzeProviderId);
     const result = await createAnalyzerExecutionService(analyzeProviderId).runSource(state.source, {
       simulateRecoverableError: simulateFailure,
     });
+    if (analyzerTimerRef.current) { clearInterval(analyzerTimerRef.current); analyzerTimerRef.current = null; }
     setLatestAnalyzerRun(result.run);
 
     if (!result.proposal) {
@@ -1085,12 +1136,21 @@ export function ConversationDetail({
 
   return (
     <main className="workspace-shell pb-24">
-      <Link
-        className="text-sm font-medium text-zinc-500 hover:text-zinc-900"
-        href="/conversation"
-      >
-        ← Conversation
-      </Link>
+      <div className="flex flex-wrap items-center gap-3">
+        <Link
+          className="text-sm font-medium text-zinc-500 hover:text-zinc-900"
+          href="/conversation"
+        >
+          ← Conversation
+        </Link>
+        <button
+          className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs font-semibold text-zinc-600 hover:border-zinc-300 hover:text-zinc-950"
+          onClick={() => scrollToAnchor("section-rounds")}
+          type="button"
+        >
+          ↓ 当前 Rounds
+        </button>
+      </div>
 
       <header className="mt-8 border-b border-zinc-200 pb-8">
         <div className="flex flex-wrap items-start justify-between gap-5">
@@ -1183,17 +1243,44 @@ export function ConversationDetail({
           <Link className="text-xs font-semibold text-sky-900 underline" href="/help">查看操作手册</Link>
         </div>
         <ol className="mt-4 grid gap-2 sm:grid-cols-4 lg:grid-cols-7">
-          {flowSteps.map((label, index) => {
-            const step = index + 1;
-            const active = step === activeFlowStep;
-            const completed = step < activeFlowStep;
+          {flowSteps.map((step, index) => {
+            const stepNum = index + 1;
+            const active = stepNum === activeFlowStep;
+            const completed = stepNum < activeFlowStep;
+            const isLink = "href" in step;
+            const isAnchor = "anchor" in step;
+            const className = `rounded-lg border px-3 py-3 text-xs font-semibold cursor-pointer transition-colors ${active ? "border-sky-600 bg-white text-sky-950 shadow-sm ring-2 ring-sky-200" : completed ? "border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100" : "border-sky-100 bg-sky-100/60 text-sky-700 hover:bg-sky-200/60"}`;
+
+            if (isLink && step.href) {
+              return (
+                <li key={step.label}>
+                  <Link className={className} href={step.href}>
+                    <span className="block text-[10px] uppercase tracking-wider">Step {stepNum}</span>
+                    <span className="mt-1 block">{step.label} →</span>
+                  </Link>
+                </li>
+              );
+            }
+
+            if (isAnchor && step.anchor) {
+              return (
+                <li key={step.label}>
+                  <button
+                    className={className}
+                    onClick={() => scrollToAnchor(step.anchor!)}
+                    type="button"
+                  >
+                    <span className="block text-[10px] uppercase tracking-wider">Step {stepNum}</span>
+                    <span className="mt-1 block">{step.label} ↓</span>
+                  </button>
+                </li>
+              );
+            }
+
             return (
-              <li
-                className={`rounded-lg border px-3 py-3 text-xs font-semibold ${active ? "border-sky-600 bg-white text-sky-950 shadow-sm ring-2 ring-sky-200" : completed ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-sky-100 bg-sky-100/60 text-sky-700"}`}
-                key={label}
-              >
-                <span className="block text-[10px] uppercase tracking-wider">Step {step}</span>
-                <span className="mt-1 block">{label}</span>
+              <li className={className} key={step.label}>
+                <span className="block text-[10px] uppercase tracking-wider">Step {stepNum}</span>
+                <span className="mt-1 block">{step.label}</span>
               </li>
             );
           })}
@@ -1488,16 +1575,22 @@ export function ConversationDetail({
         </div>
       </section>
 
-      <section className="detail-section"><div className="detail-section-heading"><p className="detail-kicker">Summary</p><h2 className="detail-title">Conversation Summary</h2><p className="detail-description">总结、最终结论与待确认点由你确认后保存；Analyzer 只生成 Proposal 草稿。</p></div><div className="rounded-xl border border-zinc-200 bg-white p-5"><div className="grid gap-4 lg:grid-cols-3"><label className="text-sm font-semibold">总结<textarea className="mt-2 min-h-28 w-full rounded-lg border border-zinc-200 p-3 font-normal" onChange={(event) => setSummaryDraft(event.target.value)} value={summaryDraft} /></label><label className="text-sm font-semibold">最终结论<textarea className="mt-2 min-h-28 w-full rounded-lg border border-zinc-200 p-3 font-normal" onChange={(event) => setConclusionDraft(event.target.value)} value={conclusionDraft} /></label><label className="text-sm font-semibold">待确认点<textarea className="mt-2 min-h-28 w-full rounded-lg border border-zinc-200 p-3 font-normal" onChange={(event) => setPendingQuestionsDraft(event.target.value)} value={pendingQuestionsDraft} /></label></div><div className="mt-4 flex flex-wrap gap-3"><button className="rounded-lg bg-zinc-950 px-4 py-2.5 text-sm font-semibold text-white" onClick={saveConversationSummary} type="button">确认保存</button><button className="rounded-lg border border-zinc-200 px-4 py-2.5 text-sm font-semibold" onClick={runConversationSummaryAnalyzer} type="button">从所有 Rounds 生成 Summary Proposal</button></div></div></section>
+      <section className="detail-section" id="section-summary"><div className="detail-section-heading"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="detail-kicker">Summary</p><h2 className="detail-title">Conversation Summary</h2><p className="detail-description">总结、最终结论与待确认点由你确认后保存；Analyzer 只生成 Proposal 草稿。</p></div><div className="flex flex-wrap items-center gap-2 text-xs">{summaryModified ? <span className="rounded-full bg-amber-100 px-2.5 py-1 font-semibold text-amber-800">● Modified</span> : summaryLastSaved ? <span className="rounded-full bg-emerald-100 px-2.5 py-1 font-semibold text-emerald-800">● Saved {summaryLastSaved}</span> : null}{proposals.length > 0 ? <span className="rounded-full bg-sky-100 px-2.5 py-1 font-semibold text-sky-800">Proposal Available</span> : null}{!summaryDraft.trim() && !conclusionDraft.trim() && !pendingQuestionsDraft.trim() ? <span className="rounded-full bg-zinc-100 px-2.5 py-1 font-semibold text-zinc-600">Draft</span> : null}</div></div></div><div className="rounded-xl border border-zinc-200 bg-white p-5"><div className="mb-3 flex flex-wrap items-center gap-2"><button className="rounded-md border border-zinc-200 bg-white px-2.5 py-1.5 text-xs font-medium text-zinc-600 hover:bg-zinc-50 disabled:opacity-30" disabled={summaryUndoStack.length === 0} onClick={undoSummary} type="button" title="撤销">↩ Undo</button><button className="rounded-md border border-zinc-200 bg-white px-2.5 py-1.5 text-xs font-medium text-zinc-600 hover:bg-zinc-50 disabled:opacity-30" disabled={summaryRedoStack.length === 0} onClick={redoSummary} type="button" title="重做">↪ Redo</button><button className="rounded-md border border-zinc-200 bg-white px-2.5 py-1.5 text-xs font-medium text-zinc-600 hover:bg-zinc-50" onClick={resetSummary} type="button" title="重置为已保存版本">⟳ Reset</button><span className="text-xs text-zinc-400">| Auto-save on</span></div><div className="grid gap-4 lg:grid-cols-3"><label className="text-sm font-semibold">总结<textarea className="mt-2 min-h-28 w-full rounded-lg border border-zinc-200 p-3 font-normal" onChange={(event) => { pushSummaryUndo(event.target.value); setSummaryDraft(event.target.value); setSummaryModified(true); }} value={summaryDraft} /></label><label className="text-sm font-semibold">最终结论<textarea className="mt-2 min-h-28 w-full rounded-lg border border-zinc-200 p-3 font-normal" onChange={(event) => setConclusionDraft(event.target.value)} value={conclusionDraft} /></label><label className="text-sm font-semibold">待确认点<textarea className="mt-2 min-h-28 w-full rounded-lg border border-zinc-200 p-3 font-normal" onChange={(event) => setPendingQuestionsDraft(event.target.value)} value={pendingQuestionsDraft} /></label></div><div className="mt-4 flex flex-wrap gap-3"><button className="rounded-lg bg-zinc-950 px-4 py-2.5 text-sm font-semibold text-white" onClick={() => { saveConversationSummary(); setSummaryModified(false); setSummaryLastSaved(new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })); }} type="button">确认保存</button><button className="rounded-lg border border-zinc-200 px-4 py-2.5 text-sm font-semibold" onClick={runConversationSummaryAnalyzer} type="button">从所有 Rounds 生成 Summary Proposal</button></div></div></section>
 
-      {detailMode === "workspace" ? <ConversationWorkspaceMode conversationId={conversationId} onAnalyzeRound={runRoundAnalyzer} /> : <RoundWorkspace conversationId={conversationId} onAnalyzeRound={runRoundAnalyzer} />}
+      <div id="section-rounds">
+        {detailMode === "workspace" ? <ConversationWorkspaceMode conversationId={conversationId} onAnalyzeRound={runRoundAnalyzer} /> : <RoundWorkspace conversationId={conversationId} onAnalyzeRound={runRoundAnalyzer} />}
+      </div>
 
       <section className="detail-section">
         <div className="detail-section-heading">
-          <p className="detail-kicker">06 · 高级 / 原始数据（日常不用）</p>
+          <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            <p className="font-semibold">⚠️ 高级功能区域 — 日常整理不需要进入此区域</p>
+            <p className="mt-1 text-xs">这是底层原始数据。日常阅读、整理、编辑请使用上方的 Rounds。仅在需要核对原始内容或修复数据时使用。</p>
+          </div>
+          <p className="detail-kicker">06 · 高级 / 原始数据</p>
           <h2 className="detail-title">Message Timeline / Raw Data</h2>
           <p className="detail-description">
-            底层原始数据，属于高级纠错区，日常整理用 Round 即可。默认折叠；旧 Message / Q&amp;A Pair 功能继续可用。
+            底层原始数据，属于高级纠错区。默认折叠。点击 Preview 快速预览前 {PREVIEW_MESSAGE_COUNT} 条，Full 展开全部。
           </p>
         </div>
         <div className="mb-4 flex flex-wrap items-center gap-2">
@@ -1965,7 +2058,7 @@ export function ConversationDetail({
         )}
       </section>
 
-      <section className="detail-section">
+      <section className="detail-section" id="section-proposal">
         <div className="detail-section-heading">
           <p className="detail-kicker">06 · AI 整理建议（可选，不是必经流程）</p>
           <h2 className="detail-title">Proposal / 整理建议</h2>
@@ -2004,12 +2097,15 @@ export function ConversationDetail({
           </div>
         </div>
         {latestAnalyzerRun ? (
-          <div className="mb-5 rounded-lg border border-zinc-200 bg-zinc-50 p-4 text-sm">
-            <p className="font-medium text-zinc-900">
-              最近 AnalyzerRun：{latestAnalyzerRun.status}
-            </p>
+          <div className={`mb-5 rounded-lg border p-4 text-sm ${latestAnalyzerRun.status === "running" ? "border-sky-200 bg-sky-50" : latestAnalyzerRun.status === "completed" ? "border-emerald-200 bg-emerald-50" : latestAnalyzerRun.status === "failed" || latestAnalyzerRun.status === "timeout" ? "border-red-200 bg-red-50" : "border-zinc-200 bg-zinc-50"}`}>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <p className="font-medium text-zinc-900">
+                {latestAnalyzerRun.status === "running" ? "⏳ Running…" : latestAnalyzerRun.status === "completed" ? "✅ Completed" : latestAnalyzerRun.status === "failed" ? "❌ Failed" : latestAnalyzerRun.status === "timeout" ? "⏰ Timeout" : `AnalyzerRun：${latestAnalyzerRun.status}`}
+              </p>
+              {latestAnalyzerRun.status === "running" ? <span className="rounded-full bg-sky-200 px-2.5 py-0.5 text-xs font-semibold text-sky-800">Elapsed: {analyzerElapsed}s</span> : null}
+            </div>
             <p className="mt-1 text-xs text-zinc-500">
-              {latestAnalyzerRun.providerName} · {latestAnalyzerRun.startedAt}
+              Provider: {latestAnalyzerRun.providerName} · {latestAnalyzerRun.startedAt ? new Date(latestAnalyzerRun.startedAt).toLocaleTimeString("zh-CN") : "—"}
             </p>
             {latestAnalyzerRun.latencyMs !== undefined ? <p className="mt-1 text-xs text-zinc-500">Latency: {latestAnalyzerRun.latencyMs} ms</p> : null}
             {latestAnalyzerRun.error ? (
@@ -2028,6 +2124,7 @@ export function ConversationDetail({
               </button>
             ) : null}
             {(latestAnalyzerRun.status === "failed" || latestAnalyzerRun.status === "timeout") ? <div className="mt-3 flex flex-wrap gap-2"><button className="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-xs font-semibold" onClick={switchToDemo} type="button">Switch to Demo</button><Link className="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-xs font-semibold" href="/settings">Increase Timeout</Link></div> : null}
+            {latestAnalyzerRun.status === "completed" ? <div className="mt-3 flex flex-wrap gap-2"><Link className="rounded-lg bg-zinc-950 px-3.5 py-2 text-xs font-semibold text-white hover:bg-zinc-800" href="/review">Open Proposal</Link><Link className="rounded-lg border border-zinc-300 bg-white px-3.5 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-50" href="/review">Review Proposal</Link></div> : null}
           </div>
         ) : null}
         {analyzerSuccess ? (
@@ -2059,7 +2156,7 @@ export function ConversationDetail({
         <ProposalWorkspace proposals={proposals} onDelete={deleteProposal} />
       </section>
 
-      <section className="detail-section">
+      <section className="detail-section" id="section-knowledge">
         <div className="detail-section-heading">
           <p className="detail-kicker">07 · Knowledge</p>
           <h2 className="detail-title">KnowledgeCard</h2>

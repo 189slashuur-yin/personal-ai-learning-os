@@ -104,7 +104,7 @@ export function ConversationWorkspaceMode({ conversationId, onAnalyzeRound }: { 
   }
 
   return (
-    <div className="mt-3 grid min-h-[620px] gap-4 xl:grid-cols-[1fr_340px]">
+    <div className="mt-3 grid min-h-[620px] gap-4 xl:grid-cols-[1fr_320px]">
       {/* Middle: Selected Round content or Round list */}
       <div className="rounded-xl border border-zinc-200 bg-white p-5">
         {selected && !showRoundList ? (
@@ -173,7 +173,7 @@ export function ConversationWorkspaceMode({ conversationId, onAnalyzeRound }: { 
         ) : (
           /* Round list view */
           <div>
-            <div className="flex flex-wrap gap-2">
+            <div className="sticky top-0 z-10 -mx-5 -mt-5 mb-4 rounded-t-xl border-b border-zinc-200 bg-white px-5 pt-5 pb-3">
               <input className="min-w-0 flex-1 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm" onChange={(event) => setQuery(event.target.value)} placeholder="搜索 Round" value={query} />
               <select className="rounded-lg border border-zinc-200 bg-white px-2 text-sm" onChange={(event) => setSort(event.target.value as "order" | "updated" | "knowledge")} value={sort}>
                 <option value="order">原始顺序</option>
