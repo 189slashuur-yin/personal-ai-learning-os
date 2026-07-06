@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import type { Workspace } from "@/core/entities/workspace";
 import {
   ChatGPTExportImportService,
+  LARGE_CONVERSATION_MESSAGE_THRESHOLD,
   type ChatGPTConversationPreview,
   type ChatGPTImportPreview,
 } from "@/core/services/chatgpt-export-import";
@@ -114,6 +115,11 @@ export function ChatGPTExportImport({
                 <span className="block font-semibold">{conversation.title}</span>
                 <span className="mt-1 block text-xs text-zinc-500">
                   {conversation.messages.length} supported Messages · {conversation.unsupportedCount} unsupported
+                  {conversation.isLarge ? (
+                    <span className="ml-1 inline-block rounded bg-amber-100 px-1.5 py-0.5 text-xs font-semibold text-amber-800">
+                      大型
+                    </span>
+                  ) : null}
                 </span>
               </button>
             ))}
@@ -133,6 +139,12 @@ export function ChatGPTExportImport({
               </dl>
               <label className="mt-4 block text-sm font-medium">Workspace / Folder<select className="mt-2 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2.5" onChange={(event) => setWorkspaceId(event.target.value)} value={workspaceId}>{workspaces.map((workspace) => <option key={workspace.id} value={workspace.id}>{workspace.name}</option>)}</select></label>
               {selected.appendOnly ? <p className="mt-4 rounded-lg bg-amber-50 p-3 text-sm text-amber-800">Append only：不会自动覆盖已有 Rounds。新增 Messages 导入后，请在 Conversation 中人工确认并手动 regenerate rounds。</p> : null}
+              {selected.isLarge ? (
+                <p className="mt-4 rounded-lg bg-amber-50 p-3 text-sm text-amber-800">
+                  ⚠️ 该 Conversation 包含 {selected.messages.length} 条 Messages（阈值 {LARGE_CONVERSATION_MESSAGE_THRESHOLD} 条），属于大型对话。
+                  导入可能需要较长时间，浏览器可能出现短暂卡顿。建议在确认前评估是否需要分批导入。
+                </p>
+              ) : null}
               <button className="mt-4 rounded-lg bg-zinc-950 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-40" disabled={!selected.newMessages || !selected.messages.length} onClick={confirmImport} type="button">{selected.appendOnly ? "增量导入新 Messages" : "导入所选 Conversation"}</button>
             </div>
           ) : null}

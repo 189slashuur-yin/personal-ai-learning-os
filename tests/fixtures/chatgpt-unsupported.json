@@ -1,0 +1,62 @@
+[
+  {
+    "id": "conv-unsupported-001",
+    "conversation_id": "conv-unsupported-001",
+    "title": "Mixed Content Chat",
+    "create_time": 1715875200,
+    "update_time": 1715880000,
+    "current_node": "node-5",
+    "mapping": {
+      "node-1": {
+        "id": "msg-user-1",
+        "parent": null,
+        "message": {
+          "id": "msg-user-1",
+          "author": { "role": "user" },
+          "content": { "content_type": "text", "parts": ["What's in this image?"] },
+          "create_time": 1715875200
+        }
+      },
+      "node-2": {
+        "id": "msg-tool-call",
+        "parent": "node-1",
+        "message": {
+          "id": "msg-tool-call",
+          "author": { "role": "tool" },
+          "content": { "content_type": "text", "parts": ["Tool call result: image analysis complete"] },
+          "create_time": 1715875260
+        }
+      },
+      "node-3": {
+        "id": "msg-system",
+        "parent": "node-2",
+        "message": {
+          "id": "msg-system",
+          "author": { "role": "system" },
+          "content": { "content_type": "text", "parts": ["Custom instructions applied."] },
+          "create_time": 1715875320
+        }
+      },
+      "node-4": {
+        "id": "msg-image",
+        "parent": "node-3",
+        "message": {
+          "id": "msg-image",
+          "author": { "role": "assistant" },
+          "content": { "content_type": "multimodal_text", "parts": ["Here is the image you requested:"] },
+          "create_time": 1715875380
+        }
+      },
+      "node-5": {
+        "id": "msg-assistant-text",
+        "parent": "node-4",
+        "message": {
+          "id": "msg-assistant-text",
+          "author": { "role": "assistant" },
+          "content": { "content_type": "text", "parts": ["I can see this is a photo of a cat sitting on a windowsill."] },
+          "create_time": 1715875440
+        }
+      }
+    }
+  }
+]

@@ -1,0 +1,42 @@
+[
+  {
+    "id": "conv-basic-001",
+    "conversation_id": "conv-basic-001",
+    "title": "Hello World Chat",
+    "create_time": 1715875200,
+    "update_time": 1715878800,
+    "current_node": "node-3",
+    "mapping": {
+      "node-1": {
+        "id": "msg-user-1",
+        "parent": null,
+        "message": {
+          "id": "msg-user-1",
+          "author": { "role": "user" },
+          "content": { "content_type": "text", "parts": ["Hello, how are you?"] },
+          "create_time": 1715875200
+        }
+      },
+      "node-2": {
+        "id": "msg-assistant-1",
+        "parent": "node-1",
+        "message": {
+          "id": "msg-assistant-1",
+          "author": { "role": "assistant" },
+          "content": { "content_type": "text", "parts": ["Hi! I'm doing well, thank you for asking. How can I help you today?"] },
+          "create_time": 1715875260
+        }
+      },
+      "node-3": {
+        "id": "msg-user-2",
+        "parent": "node-2",
+        "message": {
+          "id": "msg-user-2",
+          "author": { "role": "user" },
+          "content": { "content_type": "text", "parts": ["Can you explain TypeScript generics?"] },
+          "create_time": 1715875320
+        }
+      }
+    }
+  }
+]

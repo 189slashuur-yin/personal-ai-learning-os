@@ -35,6 +35,9 @@ export type ChatGPTLinearMessage = {
   createdAt?: string;
 };
 
+/** Conversations exceeding this many messages trigger a risk warning in the UI. */
+export const LARGE_CONVERSATION_MESSAGE_THRESHOLD = 100;
+
 export type ChatGPTConversationPreview = {
   externalConversationId: string;
   title: string;
@@ -42,6 +45,8 @@ export type ChatGPTConversationPreview = {
   updateTime?: string;
   messages: ChatGPTLinearMessage[];
   unsupportedCount: number;
+  /** True when the conversation is considered large and may cause performance issues. */
+  isLarge: boolean;
 };
 
 export type ChatGPTImportPreview = ChatGPTConversationPreview & {
@@ -138,12 +143,14 @@ export class ChatGPTExportImportService {
       const externalConversationId = conversation.id ?? conversation.conversation_id;
       if (!externalConversationId || !conversation.mapping) return [];
       const result = linearize(conversation);
+      const isLarge = result.messages.length > LARGE_CONVERSATION_MESSAGE_THRESHOLD;
       return [{
         externalConversationId,
         title: conversation.title?.trim() || `ChatGPT Conversation ${index + 1}`,
         createTime: isoFromSeconds(conversation.create_time),
         updateTime: isoFromSeconds(conversation.update_time),
         ...result,
+        isLarge,
       }];
     });
   }

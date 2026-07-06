@@ -1,0 +1,612 @@
+[
+  {
+    "id": "conv-large-001",
+    "conversation_id": "conv-large-001",
+    "title": "Intensive Brainstorming Session",
+    "create_time": 1715875200,
+    "update_time": 1715961600,
+    "current_node": "node-60",
+    "mapping": {
+      "node-1": {
+        "id": "msg-u-1",
+        "parent": null,
+        "message": {
+          "id": "msg-u-1",
+          "author": { "role": "user" },
+          "content": { "content_type": "text", "parts": ["Let's brainstorm ideas for a new SaaS product. Topic: remote team collaboration."] },
+          "create_time": 1715875200
+        }
+      },
+      "node-2": {
+        "id": "msg-a-1",
+        "parent": "node-1",
+        "message": {
+          "id": "msg-a-1",
+          "author": { "role": "assistant" },
+          "content": { "content_type": "text", "parts": ["Great topic! Let's start with the core problem: remote teams struggle with async communication and context sharing. Here are some angles we could explore..."] },
+          "create_time": 1715875260
+        }
+      },
+      "node-3": {
+        "id": "msg-u-2",
+        "parent": "node-2",
+        "message": {
+          "id": "msg-u-2",
+          "author": { "role": "user" },
+          "content": { "content_type": "text", "parts": ["Good start. Let's focus on the async video update space."] },
+          "create_time": 1715875320
+        }
+      },
+      "node-4": {
+        "id": "msg-a-2",
+        "parent": "node-3",
+        "message": {
+          "id": "msg-a-2",
+          "author": { "role": "assistant" },
+          "content": { "content_type": "text", "parts": ["Async video updates are definitely an underserved niche. Key pain points include recording friction, lack of transcriptions, and poor discoverability."] },
+          "create_time": 1715875380
+        }
+      },
+      "node-5": {
+        "id": "msg-u-3",
+        "parent": "node-4",
+        "message": {
+          "id": "msg-u-3",
+          "author": { "role": "user" },
+          "content": { "content_type": "text", "parts": ["What would the MVP look like?"] },
+          "create_time": 1715875440
+        }
+      },
+      "node-6": {
+        "id": "msg-a-3",
+        "parent": "node-5",
+        "message": {
+          "id": "msg-a-3",
+          "author": { "role": "assistant" },
+          "content": { "content_type": "text", "parts": ["MVP: browser-based recording with automatic transcription, a threaded comment system on video timelines, and search across transcripts."] },
+          "create_time": 1715875500
+        }
+      },
+      "node-7": {
+        "id": "msg-u-4",
+        "parent": "node-6",
+        "message": {
+          "id": "msg-u-4",
+          "author": { "role": "user" },
+          "content": { "content_type": "text", "parts": ["What about competitors?"] },
+          "create_time": 1715875560
+        }
+      },
+      "node-8": {
+        "id": "msg-a-4",
+        "parent": "node-7",
+        "message": {
+          "id": "msg-a-4",
+          "author": { "role": "assistant" },
+          "content": { "content_type": "text", "parts": ["Loom dominates the recording space but lacks collaboration depth. Claap adds meeting intelligence. Threads is emerging. None combine async video + deep knowledge management."] },
+          "create_time": 1715875620
+        }
+      },
+      "node-9": {
+        "id": "msg-u-5",
+        "parent": "node-8",
+        "message": {
+          "id": "msg-u-5",
+          "author": { "role": "user" },
+          "content": { "content_type": "text", "parts": ["Let's define the user personas."] },
+          "create_time": 1715875680
+        }
+      },
+      "node-10": {
+        "id": "msg-a-5",
+        "parent": "node-9",
+        "message": {
+          "id": "msg-a-5",
+          "author": { "role": "assistant" },
+          "content": { "content_type": "text", "parts": ["Three core personas: 1) Engineering leads doing daily standup replacements, 2) Product managers sharing sprint updates, 3) Designers presenting async design critiques."] },
+          "create_time": 1715875740
+        }
+      },
+      "node-11": {
+        "id": "msg-u-6",
+        "parent": "node-10",
+        "message": {
+          "id": "msg-u-6",
+          "author": { "role": "user" },
+          "content": { "content_type": "text", "parts": ["Pricing model suggestions?"] },
+          "create_time": 1715875800
+        }
+      },
+      "node-12": {
+        "id": "msg-a-6",
+        "parent": "node-11",
+        "message": {
+          "id": "msg-a-6",
+          "author": { "role": "assistant" },
+          "content": { "content_type": "text", "parts": ["Freemium with 10 videos/month free. Pro at $12/user/month for unlimited. Team at $20/user/month with admin controls and SSO. Enterprise custom."] },
+          "create_time": 1715875860
+        }
+      },
+      "node-13": {
+        "id": "msg-u-7",
+        "parent": "node-12",
+        "message": {
+          "id": "msg-u-7",
+          "author": { "role": "user" },
+          "content": { "content_type": "text", "parts": ["Tech stack thoughts?"] },
+          "create_time": 1715875920
+        }
+      },
+      "node-14": {
+        "id": "msg-a-7",
+        "parent": "node-13",
+        "message": {
+          "id": "msg-a-7",
+          "author": { "role": "assistant" },
+          "content": { "content_type": "text", "parts": ["Media ingestion via browser MediaRecorder API, upload to S3, transcode with FFmpeg WASM, transcribe via Whisper API, full-text search with a lightweight embedder, React frontend."] },
+          "create_time": 1715875980
+        }
+      },
+      "node-15": {
+        "id": "msg-u-8",
+        "parent": "node-14",
+        "message": {
+          "id": "msg-u-8",
+          "author": { "role": "user" },
+          "content": { "content_type": "text", "parts": ["Go-to-market strategy?"] },
+          "create_time": 1715876040
+        }
+      },
+      "node-16": {
+        "id": "msg-a-8",
+        "parent": "node-15",
+        "message": {
+          "id": "msg-a-8",
+          "author": { "role": "assistant" },
+          "content": { "content_type": "text", "parts": ["Product Hunt launch, target engineering team leads on LinkedIn with async standup use case, partner with remote-first company communities, create comparison content vs Loom."] },
+          "create_time": 1715876100
+        }
+      },
+      "node-17": {
+        "id": "msg-u-9",
+        "parent": "node-16",
+        "message": {
+          "id": "msg-u-9",
+          "author": { "role": "user" },
+          "content": { "content_type": "text", "parts": ["What metrics should we track?"] },
+          "create_time": 1715876160
+        }
+      },
+      "node-18": {
+        "id": "msg-a-9",
+        "parent": "node-17",
+        "message": {
+          "id": "msg-a-9",
+          "author": { "role": "assistant" },
+          "content": { "content_type": "text", "parts": ["North star: weekly active viewers (not just recorders). Secondary: average watch time, comments per video, team adoption rate, NPS after 30 days."] },
+          "create_time": 1715876220
+        }
+      },
+      "node-19": {
+        "id": "msg-u-10",
+        "parent": "node-18",
+        "message": {
+          "id": "msg-u-10",
+          "author": { "role": "user" },
+          "content": { "content_type": "text", "parts": ["Let's now talk about risks and mitigations."] },
+          "create_time": 1715876280
+        }
+      },
+      "node-20": {
+        "id": "msg-a-10",
+        "parent": "node-19",
+        "message": {
+          "id": "msg-a-10",
+          "author": { "role": "assistant" },
+          "content": { "content_type": "text", "parts": ["Key risks: 1) Browser storage limits for video, 2) Transcription accuracy for accented speech, 3) Privacy concerns with recorded meetings, 4) Competition from Zoom/Meet adding async. Mitigations: chunked upload, multi-model transcription, granular sharing controls, focus on async-native workflow not meeting replacement."] },
+          "create_time": 1715876340
+        }
+      },
+      "node-21": {
+        "id": "msg-u-11",
+        "parent": "node-20",
+        "message": {
+          "id": "msg-u-11",
+          "author": { "role": "user" },
+          "content": { "content_type": "text", "parts": ["Timeline to MVP?"] },
+          "create_time": 1715876400
+        }
+      },
+      "node-22": {
+        "id": "msg-a-11",
+        "parent": "node-21",
+        "message": {
+          "id": "msg-a-11",
+          "author": { "role": "assistant" },
+          "content": { "content_type": "text", "parts": ["8 weeks: weeks 1-2 recording + upload, weeks 3-4 transcription pipeline, weeks 5-6 commenting and search, weeks 7-8 polish + beta testing. Launch week 9."] },
+          "create_time": 1715876460
+        }
+      },
+      "node-23": {
+        "id": "msg-u-12",
+        "parent": "node-22",
+        "message": {
+          "id": "msg-u-12",
+          "author": { "role": "user" },
+          "content": { "content_type": "text", "parts": ["Team composition needed?"] },
+          "create_time": 1715876520
+        }
+      },
+      "node-24": {
+        "id": "msg-a-12",
+        "parent": "node-23",
+        "message": {
+          "id": "msg-a-12",
+          "author": { "role": "assistant" },
+          "content": { "content_type": "text", "parts": ["2 full-stack engineers, 1 ML engineer for transcription tuning, 1 designer, 1 part-time PM. Total 4.5 FTE for MVP."] },
+          "create_time": 1715876580
+        }
+      },
+      "node-25": {
+        "id": "msg-u-13",
+        "parent": "node-24",
+        "message": {
+          "id": "msg-u-13",
+          "author": { "role": "user" },
+          "content": { "content_type": "text", "parts": ["Architecture deep dive: how should we handle real-time collaboration features?"] },
+          "create_time": 1715876640
+        }
+      },
+      "node-26": {
+        "id": "msg-a-13",
+        "parent": "node-25",
+        "message": {
+          "id": "msg-a-13",
+          "author": { "role": "assistant" },
+          "content": { "content_type": "text", "parts": ["Use CRDT-based approach for comments and reactions. WebSocket connections for live presence. Video playback state synced via a lightweight protocol. Operational transform is overkill here; CRDTs give us offline support for free."] },
+          "create_time": 1715876700
+        }
+      },
+      "node-27": {
+        "id": "msg-u-14",
+        "parent": "node-26",
+        "message": {
+          "id": "msg-u-14",
+          "author": { "role": "user" },
+          "content": { "content_type": "text", "parts": ["What about mobile?"] },
+          "create_time": 1715876760
+        }
+      },
+      "node-28": {
+        "id": "msg-a-14",
+        "parent": "node-27",
+        "message": {
+          "id": "msg-a-14",
+          "author": { "role": "assistant" },
+          "content": { "content_type": "text", "parts": ["Mobile is phase 2. MVP is desktop browser only. Mobile can be a PWA for playback + comments, with recording coming later via native APIs."] },
+          "create_time": 1715876820
+        }
+      },
+      "node-29": {
+        "id": "msg-u-15",
+        "parent": "node-28",
+        "message": {
+          "id": "msg-u-15",
+          "author": { "role": "user" },
+          "content": { "content_type": "text", "parts": ["How do we differentiate from Loom long-term?"] },
+          "create_time": 1715876880
+        }
+      },
+      "node-30": {
+        "id": "msg-a-15",
+        "parent": "node-29",
+        "message": {
+          "id": "msg-a-15",
+          "author": { "role": "assistant" },
+          "content": { "content_type": "text", "parts": ["Loom is a communication tool; we build a knowledge tool. Videos become a searchable, organized knowledge base with AI summaries, cross-referencing, and progressive summarization. Think 'second brain for video updates' not 'async video messaging'."] },
+          "create_time": 1715876940
+        }
+      },
+      "node-31": {
+        "id": "msg-u-16",
+        "parent": "node-30",
+        "message": {
+          "id": "msg-u-16",
+          "author": { "role": "user" },
+          "content": { "content_type": "text", "parts": ["Let's explore the AI features more deeply. What beyond transcription?"] },
+          "create_time": 1715877000
+        }
+      },
+      "node-32": {
+        "id": "msg-a-16",
+        "parent": "node-31",
+        "message": {
+          "id": "msg-a-16",
+          "author": { "role": "assistant" },
+          "content": { "content_type": "text", "parts": ["1) Auto-chapter detection by topic shift, 2) Action item extraction with assignment suggestions, 3) Cross-video question answering ('what did we decide about pricing?'), 4) Update digest generation from multiple videos, 5) Smart notification routing based on content relevance to each team member."] },
+          "create_time": 1715877060
+        }
+      },
+      "node-33": {
+        "id": "msg-u-17",
+        "parent": "node-32",
+        "message": {
+          "id": "msg-u-17",
+          "author": { "role": "user" },
+          "content": { "content_type": "text", "parts": ["Security considerations for enterprise?"] },
+          "create_time": 1715877120
+        }
+      },
+      "node-34": {
+        "id": "msg-a-17",
+        "parent": "node-33",
+        "message": {
+          "id": "msg-a-17",
+          "author": { "role": "assistant" },
+          "content": { "content_type": "text", "parts": ["SOC 2 Type II from day one. Encryption at rest and in transit. Granular sharing (link, domain, specific people). Audit logs. Data residency options. SSO/SAML at team tier. Retention policies. All videos watermarked with viewer identity."] },
+          "create_time": 1715877180
+        }
+      },
+      "node-35": {
+        "id": "msg-u-18",
+        "parent": "node-34",
+        "message": {
+          "id": "msg-u-18",
+          "author": { "role": "user" },
+          "content": { "content_type": "text", "parts": ["What would the ideal investor pitch deck highlight?"] },
+          "create_time": 1715877240
+        }
+      },
+      "node-36": {
+        "id": "msg-a-18",
+        "parent": "node-35",
+        "message": {
+          "id": "msg-a-18",
+          "author": { "role": "assistant" },
+          "content": { "content_type": "text", "parts": ["1) Remote work is permanent - 58% of Americans have remote options, 2) Async communication reduces meeting overload by 40%, 3) Video is the richest async medium but current tools treat it as disposable, 4) Knowledge workers spend 30% of time searching for information - we turn video updates into a searchable knowledge asset, 5) TAM: 100M+ knowledge workers globally."] },
+          "create_time": 1715877300
+        }
+      },
+      "node-37": {
+        "id": "msg-u-19",
+        "parent": "node-36",
+        "message": {
+          "id": "msg-u-19",
+          "author": { "role": "user" },
+          "content": { "content_type": "text", "parts": ["Let's map out the user onboarding flow."] },
+          "create_time": 1715877360
+        }
+      },
+      "node-38": {
+        "id": "msg-a-19",
+        "parent": "node-37",
+        "message": {
+          "id": "msg-a-19",
+          "author": { "role": "assistant" },
+          "content": { "content_type": "text", "parts": ["1) Sign up with Google SSO, 2) Create first workspace, 3) Record a 30-second intro video (guided), 4) Invite 2 teammates, 5) Watch a sample team update, 6) Comment on a timestamp. Time to value: under 3 minutes."] },
+          "create_time": 1715877420
+        }
+      },
+      "node-39": {
+        "id": "msg-u-20",
+        "parent": "node-38",
+        "message": {
+          "id": "msg-u-20",
+          "author": { "role": "user" },
+          "content": { "content_type": "text", "parts": ["What edge cases should we handle early?"] },
+          "create_time": 1715877480
+        }
+      },
+      "node-40": {
+        "id": "msg-a-20",
+        "parent": "node-39",
+        "message": {
+          "id": "msg-a-20",
+          "author": { "role": "assistant" },
+          "content": { "content_type": "text", "parts": ["Upload failures with retry, large video chunking, offline recording queue, transcription timeout with partial results, concurrent editing conflicts, deleted user content ownership, workspace migration between orgs."] },
+          "create_time": 1715877540
+        }
+      },
+      "node-41": {
+        "id": "msg-u-21",
+        "parent": "node-40",
+        "message": {
+          "id": "msg-u-21",
+          "author": { "role": "user" },
+          "content": { "content_type": "text", "parts": ["Let's think about internationalization."] },
+          "create_time": 1715877600
+        }
+      },
+      "node-42": {
+        "id": "msg-a-21",
+        "parent": "node-41",
+        "message": {
+          "id": "msg-a-21",
+          "author": { "role": "assistant" },
+          "content": { "content_type": "text", "parts": ["Phase 3. UI localization in top 10 languages. Multi-language transcription via Whisper large-v3. RTL support. Date/time/currency formatting per locale. But MVP ships English-only to move fast."] },
+          "create_time": 1715877660
+        }
+      },
+      "node-43": {
+        "id": "msg-u-22",
+        "parent": "node-42",
+        "message": {
+          "id": "msg-u-22",
+          "author": { "role": "user" },
+          "content": { "content_type": "text", "parts": ["What would the database schema look like at scale?"] },
+          "create_time": 1715877720
+        }
+      },
+      "node-44": {
+        "id": "msg-a-22",
+        "parent": "node-43",
+        "message": {
+          "id": "msg-a-22",
+          "author": { "role": "assistant" },
+          "content": { "content_type": "text", "parts": ["PostgreSQL for relational data (users, workspaces, permissions), S3 for video storage, Elasticsearch for full-text transcript search, Redis for presence and session state, TimescaleDB for analytics events. Event sourcing for all content mutations to enable undo and audit."] },
+          "create_time": 1715877780
+        }
+      },
+      "node-45": {
+        "id": "msg-u-23",
+        "parent": "node-44",
+        "message": {
+          "id": "msg-u-23",
+          "author": { "role": "user" },
+          "content": { "content_type": "text", "parts": ["How would we handle API design?"] },
+          "create_time": 1715877840
+        }
+      },
+      "node-46": {
+        "id": "msg-a-23",
+        "parent": "node-45",
+        "message": {
+          "id": "msg-a-23",
+          "author": { "role": "assistant" },
+          "content": { "content_type": "text", "parts": ["REST for CRUD, WebSocket for real-time features. GraphQL for the dashboard to let clients fetch exactly what they need. OpenAPI spec from day one. Versioned endpoints (/v1/...). Rate limiting at 1000 req/min per user."] },
+          "create_time": 1715877900
+        }
+      },
+      "node-47": {
+        "id": "msg-u-24",
+        "parent": "node-46",
+        "message": {
+          "id": "msg-u-24",
+          "author": { "role": "user" },
+          "content": { "content_type": "text", "parts": ["Monetization beyond subscriptions?"] },
+          "create_time": 1715877960
+        }
+      },
+      "node-48": {
+        "id": "msg-a-24",
+        "parent": "node-47",
+        "message": {
+          "id": "msg-a-24",
+          "author": { "role": "assistant" },
+          "content": { "content_type": "text", "parts": ["API access tier for building on top of the knowledge graph, AI summarization credits as add-on, white-label embedding for enterprise portals, marketplace for integrations (Jira, Notion, Slack connectors)."] },
+          "create_time": 1715878020
+        }
+      },
+      "node-49": {
+        "id": "msg-u-25",
+        "parent": "node-48",
+        "message": {
+          "id": "msg-u-25",
+          "author": { "role": "user" },
+          "content": { "content_type": "text", "parts": ["Final question: what's the one thing that could kill this product?"] },
+          "create_time": 1715878080
+        }
+      },
+      "node-50": {
+        "id": "msg-a-25",
+        "parent": "node-49",
+        "message": {
+          "id": "msg-a-25",
+          "author": { "role": "assistant" },
+          "content": { "content_type": "text", "parts": ["Adoption inertia. Recording a video update feels like more effort than typing a Slack message, even if it saves the team time overall. The UX must make recording feel effortless - one click, no editing required, and the value (searchable knowledge base) must be immediately visible to every team member, not just the recorder."] },
+          "create_time": 1715878140
+        }
+      },
+      "node-51": {
+        "id": "msg-u-26",
+        "parent": "node-50",
+        "message": {
+          "id": "msg-u-26",
+          "author": { "role": "user" },
+          "content": { "content_type": "text", "parts": ["Actually, one more thing. Let's think about integration ecosystem."] },
+          "create_time": 1715878200
+        }
+      },
+      "node-52": {
+        "id": "msg-a-26",
+        "parent": "node-51",
+        "message": {
+          "id": "msg-a-26",
+          "author": { "role": "assistant" },
+          "content": { "content_type": "text", "parts": ["Critical integrations: Slack (post video updates to channels), Jira/Linear (link videos to tickets), Notion/Confluence (embed videos in docs), GitHub/GitLab (link videos to PRs), Google Calendar (auto-record meeting updates). Webhook system + Zapier connector for long-tail integrations."] },
+          "create_time": 1715878260
+        }
+      },
+      "node-53": {
+        "id": "msg-u-27",
+        "parent": "node-52",
+        "message": {
+          "id": "msg-u-27",
+          "author": { "role": "user" },
+          "content": { "content_type": "text", "parts": ["How should we approach beta testing?"] },
+          "create_time": 1715878320
+        }
+      },
+      "node-54": {
+        "id": "msg-a-27",
+        "parent": "node-53",
+        "message": {
+          "id": "msg-a-27",
+          "author": { "role": "assistant" },
+          "content": { "content_type": "text", "parts": ["Closed beta with 10-15 remote-first teams (50-100 users). 4-week program: week 1 onboarding + first recording, week 2 daily standup replacement, week 3 async design reviews, week 4 feedback survey + NPS. Weekly check-in calls. Incentive: 6 months free Pro for beta participants."] },
+          "create_time": 1715878380
+        }
+      },
+      "node-55": {
+        "id": "msg-u-28",
+        "parent": "node-54",
+        "message": {
+          "id": "msg-u-28",
+          "author": { "role": "user" },
+          "content": { "content_type": "text", "parts": ["Great session! Let's summarize everything we discussed into an actionable product brief."] },
+          "create_time": 1715878440
+        }
+      },
+      "node-56": {
+        "id": "msg-a-28",
+        "parent": "node-55",
+        "message": {
+          "id": "msg-a-28",
+          "author": { "role": "assistant" },
+          "content": { "content_type": "text", "parts": ["Absolutely! Here's the comprehensive product brief summary. Product: AsyncVideo (working title) - a knowledge-first async video collaboration platform. Target: remote-first engineering and product teams. Core differentiator: videos become a searchable, organized knowledge base with AI-powered insights. MVP scope: browser recording, transcription, threaded comments, full-text search. Timeline: 8 weeks to MVP, 4-week beta. Team: 4.5 FTE. Pricing: freemium with Pro at $12/user/month. Key risk: adoption inertia - solve with one-click recording and immediate knowledge base value. Next steps: validate with 5 team leads this week, build recording prototype, draft pitch deck."] },
+          "create_time": 1715878500
+        }
+      },
+      "node-57": {
+        "id": "msg-u-29",
+        "parent": "node-56",
+        "message": {
+          "id": "msg-u-29",
+          "author": { "role": "user" },
+          "content": { "content_type": "text", "parts": ["Perfect. Let's schedule the follow-up for next week to review the prototype."] },
+          "create_time": 1715878560
+        }
+      },
+      "node-58": {
+        "id": "msg-a-29",
+        "parent": "node-57",
+        "message": {
+          "id": "msg-a-29",
+          "author": { "role": "assistant" },
+          "content": { "content_type": "text", "parts": ["Sounds like a plan! I'll prepare a clickable prototype focusing on the recording flow and the knowledge base browsing experience. Looking forward to it!"] },
+          "create_time": 1715878620
+        }
+      },
+      "node-59": {
+        "id": "msg-u-30",
+        "parent": "node-58",
+        "message": {
+          "id": "msg-u-30",
+          "author": { "role": "user" },
+          "content": { "content_type": "text", "parts": ["Thanks! This has been incredibly productive."] },
+          "create_time": 1715878680
+        }
+      },
+      "node-60": {
+        "id": "msg-a-30",
+        "parent": "node-59",
+        "message": {
+          "id": "msg-a-30",
+          "author": { "role": "assistant" },
+          "content": { "content_type": "text", "parts": ["Thank you! This is exactly the kind of deep collaboration session that our product aims to make searchable and referenceable. Talk next week!"] },
+          "create_time": 1715878740
+        }
+      }
+    }
+  }
+]
