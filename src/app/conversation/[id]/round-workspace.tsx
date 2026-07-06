@@ -8,6 +8,8 @@ import { BrowserKnowledgeCardStorage } from "@/infrastructure/storage/browser-kn
 import { BrowserConversationStorage } from "@/infrastructure/storage/browser-conversation-storage";
 import { BrowserMessageStorage } from "@/infrastructure/storage/browser-message-storage";
 import { MessageToRoundMigrationService } from "@/core/services/message-to-round-migration";
+import { BrowserConversationVersionStorage } from "@/infrastructure/storage/browser-conversation-version-storage";
+import { ConversationVersionService } from "@/core/services/conversation-version-service";
 import { BrowserAppEventLogStorage } from "@/infrastructure/storage/browser-feedback-storage";
 import { BrowserProposalStorage } from "@/infrastructure/storage/browser-proposal-storage";
 import { BrowserAssetStorage } from "@/infrastructure/storage/browser-asset-storage";
@@ -38,6 +40,7 @@ export function RoundWorkspace({ conversationId, onAnalyzeRound }: RoundWorkspac
   const [analyzingId, setAnalyzingId] = useState<string | null>(null);
   const [knowledgeCounts, setKnowledgeCounts] = useState<Map<string, number>>(new Map());
   const [migrationNotice, setMigrationNotice] = useState<string | null>(null);
+  const [autoSnapshotNotice, setAutoSnapshotNotice] = useState<string | null>(null);
   const [inspectedRoundId, setInspectedRoundId] = useState<string | null>(null);
   const [allProposals, setAllProposals] = useState<Proposal[]>([]);
   const [allKnowledge, setAllKnowledge] = useState<KnowledgeCard[]>([]);
@@ -86,6 +89,19 @@ export function RoundWorkspace({ conversationId, onAnalyzeRound }: RoundWorkspac
 
   function reload() {
     setRounds(createService().listByConversation(conversationId));
+  }
+
+  function createAutoSnapshot(label: string) {
+    try {
+      new ConversationVersionService({
+        conversations: new BrowserConversationStorage(),
+        messages: new BrowserMessageStorage(),
+        versions: new BrowserConversationVersionStorage(),
+      }).createSnapshot(conversationId, `自动恢复点 — ${label}`, `执行「${label}」操作前自动创建`);
+      setAutoSnapshotNotice("已创建恢复点，可在版本恢复中撤回。");
+    } catch {
+      // snapshot creation is best-effort; don't block the operation
+    }
   }
 
   function addRound() {
@@ -140,6 +156,7 @@ export function RoundWorkspace({ conversationId, onAnalyzeRound }: RoundWorkspac
 
   function deleteRound(round: Round) {
     if (!window.confirm(`删除「${round.title}」？Messages 不会被删除。`)) return;
+    createAutoSnapshot(`删除 Round「${round.title}」`);
     createService().deleteRound(round.id);
     reload();
   }
@@ -152,6 +169,7 @@ export function RoundWorkspace({ conversationId, onAnalyzeRound }: RoundWorkspac
   }
 
   function duplicateRound(round: Round) {
+    createAutoSnapshot(`复制 Round「${round.title}」`);
     const service = createService();
     const newRound = service.createRound({
       conversationId: round.conversationId,
@@ -184,6 +202,7 @@ export function RoundWorkspace({ conversationId, onAnalyzeRound }: RoundWorkspac
   function batchDelete() {
     if (batchSelectedIds.size === 0) return;
     if (!window.confirm(`删除 ${batchSelectedIds.size} 个选中的 Round？Messages 不会被删除。`)) return;
+    createAutoSnapshot(`批量删除 ${batchSelectedIds.size} 个 Round`);
     const service = createService();
     batchSelectedIds.forEach((id) => service.deleteRound(id));
     setBatchSelectedIds(new Set());
@@ -193,6 +212,7 @@ export function RoundWorkspace({ conversationId, onAnalyzeRound }: RoundWorkspac
 
   function batchMoveUp() {
     if (batchSelectedIds.size === 0) return;
+    createAutoSnapshot(`批量上移 ${batchSelectedIds.size} 个 Round`);
     const service = createService();
     const selected = rounds.filter((r) => batchSelectedIds.has(r.id)).sort((a, b) => a.order - b.order);
     for (const round of selected) {
@@ -203,6 +223,7 @@ export function RoundWorkspace({ conversationId, onAnalyzeRound }: RoundWorkspac
 
   function batchMoveDown() {
     if (batchSelectedIds.size === 0) return;
+    createAutoSnapshot(`批量下移 ${batchSelectedIds.size} 个 Round`);
     const service = createService();
     const selected = rounds.filter((r) => batchSelectedIds.has(r.id)).sort((a, b) => b.order - a.order);
     for (const round of selected) {
@@ -247,16 +268,19 @@ export function RoundWorkspace({ conversationId, onAnalyzeRound }: RoundWorkspac
   function mergeWithPrevious(round: Round) {
     const previous = rounds.find((candidate) => candidate.order === round.order - 1);
     if (!previous) return;
+    createAutoSnapshot(`合并 Round「${previous.title}」+「${round.title}」`);
     createService().mergeRounds(previous.id, round.id);
     reload();
   }
 
   function splitRound(round: Round) {
+    createAutoSnapshot(`拆分 Round「${round.title}」`);
     createService().splitRound(round.id);
     reload();
   }
 
   function moveRound(round: Round, direction: -1 | 1) {
+    createAutoSnapshot(`移动 Round「${round.title}」`);
     createService().reorderRound(round.id, round.order + direction);
     reload();
   }
@@ -396,7 +420,7 @@ export function RoundWorkspace({ conversationId, onAnalyzeRound }: RoundWorkspac
                     <h3 className="mt-1 font-semibold text-zinc-950">{round.title}</h3>
                   </div>
                   <div className="flex flex-wrap gap-3 text-xs font-medium">
-                    <button className="text-emerald-700 hover:text-emerald-900 disabled:opacity-40" disabled={analyzingId !== null || (!round.question && !round.answer && round.messageIds.length === 0)} onClick={() => analyzeRound(round)} type="button">{analyzingId === round.id ? "Analyzing…" : "Analyze Round"}</button>
+                    <button className="text-emerald-700 hover:text-emerald-900 disabled:opacity-40" disabled={analyzingId !== null || (!round.question && !round.answer && round.messageIds.length === 0)} onClick={() => analyzeRound(round)} type="button">{analyzingId === round.id ? "Analyzing…" : "可选：生成 AI 整理建议"}</button>
                     <button className="text-zinc-600 hover:text-zinc-950 disabled:opacity-30" disabled={round.order === 1} onClick={() => moveRound(round, -1)} type="button">上移</button>
                     <button className="text-zinc-600 hover:text-zinc-950 disabled:opacity-30" disabled={round.order === rounds.length} onClick={() => moveRound(round, 1)} type="button">下移</button>
                     <button className="text-zinc-600 hover:text-zinc-950 disabled:opacity-30" disabled={round.order === 1} onClick={() => mergeWithPrevious(round)} type="button">合并上一 Round</button>
@@ -415,7 +439,7 @@ export function RoundWorkspace({ conversationId, onAnalyzeRound }: RoundWorkspac
                   <div className="mt-4 space-y-3">
                     <label className="block text-xs font-medium text-zinc-600">Question<textarea className="mt-1.5 min-h-24 w-full rounded-lg border border-zinc-200 p-3 text-sm" onChange={(event) => setQuestionDraft(event.target.value)} value={questionDraft} /></label>
                     <label className="block text-xs font-medium text-zinc-600">Answer<textarea className="mt-1.5 min-h-32 w-full rounded-lg border border-zinc-200 p-3 text-sm" onChange={(event) => setAnswerDraft(event.target.value)} value={answerDraft} /></label>
-                    <label className="block text-xs font-medium text-zinc-600">Round Note<textarea className="mt-1.5 min-h-20 w-full rounded-lg border border-zinc-200 p-3 text-sm" onChange={(event) => setNoteDraft(event.target.value)} value={noteDraft} /></label>
+                    <label className="block text-xs font-medium text-zinc-600">我的备注<textarea className="mt-1.5 min-h-20 w-full rounded-lg border border-zinc-200 p-3 text-sm" onChange={(event) => setNoteDraft(event.target.value)} value={noteDraft} /></label>
                     <label className="block text-xs font-medium text-zinc-600">Message IDs（逗号分隔；保存时会从其他 Round 解除重复绑定）<textarea className="mt-1.5 min-h-20 w-full rounded-lg border border-zinc-200 p-3 font-mono text-xs" onChange={(event) => setMessageIdsDraft(event.target.value)} value={messageIdsDraft} /></label>
                     <div className="flex justify-end gap-2">
                       <button className="rounded-md border border-zinc-200 px-3 py-2 text-xs font-medium" onClick={() => setEditingId(null)} type="button">Cancel</button>
@@ -426,7 +450,7 @@ export function RoundWorkspace({ conversationId, onAnalyzeRound }: RoundWorkspac
                   <div className="mt-4 grid gap-4 md:grid-cols-2">
                     <div className="rounded-lg bg-sky-50 p-4"><p className="text-xs font-semibold text-sky-800">Question</p><p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-sky-950">{round.question || "（无问题）"}</p></div>
                     <div className="rounded-lg bg-violet-50 p-4"><p className="text-xs font-semibold text-violet-800">Answer</p><p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-violet-950">{round.answer || "（无回答）"}</p></div>
-                    {round.note ? <div className="rounded-lg bg-amber-50 p-4 md:col-span-2"><p className="text-xs font-semibold text-amber-800">Note</p><p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-amber-950">{round.note}</p></div> : null}
+                    {round.note ? <div className="rounded-lg bg-amber-50 p-4 md:col-span-2"><p className="text-xs font-semibold text-amber-800">我的备注</p><p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-amber-950">{round.note}</p></div> : null}
                   </div>
                 )}
               </li>
@@ -434,6 +458,7 @@ export function RoundWorkspace({ conversationId, onAnalyzeRound }: RoundWorkspac
           })}
         </ol>
         {rounds.length === 0 ? <div className="mt-4 rounded-xl border border-dashed border-zinc-300 bg-zinc-50 p-6 text-center text-sm text-zinc-500"><p>这个 Conversation 尚无 Round；旧 Messages 仍可用。</p><button className="mt-3 rounded-lg border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-800" onClick={generateFromLegacyMessages} type="button">从旧 Messages 预检并生成 Rounds</button></div> : null}
+        {autoSnapshotNotice ? <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800" role="status"><p className="font-semibold">✅ {autoSnapshotNotice}</p><p className="mt-1 text-xs text-emerald-700">可在下方「版本恢复」区域撤回到操作前的状态。</p></div> : null}
         {migrationNotice ? <p className="mt-3 rounded-lg bg-sky-50 px-4 py-3 text-sm text-sky-800" role="status">{migrationNotice}</p> : null}
         </div>
         {inspectedRoundId ? (() => {
@@ -456,11 +481,11 @@ export function RoundWorkspace({ conversationId, onAnalyzeRound }: RoundWorkspac
                 <span className="text-[10px] text-zinc-400">{currentIndex + 1} / {rounds.length}</span>
               </div>
 
-              <label className="mt-5 block text-sm font-semibold text-zinc-700">Round Note<textarea className="mt-2 min-h-20 w-full rounded-lg border border-zinc-200 p-3 text-sm font-normal" onChange={(event) => setInspectorNoteDraft(event.target.value)} placeholder="记录本轮上下文、待办或备注…" value={inspectorNoteDraft} /></label>
-              <button className="mt-2 rounded-lg bg-zinc-950 px-3 py-2 text-xs font-semibold text-white" onClick={saveInspectorNote} type="button">保存 Note</button>
+              <label className="mt-5 block text-sm font-semibold text-zinc-700">我的备注<span className="ml-2 text-xs font-normal text-zinc-400">我的想法、待办、判断</span><textarea className="mt-2 min-h-20 w-full rounded-lg border border-zinc-200 p-3 text-sm font-normal" onChange={(event) => setInspectorNoteDraft(event.target.value)} placeholder="我的想法、待办、判断…" value={inspectorNoteDraft} /></label>
+              <button className="mt-2 rounded-lg bg-zinc-950 px-3 py-2 text-xs font-semibold text-white" onClick={saveInspectorNote} type="button">保存备注</button>
 
-              <label className="mt-5 block text-sm font-semibold text-zinc-700">Round Summary<textarea className="mt-2 min-h-20 w-full rounded-lg border border-zinc-200 p-3 text-sm font-normal" onChange={(event) => setInspectorSummaryDraft(event.target.value)} placeholder="手动总结本轮要点…" value={inspectorSummaryDraft} /></label>
-              <button className="mt-2 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs font-semibold" onClick={saveInspectorSummary} type="button">确认保存 Summary</button>
+              <label className="mt-5 block text-sm font-semibold text-zinc-700">本轮摘要<span className="ml-2 text-xs font-normal text-zinc-400">这一轮客观说了什么</span><textarea className="mt-2 min-h-20 w-full rounded-lg border border-zinc-200 p-3 text-sm font-normal" onChange={(event) => setInspectorSummaryDraft(event.target.value)} placeholder="这一轮客观说了什么…" value={inspectorSummaryDraft} /></label>
+              <button className="mt-2 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs font-semibold" onClick={saveInspectorSummary} type="button">确认保存摘要</button>
 
               <div className="mt-5 space-y-3 border-t border-zinc-100 pt-5 text-sm">
                 <div>
@@ -490,8 +515,8 @@ export function RoundWorkspace({ conversationId, onAnalyzeRound }: RoundWorkspac
               </div>
 
               <div className="mt-5 space-y-2 border-t border-zinc-100 pt-5">
-                <button className="w-full rounded-lg bg-emerald-700 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50" disabled={analyzingId === inspected.id || (!inspected.question && !inspected.answer && inspected.messageIds.length === 0)} onClick={analyzeInspectorRound} type="button">{analyzingId === inspected.id ? "Analyzing…" : "Analyze 当前 Round"}</button>
-                <p className="text-xs text-zinc-400">生成 Proposal 草稿，不覆盖现有 Summary。</p>
+                <button className="w-full rounded-lg bg-emerald-700 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50" disabled={analyzingId === inspected.id || (!inspected.question && !inspected.answer && inspected.messageIds.length === 0)} onClick={analyzeInspectorRound} type="button">{analyzingId === inspected.id ? "Analyzing…" : "可选：生成 AI 整理建议"}</button>
+                <p className="text-xs text-zinc-400">不影响原文、Round、Summary；失败也不会丢数据。生成 Proposal 草稿，不覆盖现有 Summary。</p>
                 <button className="w-full rounded-lg border border-zinc-200 px-4 py-2.5 text-sm font-semibold text-zinc-700 hover:bg-zinc-50" onClick={createKnowledgeFromInspector} type="button">从当前 Round 创建 Knowledge</button>
                 <button className="w-full rounded-lg border border-zinc-300 bg-white px-4 py-2.5 text-sm font-semibold text-zinc-500 hover:bg-zinc-100 hover:text-zinc-700" onClick={() => setInspectedRoundId(null)} type="button">收起 Inspector</button>
               </div>

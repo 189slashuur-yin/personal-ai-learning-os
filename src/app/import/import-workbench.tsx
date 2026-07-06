@@ -1,6 +1,6 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { type ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -34,6 +34,8 @@ const parserLabels: Record<ConversationParserId, string> = {
 
 export function ImportWorkbench() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const targetConversationId = searchParams.get("targetConversationId") ?? "";
   const [mode, setMode] = useState<"paste" | "txt" | "json">("paste");
   const [parserId, setParserId] = useState<ConversationParserId>("chatgpt");
   const [artifactName, setArtifactName] = useState("Pasted Conversation");
@@ -100,9 +102,12 @@ export function ImportWorkbench() {
           .filter((workspace) => !workspace.archivedAt),
       );
       setExistingConversations(conversationStorage.getAll());
+      if (targetConversationId) {
+        setSelectedConversationId(targetConversationId);
+      }
     }, 0);
     return () => window.clearTimeout(timer);
-  }, []);
+  }, [targetConversationId]);
 
   // K1: Existing conversation preview
   const existingPreview = useMemo(
@@ -331,9 +336,9 @@ export function ImportWorkbench() {
       )}
 
       {/* K1: Import into Existing Conversation */}
-      <details className="mt-6 rounded-xl border border-sky-200 bg-sky-50 p-5">
-        <summary className="cursor-pointer text-sm font-semibold text-sky-950">📥 Import into Existing Conversation</summary>
-        <p className="mt-2 text-xs text-sky-800">选择已有 Conversation，追加 Messages 或 Rounds；不覆盖旧数据，新内容默认追加。</p>
+      <details className="mt-6 rounded-xl border border-sky-200 bg-sky-50 p-5" open={!!targetConversationId || undefined}>
+        <summary className="cursor-pointer text-sm font-semibold text-sky-950">📥 Import into Existing Conversation{targetConversationId ? "（已选择目标对话）" : ""}</summary>
+        <p className="mt-2 text-xs text-sky-800">新内容会追加到当前 Conversation 后面，不覆盖旧内容。{targetConversationId ? ` 目标：${existingConversations.find((c) => c.id === targetConversationId)?.title ?? "—"}` : ""}</p>
         {!existingImportReport ? (
           <div className="mt-4 space-y-4">
             <label className="block text-sm font-medium text-zinc-800">
