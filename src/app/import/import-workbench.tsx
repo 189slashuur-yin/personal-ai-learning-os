@@ -145,6 +145,15 @@ export function ImportWorkbench() {
 
   return (
     <section className="mt-8 space-y-6">
+      <details className="rounded-xl border border-emerald-200 bg-emerald-50 p-5">
+        <summary className="cursor-pointer text-sm font-semibold text-emerald-950">📦 怎么导入 ChatGPT 数据？</summary>
+        <ol className="mt-3 list-inside list-decimal space-y-1 text-sm leading-7 text-emerald-900">
+          <li>在 ChatGPT 设置（Settings）里选择 <strong>导出数据（Export data）</strong>，等待 OpenAI 发送下载邮件。</li>
+          <li>下载 zip 文件并解压，找到 <code className="rounded bg-emerald-100 px-1.5 py-0.5 text-xs font-semibold">conversations.json</code>。</li>
+          <li>在本页面选择 <strong>「📦 导入 ChatGPT Export」</strong>，上传 conversations.json 即可。重复导入会自动去重，只追加新消息。</li>
+        </ol>
+        <p className="mt-2 text-xs text-emerald-700">注意：当前只导入 User / Assistant 文本；附件、图片、tool call、canvas、voice 与 shared link 会被跳过或不处理。</p>
+      </details>
       <div className="grid gap-4 md:grid-cols-3">
         {([
           ["paste", "粘贴并导入对话", "直接粘贴多轮问答文本；支持六种角色别名"],
@@ -179,7 +188,7 @@ export function ImportWorkbench() {
                 <select className="mt-2 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2.5" onChange={(event) => setParserId(event.target.value as ConversationParserId)} value={parserId}>
                   {conversationParserIds.map((id) => <option key={id} value={id}>{parserLabels[id]}</option>)}
                 </select>
-              </label><details className="rounded-lg border border-zinc-200 p-4"><summary className="cursor-pointer text-sm font-semibold">Parser Profile 配置</summary><div className="mt-3 grid gap-3"><label className="text-xs font-medium">User role aliases<input className="mt-1 w-full rounded border border-zinc-200 px-3 py-2" onChange={(event) => setUserAliases(event.target.value)} value={userAliases} /></label><label className="text-xs font-medium">Assistant role aliases<input className="mt-1 w-full rounded border border-zinc-200 px-3 py-2" onChange={(event) => setAssistantAliases(event.target.value)} value={assistantAliases} /></label><label className="text-xs font-medium">Separators<input className="mt-1 w-full rounded border border-zinc-200 px-3 py-2" onChange={(event) => setSeparators(event.target.value)} value={separators} /></label><p className="text-xs text-zinc-500">当前 parser type：{parserLabels[parserId]}。</p><p className="mt-1 text-xs font-semibold text-zinc-600">支持的 role alias：</p><ul className="mt-1 list-inside list-disc text-xs text-zinc-500"><li>User / Assistant</li><li>用户 / AI</li><li>我 / GPT</li><li>问 / 答</li></ul><p className="mt-2 text-xs text-zinc-500">自定义 Profile 先作为本次导入记录，不会改变旧数据。</p></div></details></>
+              </label><details className="rounded-lg border border-zinc-200 p-4"><summary className="cursor-pointer text-sm font-semibold">识别格式 / Role 识别规则</summary><div className="mt-3 grid gap-3"><label className="text-xs font-medium">User role aliases<input className="mt-1 w-full rounded border border-zinc-200 px-3 py-2" onChange={(event) => setUserAliases(event.target.value)} value={userAliases} /></label><label className="text-xs font-medium">Assistant role aliases<input className="mt-1 w-full rounded border border-zinc-200 px-3 py-2" onChange={(event) => setAssistantAliases(event.target.value)} value={assistantAliases} /></label><label className="text-xs font-medium">Separators<input className="mt-1 w-full rounded border border-zinc-200 px-3 py-2" onChange={(event) => setSeparators(event.target.value)} value={separators} /></label><p className="text-xs text-zinc-500">当前 parser type：{parserLabels[parserId]}。</p><p className="mt-1 text-xs font-semibold text-zinc-600">默认支持的角色别名（无需配置）：</p><ul className="mt-1 list-inside list-disc text-xs text-zinc-500"><li>User / Assistant</li><li>用户 / AI</li><li>我 / GPT</li><li>问 / 答</li></ul><p className="mt-2 text-xs text-zinc-500">后续支持自定义 alias。以上输入先作为本次导入记录，不会改变旧数据。</p></div></details></>
             )}
             <label className="block text-sm font-medium text-zinc-800">
               Conversation 标题

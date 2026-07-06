@@ -280,7 +280,7 @@ export function RoundWorkspace({ conversationId, onAnalyzeRound }: RoundWorkspac
                     <button className="text-zinc-600 hover:text-zinc-950" onClick={() => splitRound(round)} type="button">拆分</button>
                     <button className="text-zinc-600 hover:text-zinc-950" onClick={() => startEditing(round)} type="button">Edit</button>
                     <button className="text-red-600 hover:text-red-800" onClick={() => deleteRound(round)} type="button">删除</button>
-                    <button className={`text-sm font-semibold ${inspectedRoundId === round.id ? "text-zinc-950" : "text-sky-600 hover:text-sky-800"}`} onClick={() => inspectRound(round)} type="button">{inspectedRoundId === round.id ? "✓ Inspecting" : "Inspect"}</button>
+                    <button className={`text-sm font-semibold ${inspectedRoundId === round.id ? "text-zinc-950" : "text-sky-600 hover:text-sky-800"}`} onClick={() => inspectRound(round)} type="button">{inspectedRoundId === round.id ? "正在查看" : "Inspect"}</button>
                     <button aria-expanded={!collapsed} className="text-zinc-600 hover:text-zinc-950" onClick={() => toggleCollapsed(round.id)} type="button">{collapsed ? "展开" : "折叠"}</button>
                   </div>
                 </div>
@@ -322,7 +322,7 @@ export function RoundWorkspace({ conversationId, onAnalyzeRound }: RoundWorkspac
             <aside className="rounded-xl border border-zinc-200 bg-white p-5">
               <div className="flex items-center justify-between">
                 <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500">Round Inspector</p>
-                <button className="text-xs text-zinc-400 hover:text-zinc-600" onClick={() => setInspectedRoundId(null)} type="button">✕ 关闭</button>
+                <button className="rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 hover:text-zinc-950" onClick={() => setInspectedRoundId(null)} type="button">✕ 关闭 Inspector</button>
               </div>
               <h2 className="mt-2 text-lg font-semibold text-zinc-950">{inspected.title}</h2>
               <div className="mt-3 flex items-center gap-2">
@@ -356,6 +356,7 @@ export function RoundWorkspace({ conversationId, onAnalyzeRound }: RoundWorkspac
                 <button className="w-full rounded-lg bg-emerald-700 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50" disabled={analyzingId === inspected.id || (!inspected.question && !inspected.answer && inspected.messageIds.length === 0)} onClick={analyzeInspectorRound} type="button">{analyzingId === inspected.id ? "Analyzing…" : "Analyze 当前 Round"}</button>
                 <p className="text-xs text-zinc-400">生成 Proposal 草稿，不覆盖现有 Summary。</p>
                 <button className="w-full rounded-lg border border-zinc-200 px-4 py-2.5 text-sm font-semibold text-zinc-700 hover:bg-zinc-50" onClick={createKnowledgeFromInspector} type="button">从当前 Round 创建 Knowledge</button>
+                <button className="w-full rounded-lg border border-zinc-300 bg-white px-4 py-2.5 text-sm font-semibold text-zinc-500 hover:bg-zinc-100 hover:text-zinc-700" onClick={() => setInspectedRoundId(null)} type="button">收起 Inspector</button>
               </div>
             </aside>
           );

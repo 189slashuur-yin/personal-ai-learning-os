@@ -184,6 +184,7 @@ export function ConversationDetail({
   );
   const [activeSearchIndex, setActiveSearchIndex] = useState(0);
   const [analyzerError, setAnalyzerError] = useState<string | null>(null);
+  const [analyzerSuccess, setAnalyzerSuccess] = useState<string | null>(null);
   const [taskNotice, setTaskNotice] = useState<string | null>(null);
   const [taskError, setTaskError] = useState<string | null>(null);
   const [latestAnalyzerRun, setLatestAnalyzerRun] =
@@ -445,22 +446,21 @@ export function ConversationDetail({
   const hasOriginalContent = draft.trim().length > 0;
   const activeFlowStep = !hasOriginalContent
     ? 1
-    : state.messages.length === 0
-      ? 2
-      : knowledgeCount > 0
-        ? 6
-        : proposals.length > 0
-          ? 5
-          : selectedMessageIds.size > 0
-            ? 4
-            : 3;
+    : knowledgeCount > 0
+      ? 7
+      : proposals.length > 0
+        ? 5
+        : selectedMessageIds.size > 0
+          ? 4
+          : 2;
   const flowSteps = [
-    "原始内容",
-    "Messages",
-    "Q&A Pair",
-    "Analyze",
-    "Review",
+    "导入",
+    "浏览 Rounds",
+    "写 Summary/Note",
+    "可选 Analyze",
+    "可选 Review",
     "Knowledge",
+    "Search",
   ];
 
   async function runSourceAnalyzer(simulateFailure = false) {
@@ -468,6 +468,7 @@ export function ConversationDetail({
       return;
     }
 
+    setAnalyzerSuccess(null);
     setLatestAnalyzerRun({ id: "pending", conversationId: state.conversation.id, sourceId: state.source.id, providerId: providerDetails.id, providerName: providerDetails.name, status: "running", startedAt: new Date().toISOString() });
     new BrowserAppEventLogStorage().record("analyze started", state.conversation.id, analyzeProviderId);
     const result = await createAnalyzerExecutionService(analyzeProviderId).runSource(state.source, {
@@ -487,6 +488,7 @@ export function ConversationDetail({
     };
     new BrowserProposalStorage().saveCurrent(conversationProposal);
     setAnalyzerError(null);
+    setAnalyzerSuccess(`已从 Source 生成整理建议「${conversationProposal.title}」。请在 Review 页面审核后确认加入 Knowledge。`);
     setState({
       ...state,
       proposals: [conversationProposal, ...state.proposals],
@@ -495,6 +497,7 @@ export function ConversationDetail({
 
   async function runRoundAnalyzer(round: Round) {
     if (state.status !== "ready") return;
+    setAnalyzerSuccess(null);
     setLatestAnalyzerRun({ id: "pending", conversationId: state.conversation.id, roundId: round.id, providerId: providerDetails.id, providerName: providerDetails.name, status: "running", startedAt: new Date().toISOString() });
     const messageIdSet = new Set(round.messageIds);
     const roundMessages = state.messages.filter((message) => messageIdSet.has(message.id));
@@ -508,11 +511,13 @@ export function ConversationDetail({
     proposalStorage.save(result.proposal);
     proposalStorage.saveCurrent(result.proposal);
     setAnalyzerError(null);
+    setAnalyzerSuccess(`已从 Round「${round.title}」生成整理建议。请在 Review 页面审核后确认加入 Knowledge。`);
     setState({ ...state, proposals: [result.proposal, ...state.proposals] });
   }
 
   async function runConversationSummaryAnalyzer() {
     if (state.status !== "ready") return;
+    setAnalyzerSuccess(null);
     setLatestAnalyzerRun({ id: "pending", conversationId: state.conversation.id, providerId: providerDetails.id, providerName: providerDetails.name, status: "running", startedAt: new Date().toISOString() });
     const rounds = new BrowserRoundStorage().getByConversationId(state.conversation.id);
     const timestamp = new Date().toISOString();
@@ -530,6 +535,8 @@ export function ConversationDetail({
     const storage = new BrowserProposalStorage();
     storage.save(proposal);
     storage.saveCurrent(proposal);
+    setAnalyzerError(null);
+    setAnalyzerSuccess("已生成 Conversation Summary 整理建议。请在 Review 页面审核后确认加入 Knowledge。");
     setState({ ...state, proposals: [proposal, ...state.proposals] });
   }
 
@@ -614,6 +621,7 @@ export function ConversationDetail({
       return;
     }
 
+    setAnalyzerSuccess(null);
     setLatestAnalyzerRun({ id: "pending", conversationId: state.conversation.id, providerId: providerDetails.id, providerName: providerDetails.name, status: "running", startedAt: new Date().toISOString() });
     const selectedMessages = state.messages.filter((message) =>
       selectedMessageIds.has(message.id),
@@ -633,6 +641,7 @@ export function ConversationDetail({
     proposalStorage.saveFromMessages(result.proposal);
     proposalStorage.saveCurrent(result.proposal);
     setAnalyzerError(null);
+    setAnalyzerSuccess(`已从 ${selectedMessages.length} 条选中 Messages 生成整理建议。请在 Review 页面审核后确认加入 Knowledge。`);
     setState({
       ...state,
       proposals: [result.proposal, ...state.proposals],
@@ -1168,12 +1177,12 @@ export function ConversationDetail({
       <nav aria-label="Conversation 整理流程" className="mt-8 rounded-xl border border-sky-200 bg-sky-50 p-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <p className="text-sm font-semibold text-sky-950">Conversation → Knowledge 流程</p>
-            <p className="mt-1 text-xs text-sky-800">当前建议处理 Step {activeFlowStep}</p>
+            <p className="text-sm font-semibold text-sky-950">推荐整理流程</p>
+            <p className="mt-1 text-xs text-sky-800">导入 → 浏览 Rounds → 写 Summary/Note → 可选 Analyze → 可选 Review → Knowledge → Search</p>
           </div>
           <Link className="text-xs font-semibold text-sky-900 underline" href="/help">查看操作手册</Link>
         </div>
-        <ol className="mt-4 grid gap-2 sm:grid-cols-3 lg:grid-cols-6">
+        <ol className="mt-4 grid gap-2 sm:grid-cols-4 lg:grid-cols-7">
           {flowSteps.map((label, index) => {
             const step = index + 1;
             const active = step === activeFlowStep;
@@ -1192,16 +1201,14 @@ export function ConversationDetail({
         <div className="mt-4 text-sm leading-6 text-sky-950">
           {!hasOriginalContent ? (
             <p>还没有原始内容。请先前往 <Link className="font-semibold underline" href="/import">Import</Link> 导入材料。</p>
-          ) : state.messages.length === 0 ? (
-            <p>原始内容已就绪。下一步请点击“从原始文本生成 Messages”。</p>
-          ) : proposals.length > 0 && knowledgeCount === 0 ? (
-            <p>整理建议已经生成。请前往 <Link className="font-semibold underline" href="/review">Review</Link> 人工审核。</p>
           ) : knowledgeCount > 0 ? (
-            <p>已有 Knowledge。你仍可继续从 Timeline 或 Q&amp;A Pair 选择其它内容整理。</p>
+            <p>已有 Knowledge。你仍可继续从 Rounds 选择其他内容整理，或前往 <Link className="font-semibold underline" href="/search">Search</Link> 检索。</p>
+          ) : proposals.length > 0 ? (
+            <p>Proposal（AI 整理建议）已经生成。请前往 <Link className="font-semibold underline" href="/review">Review</Link> 人工审核。也可以跳过 Analyze，直接手动创建 Knowledge。</p>
           ) : selectedMessageIds.size > 0 ? (
-            <p>已选择 {selectedMessageIds.size} 条 Messages。下一步点击“Analyze / 生成整理建议”。</p>
+            <p>已选择 {selectedMessageIds.size} 条 Messages。下一步点击「Analyze / 生成整理建议」（可选），或直接在 Round 中写 Summary/Note。</p>
           ) : (
-            <p>Messages 已就绪。可用 Timeline 查看原始轮次，或切换 Q&amp;A Pair 按一问一答阅读和选择。</p>
+            <p>浏览下方 Rounds，为每个 Round 写 Summary/Note。需要 AI 辅助时再点击 Analyze（可选）；没有 Proposal 也可以直接手动创建 Knowledge。</p>
           )}
         </div>
       </nav>
@@ -1487,10 +1494,10 @@ export function ConversationDetail({
 
       <section className="detail-section">
         <div className="detail-section-heading">
-          <p className="detail-kicker">06 · Messages (underlying data)</p>
-          <h2 className="detail-title">Advanced / Raw Data · Message Timeline</h2>
+          <p className="detail-kicker">06 · 高级 / 原始数据（日常不用）</p>
+          <h2 className="detail-title">Message Timeline / Raw Data</h2>
           <p className="detail-description">
-            底层原始数据默认折叠；旧 Message / Q&amp;A Pair 功能继续可用。
+            底层原始数据，属于高级纠错区，日常整理用 Round 即可。默认折叠；旧 Message / Q&amp;A Pair 功能继续可用。
           </p>
         </div>
         <div className="mb-4 flex flex-wrap items-center gap-2">
@@ -1960,10 +1967,10 @@ export function ConversationDetail({
 
       <section className="detail-section">
         <div className="detail-section-heading">
-          <p className="detail-kicker">06 · Proposal Workspace</p>
-          <h2 className="detail-title">整理建议</h2>
+          <p className="detail-kicker">06 · AI 整理建议（可选，不是必经流程）</p>
+          <h2 className="detail-title">Proposal / 整理建议</h2>
           <p className="detail-description">
-            按创建时间查看、追溯和管理当前 Conversation 下的所有 Proposal。
+            AI 生成的整理草稿，可选使用。没有 Proposal 也可以直接手动创建 Knowledge。按创建时间查看、追溯和管理当前 Conversation 下的所有 Proposal。
           </p>
         </div>
         <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
@@ -2023,9 +2030,21 @@ export function ConversationDetail({
             {(latestAnalyzerRun.status === "failed" || latestAnalyzerRun.status === "timeout") ? <div className="mt-3 flex flex-wrap gap-2"><button className="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-xs font-semibold" onClick={switchToDemo} type="button">Switch to Demo</button><Link className="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-xs font-semibold" href="/settings">Increase Timeout</Link></div> : null}
           </div>
         ) : null}
+        {analyzerSuccess ? (
+          <div className="mb-5 rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800" role="status">
+            <p className="font-semibold">✅ Proposal 已生成</p>
+            <p className="mt-1">{analyzerSuccess}</p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Link className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-800" href="/review">前往 Review 审核</Link>
+              <button className="rounded-lg border border-emerald-300 bg-white px-4 py-2 text-sm font-semibold text-emerald-800 hover:bg-emerald-100" onClick={() => setAnalyzerSuccess(null)} type="button">关闭提示</button>
+            </div>
+          </div>
+        ) : null}
         {analyzerError ? (
           <div className="mb-5 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800">
-            <p>未生成 AI 整理建议：{analyzerError}</p><p className="mt-2">本次失败不写入任何 Proposal 或 Knowledge。</p>
+            <p className="font-semibold">❌ 未生成 AI 整理建议</p>
+            <p className="mt-1">{analyzerError}</p>
+            <p className="mt-2 text-xs text-red-600">本次失败不写入任何 Proposal 或 Knowledge。如果超时，可以尝试 Increase Timeout 或切换 Provider 后重试。Analyze 不是必经流程，你也可以手动创建 Knowledge。</p>
             {latestAnalyzerRun?.providerId === "ollama" ? (
               <p className="mt-2 leading-6">
                 本次失败未写入 Proposal。你可以前往{" "}
