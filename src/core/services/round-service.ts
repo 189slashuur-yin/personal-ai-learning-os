@@ -5,7 +5,7 @@ export type CreateRoundInput = Pick<
   Round,
   "conversationId" | "question" | "answer" | "messageIds"
 > &
-  Partial<Pick<Round, "title" | "note" | "order">>;
+  Partial<Pick<Round, "title" | "note" | "summary" | "order">>;
 
 export type UpdateRoundInput = Partial<
   Pick<Round, "title" | "question" | "answer" | "messageIds" | "note" | "summary">
@@ -63,6 +63,7 @@ export class RoundService {
       answer: input.answer.trim(),
       messageIds: uniqueMessageIds(input.messageIds),
       note: normalizeOptional(input.note),
+      summary: normalizeOptional(input.summary),
       createdAt: timestamp,
       updatedAt: timestamp,
     };

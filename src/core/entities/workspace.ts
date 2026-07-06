@@ -13,4 +13,7 @@ export type Workspace = {
   createdAt: string;
   updatedAt: string;
   archivedAt?: string;
+  // v1.3 reserved — Folder UI not yet implemented
+  folderId?: string;
+  parentFolderId?: string;
 };

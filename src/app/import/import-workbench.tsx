@@ -19,6 +19,8 @@ import { BrowserSourceStorage } from "@/infrastructure/storage/browser-source-st
 import { BrowserWorkspaceStorage } from "@/infrastructure/storage/browser-workspace-storage";
 import { BrowserAppEventLogStorage } from "@/infrastructure/storage/browser-feedback-storage";
 import { RoundService } from "@/core/services/round-service";
+import { ConversationVersionService } from "@/core/services/conversation-version-service";
+import { BrowserConversationVersionStorage } from "@/infrastructure/storage/browser-conversation-version-storage";
 import { ChatGPTExportImport } from "./chatgpt-export-import";
 
 const pipeline = new ImportParserPipeline();
@@ -58,6 +60,12 @@ export function ImportWorkbench() {
   const [existingRawText, setExistingRawText] = useState("");
   const [existingParserId, setExistingParserId] = useState<ConversationParserId>("chatgpt");
   const [existingImportReport, setExistingImportReport] = useState<{ appendedMessages: number; appendedRounds: number; skipped: number } | null>(null);
+
+  // R10: Conversation Merge
+  const [mergeSourceId, setMergeSourceId] = useState("");
+  const [mergeTargetId, setMergeTargetId] = useState("");
+  const [mergePreview, setMergePreview] = useState<{ sourceTitle: string; sourceMessages: number; sourceRounds: number; targetTitle: string; targetMessages: number; targetRounds: number } | null>(null);
+  const [mergeReport, setMergeReport] = useState<string | null>(null);
 
   const preview = useMemo(
     () =>
@@ -182,6 +190,98 @@ export function ImportWorkbench() {
       new BrowserAppEventLogStorage().record("import created", selectedConversationId, `existing ${appendMode}`);
     } catch {
       setError("导入失败，请确认浏览器允许本地保存后重试。");
+    }
+  }
+
+  // R10: Merge preview
+  function previewMerge() {
+    if (!mergeSourceId || !mergeTargetId || mergeSourceId === mergeTargetId) {
+      setError("请选择不同的源和目标 Conversation。");
+      return;
+    }
+    const convStorage = new BrowserConversationStorage();
+    const msgStorage = new BrowserMessageStorage();
+    const roundStorage = new BrowserRoundStorage();
+    const source = convStorage.getById(mergeSourceId);
+    const target = convStorage.getById(mergeTargetId);
+    if (!source || !target) { setError("Conversation 不存在。"); return; }
+    const sourceMessages = msgStorage.getByConversationId(mergeSourceId);
+    const sourceRounds = roundStorage.getByConversationId(mergeSourceId);
+    const targetMessages = msgStorage.getByConversationId(mergeTargetId);
+    const targetRounds = roundStorage.getByConversationId(mergeTargetId);
+    setMergePreview({
+      sourceTitle: source.title,
+      sourceMessages: sourceMessages.length,
+      sourceRounds: sourceRounds.length,
+      targetTitle: target.title,
+      targetMessages: targetMessages.length,
+      targetRounds: targetRounds.length,
+    });
+    setError(null);
+  }
+
+  function confirmMerge() {
+    if (!mergePreview || !mergeSourceId || !mergeTargetId) return;
+    if (!window.confirm(`将「${mergePreview.sourceTitle}」的全部内容合并到「${mergePreview.targetTitle}」？\n\n源：${mergePreview.sourceMessages} Messages · ${mergePreview.sourceRounds} Rounds\n目标：${mergePreview.targetMessages} Messages · ${mergePreview.targetRounds} Rounds\n\n合并后目标将包含两边的全部内容。源 Conversation 保持不变。`)) return;
+    try {
+      const convStorage = new BrowserConversationStorage();
+      const msgStorage = new BrowserMessageStorage();
+      const roundStorage = new BrowserRoundStorage();
+      const versionStorage = new BrowserConversationVersionStorage();
+      const target = convStorage.getById(mergeTargetId);
+      if (!target) { setError("目标 Conversation 不存在。"); return; }
+
+      // Auto-snapshot on target before merge
+      new ConversationVersionService({
+        conversations: convStorage,
+        messages: msgStorage,
+        versions: versionStorage,
+      }).createSnapshot(mergeTargetId, `自动恢复点 — Merge「${mergePreview.sourceTitle}」`, `合并来自「${mergePreview.sourceTitle}」的内容前自动创建`);
+
+      const sourceMessages = msgStorage.getByConversationId(mergeSourceId);
+      const targetMessages = msgStorage.getByConversationId(mergeTargetId);
+      const sourceRounds = roundStorage.getByConversationId(mergeSourceId);
+
+      // Append source messages to target
+      const maxOrder = targetMessages.reduce((max, m) => Math.max(max, m.order), -1);
+      const appendedMessages = sourceMessages.map((msg, i) => ({
+        ...msg,
+        id: crypto.randomUUID(),
+        conversationId: mergeTargetId,
+        order: maxOrder + 1 + i,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }));
+      msgStorage.replaceByConversationId(mergeTargetId, [...targetMessages, ...appendedMessages]);
+      const newMessageIds = appendedMessages.map((m) => m.id);
+
+      // Append source rounds to target
+      const roundService = new RoundService(roundStorage);
+      for (const round of sourceRounds) {
+        const mappedMessageIds = round.messageIds.map((mid) => {
+          const idx = sourceMessages.findIndex((m) => m.id === mid);
+          return idx >= 0 ? newMessageIds[idx] : undefined;
+        }).filter(Boolean) as string[];
+        roundService.createRound({
+          conversationId: mergeTargetId,
+          title: round.title,
+          question: round.question,
+          answer: round.answer,
+          messageIds: mappedMessageIds,
+          note: round.note,
+          summary: round.summary,
+        });
+      }
+
+      // Update target conversation timestamp
+      convStorage.save({ ...target, updatedAt: new Date().toISOString() });
+
+      setMergeReport(`✅ 已合并：${appendedMessages.length} Messages · ${sourceRounds.length} Rounds →「${mergePreview.targetTitle}」`);
+      setMergePreview(null);
+      setMergeSourceId("");
+      setMergeTargetId("");
+    } catch {
+      setError("合并失败，请确认浏览器允许本地保存后重试。");
     }
   }
 
@@ -445,6 +545,76 @@ export function ImportWorkbench() {
               <Link className="rounded-lg bg-emerald-700 px-4 py-2 text-xs font-semibold text-white hover:bg-emerald-800" href={`/conversation/${selectedConversationId}`}>打开 Conversation →</Link>
               <button className="rounded-lg border border-emerald-300 bg-white px-4 py-2 text-xs font-semibold text-emerald-800" onClick={() => { setExistingImportReport(null); setExistingRawText(""); setSelectedConversationId(""); }} type="button">导入更多</button>
             </div>
+          </div>
+        )}
+      </details>
+
+      {/* R10: Merge Conversation */}
+      <details className="mt-6 rounded-xl border border-purple-200 bg-purple-50 p-5">
+        <summary className="cursor-pointer text-sm font-semibold text-purple-950">🔀 Merge Conversation / 合并对话</summary>
+        <p className="mt-2 text-xs text-purple-800">将源 Conversation 的全部 Messages 和 Rounds 追加到目标 Conversation。合并前自动创建快照，源 Conversation 保持不变。</p>
+        {mergeReport ? (
+          <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 p-4">
+            <p className="font-semibold text-emerald-900">{mergeReport}</p>
+            <div className="mt-3 flex gap-2">
+              <Link className="rounded-lg bg-emerald-700 px-4 py-2 text-xs font-semibold text-white hover:bg-emerald-800" href={`/conversation/${mergeTargetId}`}>打开目标 Conversation →</Link>
+              <button className="rounded-lg border border-emerald-300 bg-white px-4 py-2 text-xs font-semibold text-emerald-800" onClick={() => { setMergeReport(null); setMergeSourceId(""); setMergeTargetId(""); }} type="button">执行其他合并</button>
+            </div>
+          </div>
+        ) : (
+          <div className="mt-4 space-y-4">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <label className="block text-sm font-medium text-zinc-800">
+                源 Conversation（内容来源）
+                <select
+                  className="mt-2 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2.5"
+                  onChange={(event) => { setMergeSourceId(event.target.value); setMergePreview(null); }}
+                  value={mergeSourceId}
+                >
+                  <option value="">— 请选择 —</option>
+                  {existingConversations.map((conv) => (
+                    <option key={conv.id} value={conv.id} disabled={conv.id === mergeTargetId}>{conv.title} ({conv.sourceType})</option>
+                  ))}
+                </select>
+              </label>
+              <label className="block text-sm font-medium text-zinc-800">
+                目标 Conversation（合并到）
+                <select
+                  className="mt-2 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2.5"
+                  onChange={(event) => { setMergeTargetId(event.target.value); setMergePreview(null); }}
+                  value={mergeTargetId}
+                >
+                  <option value="">— 请选择 —</option>
+                  {existingConversations.map((conv) => (
+                    <option key={conv.id} value={conv.id} disabled={conv.id === mergeSourceId}>{conv.title} ({conv.sourceType})</option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            {mergeSourceId && mergeTargetId && mergeSourceId !== mergeTargetId ? (
+              <button className="rounded-lg border border-purple-300 bg-white px-4 py-2 text-sm font-semibold text-purple-800 hover:bg-purple-100" onClick={previewMerge} type="button">Preview Merge</button>
+            ) : null}
+            {mergePreview ? (
+              <div className="rounded-lg border border-purple-200 bg-white p-4">
+                <p className="text-sm font-semibold text-purple-950">Merge Preview</p>
+                <div className="mt-3 grid grid-cols-2 gap-4 text-sm">
+                  <div className="rounded-lg bg-zinc-50 p-3">
+                    <p className="font-semibold text-zinc-700">源：{mergePreview.sourceTitle}</p>
+                    <p className="mt-1 text-xs text-zinc-500">{mergePreview.sourceMessages} Messages · {mergePreview.sourceRounds} Rounds</p>
+                  </div>
+                  <div className="rounded-lg bg-zinc-50 p-3">
+                    <p className="font-semibold text-zinc-700">目标：{mergePreview.targetTitle}</p>
+                    <p className="mt-1 text-xs text-zinc-500">{mergePreview.targetMessages} Messages · {mergePreview.targetRounds} Rounds（合并前）</p>
+                  </div>
+                </div>
+                <p className="mt-3 text-xs text-zinc-500">合并后目标将包含 {mergePreview.targetMessages + mergePreview.sourceMessages} Messages · {mergePreview.targetRounds + mergePreview.sourceRounds} Rounds。</p>
+                <div className="mt-3 flex gap-2">
+                  <button className="rounded-lg bg-purple-700 px-4 py-2 text-xs font-semibold text-white hover:bg-purple-800" onClick={confirmMerge} type="button">Confirm Merge</button>
+                  <button className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-xs font-semibold text-zinc-600" onClick={() => setMergePreview(null)} type="button">Cancel</button>
+                </div>
+              </div>
+            ) : null}
+            {error ? <p className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700" role="alert">{error}</p> : null}
           </div>
         )}
       </details>

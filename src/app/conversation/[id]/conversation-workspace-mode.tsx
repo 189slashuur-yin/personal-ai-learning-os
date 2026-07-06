@@ -141,13 +141,11 @@ export function ConversationWorkspaceMode({ conversationId, onAnalyzeRound }: { 
               </div>
             ) : null}
 
-            {/* Note */}
-            {selected.note ? (
-              <div className="mt-4 rounded-lg bg-amber-50 p-4">
-                <p className="text-xs font-semibold text-amber-800">Note</p>
-                <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-amber-950">{selected.note}</p>
-              </div>
-            ) : null}
+            {/* Note — always visible */}
+            <div className="mt-4 rounded-lg bg-amber-50 p-4">
+              <p className="text-xs font-semibold text-amber-800">Note</p>
+              <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-amber-950">{selected.note || "暂无备注。"}</p>
+            </div>
 
             {/* Round navigation */}
             <div className="mt-5 flex items-center justify-between border-t border-zinc-100 pt-4">
@@ -243,13 +241,14 @@ export function ConversationWorkspaceMode({ conversationId, onAnalyzeRound }: { 
 
             {/* Linked content */}
             <div className="mt-5 grid gap-3 text-sm">
+              {proposals.some((p) => p.sourceRoundId === selected.id) ? (
               <div>
                 <p className="font-semibold">Linked Proposal</p>
                 {proposals.filter((proposal) => proposal.sourceRoundId === selected.id).map((proposal) => (
                   <Link className="mt-1 block text-sky-700" href={`/review?proposal=${proposal.id}`} key={proposal.id}>{proposal.title}</Link>
                 ))}
-                {!proposals.some((p) => p.sourceRoundId === selected.id) ? <p className="mt-1 text-xs text-zinc-400">暂无</p> : null}
               </div>
+            ) : null}
               <div>
                 <p className="font-semibold">Linked Knowledge</p>
                 {knowledge.filter((card) => card.sourceRoundId === selected.id).map((card) => (

@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { createPortal } from "react-dom";
 import {
   type KeyboardEvent,
   useEffect,
@@ -193,6 +194,12 @@ export function ConversationDetail({
   const [analyzerElapsed, setAnalyzerElapsed] = useState(0);
   const analyzerTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // R9: More Menu
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
+  const [moreMenuPos, setMoreMenuPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
+  const moreMenuRef = useRef<HTMLDivElement>(null);
+  const moreMenuButtonRef = useRef<HTMLButtonElement>(null);
+
   // K3: Summary undo/redo
   const [summaryUndoStack, setSummaryUndoStack] = useState<string[]>([]);
   const [summaryRedoStack, setSummaryRedoStack] = useState<string[]>([]);
@@ -373,6 +380,23 @@ export function ConversationDetail({
     return () => window.clearTimeout(loadTimer);
   }, [conversationId, providerDetails.id]);
 
+  // R9: Close More Menu on outside click
+  useEffect(() => {
+    if (!moreMenuOpen) return;
+    function handleClick(event: MouseEvent) {
+      if (
+        moreMenuRef.current &&
+        !moreMenuRef.current.contains(event.target as Node) &&
+        moreMenuButtonRef.current &&
+        !moreMenuButtonRef.current.contains(event.target as Node)
+      ) {
+        setMoreMenuOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [moreMenuOpen]);
+
   useEffect(() => {
     if (
       state.status !== "ready" ||
@@ -464,7 +488,7 @@ export function ConversationDetail({
   const flowSteps = [
     { label: "导入", href: "/import" },
     { label: "浏览 Rounds", anchor: "section-rounds" },
-    { label: "写 Summary/Note", anchor: "section-summary" },
+    { label: "写 Summary/Note", anchor: "section-info" },
     { label: "可选 Analyze", anchor: "section-proposal" },
     { label: "可选 Review", href: "/review" },
     { label: "Knowledge", anchor: "section-knowledge" },
@@ -1152,10 +1176,10 @@ export function ConversationDetail({
         </button>
         <button
           className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800 hover:border-amber-300 hover:bg-amber-100"
-          onClick={() => scrollToAnchor("section-restore")}
+          onClick={() => scrollToAnchor("section-history")}
           type="button"
         >
-          🔄 版本恢复 / Restore
+          🔄 History / 版本历史
         </button>
       </div>
 
@@ -1197,31 +1221,47 @@ export function ConversationDetail({
             >
               📥 继续导入到本对话
             </Link>
-            <button className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs font-semibold" onClick={() => exportConversation("markdown")} type="button">Export Markdown</button>
-            <button className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs font-semibold" onClick={() => exportConversation("json")} type="button">Export JSON</button>
             <div className="flex rounded-lg border border-zinc-200 bg-white p-1 text-xs font-semibold"><button className={`rounded-md px-3 py-1.5 ${detailMode === "classic" ? "bg-zinc-950 text-white" : "text-zinc-600"}`} onClick={() => setDetailMode("classic")} type="button">Classic</button><button className={`rounded-md px-3 py-1.5 ${detailMode === "workspace" ? "bg-zinc-950 text-white" : "text-zinc-600"}`} onClick={() => setDetailMode("workspace")} type="button">Workspace Mode</button></div>
-            <button
-              className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs font-semibold text-zinc-600 shadow-sm hover:border-zinc-300 hover:text-zinc-950"
-              onClick={createTaskFromConversation}
-              type="button"
-            >
-              Create Task（可选）
-            </button>
-            <Link
-              className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs font-semibold text-zinc-600 shadow-sm hover:border-zinc-300 hover:text-zinc-950"
-              href={`/search?q=${encodeURIComponent(conversation.title)}&workspaceId=${encodeURIComponent(conversation.workspaceId ?? DEFAULT_WORKSPACE_ID)}&type=conversation`}
-            >
-              搜索此 Conversation
-            </Link>
-            <Link
-              className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs font-semibold text-zinc-600 shadow-sm hover:border-zinc-300 hover:text-zinc-950"
-              href={`/feedback?page=${encodeURIComponent(`/conversation/${conversation.id}`)}`}
-            >
-              记录反馈
-            </Link>
             <span className="rounded-full border border-zinc-200 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-600 shadow-sm">
               {conversation.sourceType}
             </span>
+            <button
+              ref={moreMenuButtonRef}
+              className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs font-semibold text-zinc-600 hover:border-zinc-300 hover:text-zinc-950"
+              onClick={() => {
+                if (!moreMenuOpen && moreMenuButtonRef.current) {
+                  const rect = moreMenuButtonRef.current.getBoundingClientRect();
+                  setMoreMenuPos({ top: rect.bottom + 4, left: rect.left });
+                }
+                setMoreMenuOpen((prev) => !prev);
+              }}
+              type="button"
+            >
+              More ▾
+            </button>
+            {moreMenuOpen
+              ? createPortal(
+                  <div
+                    ref={moreMenuRef}
+                    className="rounded-xl border border-zinc-200 bg-white p-2 shadow-lg"
+                    style={{
+                      position: "fixed",
+                      zIndex: 9999,
+                      top: moreMenuPos.top,
+                      left: moreMenuPos.left,
+                    }}
+                  >
+                    <div className="flex flex-col gap-1">
+                      <button className="rounded-lg px-3 py-2 text-left text-xs font-semibold text-zinc-700 hover:bg-zinc-50" onClick={() => { exportConversation("markdown"); setMoreMenuOpen(false); }} type="button">Export Markdown</button>
+                      <button className="rounded-lg px-3 py-2 text-left text-xs font-semibold text-zinc-700 hover:bg-zinc-50" onClick={() => { exportConversation("json"); setMoreMenuOpen(false); }} type="button">Export JSON</button>
+                      <button className="rounded-lg px-3 py-2 text-left text-xs font-semibold text-zinc-700 hover:bg-zinc-50" onClick={() => { createTaskFromConversation(); setMoreMenuOpen(false); }} type="button">Create Task</button>
+                      <Link className="rounded-lg px-3 py-2 text-left text-xs font-semibold text-zinc-700 hover:bg-zinc-50" href={`/search?q=${encodeURIComponent(conversation.title)}&workspaceId=${encodeURIComponent(conversation.workspaceId ?? DEFAULT_WORKSPACE_ID)}&type=conversation`} onClick={() => setMoreMenuOpen(false)}>搜索此 Conversation</Link>
+                      <Link className="rounded-lg px-3 py-2 text-left text-xs font-semibold text-zinc-700 hover:bg-zinc-50" href={`/feedback?page=${encodeURIComponent(`/conversation/${conversation.id}`)}`} onClick={() => setMoreMenuOpen(false)}>记录反馈</Link>
+                    </div>
+                  </div>,
+                  document.body,
+                )
+              : null}
           </div>
         </div>
       </header>
@@ -1318,7 +1358,7 @@ export function ConversationDetail({
         </div>
       </nav>
 
-      <section className="detail-section">
+      <section className="detail-section" id="section-info">
         <div className="detail-section-heading">
           <p className="detail-kicker">01 · Context</p>
           <h2 className="detail-title">Conversation 信息</h2>
@@ -1400,6 +1440,37 @@ export function ConversationDetail({
             </dd>
           </div>
         </dl>
+
+        {/* Conversation Summary — part of Conversation Information */}
+        <div className="mt-4 rounded-xl border border-zinc-200 bg-white p-5">
+          <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+            <div>
+              <h3 className="text-sm font-semibold text-zinc-900">Conversation Summary / 对话总结</h3>
+              <p className="mt-1 text-xs text-zinc-500">整本书摘要，由你确认后保存；Analyzer 只生成 Proposal 草稿。</p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              {summaryModified ? <span className="rounded-full bg-amber-100 px-2.5 py-1 font-semibold text-amber-800">● Modified</span> : summaryLastSaved ? <span className="rounded-full bg-emerald-100 px-2.5 py-1 font-semibold text-emerald-800">● Saved {summaryLastSaved}</span> : null}
+              {proposals.length > 0 ? <span className="rounded-full bg-sky-100 px-2.5 py-1 font-semibold text-sky-800">Proposal Available</span> : null}
+              {!summaryDraft.trim() && !conclusionDraft.trim() && !pendingQuestionsDraft.trim() ? <span className="rounded-full bg-zinc-100 px-2.5 py-1 font-semibold text-zinc-600">Draft</span> : null}
+            </div>
+          </div>
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            <button className="rounded-md border border-zinc-200 bg-white px-2.5 py-1.5 text-xs font-medium text-zinc-600 hover:bg-zinc-50 disabled:opacity-30" disabled={summaryUndoStack.length === 0} onClick={undoSummary} type="button" title="撤销">↩ Undo</button>
+            <button className="rounded-md border border-zinc-200 bg-white px-2.5 py-1.5 text-xs font-medium text-zinc-600 hover:bg-zinc-50 disabled:opacity-30" disabled={summaryRedoStack.length === 0} onClick={redoSummary} type="button" title="重做">↪ Redo</button>
+            <button className="rounded-md border border-zinc-200 bg-white px-2.5 py-1.5 text-xs font-medium text-zinc-600 hover:bg-zinc-50" onClick={resetSummary} type="button" title="重置为已保存版本">⟳ Reset</button>
+            <span className="text-xs text-zinc-400">| Auto-save on</span>
+          </div>
+          <div className="grid gap-4 lg:grid-cols-3">
+            <label className="text-sm font-semibold">总结<textarea className="mt-2 min-h-28 w-full rounded-lg border border-zinc-200 p-3 font-normal" onChange={(event) => { pushSummaryUndo(event.target.value); setSummaryDraft(event.target.value); setSummaryModified(true); }} value={summaryDraft} /></label>
+            <label className="text-sm font-semibold">最终结论<textarea className="mt-2 min-h-28 w-full rounded-lg border border-zinc-200 p-3 font-normal" onChange={(event) => setConclusionDraft(event.target.value)} value={conclusionDraft} /></label>
+            <label className="text-sm font-semibold">待确认点<textarea className="mt-2 min-h-28 w-full rounded-lg border border-zinc-200 p-3 font-normal" onChange={(event) => setPendingQuestionsDraft(event.target.value)} value={pendingQuestionsDraft} /></label>
+          </div>
+          <div className="mt-4 flex flex-wrap gap-3">
+            <button className="rounded-lg bg-zinc-950 px-4 py-2.5 text-sm font-semibold text-white" onClick={() => { saveConversationSummary(); setSummaryModified(false); setSummaryLastSaved(new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })); }} type="button">确认保存</button>
+            <button className="rounded-lg border border-zinc-200 px-4 py-2.5 text-sm font-semibold" onClick={runConversationSummaryAnalyzer} type="button">可选：从所有 Rounds 生成 AI 整理建议</button>
+          </div>
+        </div>
+
         <div className="mt-4 rounded-xl border border-zinc-200 bg-white p-5">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
@@ -1455,12 +1526,12 @@ export function ConversationDetail({
 
       <ConversationAssets conversationId={conversation.id} />
 
-      <section className="detail-section" id="section-restore">
+      <section className="detail-section" id="section-history">
         <div className="detail-section-heading">
-          <p className="detail-kicker">03 · 版本恢复 / Restore</p>
-          <h2 className="detail-title">版本恢复</h2>
+          <p className="detail-kicker">History / 版本历史</p>
+          <h2 className="detail-title">版本历史</h2>
           <p className="detail-description">
-            用于撤回 Split、Merge、Delete、Import 等整理操作。保存当前 Conversation 与 Messages 的快照；不包含 Proposal、Knowledge、AnalyzerRun、Tag 或 Provider。
+            Auto Snapshot · Manual Snapshot · Import · Split · Merge · Delete · Duplicate · Move · Restore。所有整理操作自动创建快照；也可手动创建。仅保存 Conversation 与 Messages，不包含 Proposal、Knowledge、AnalyzerRun、Tag 或 Provider。
           </p>
         </div>
         <div>
@@ -1474,7 +1545,7 @@ export function ConversationDetail({
           ) : null}
           <div className="grid gap-3 rounded-xl border border-zinc-200 bg-white p-5 sm:grid-cols-2">
             <label className="text-xs font-medium text-zinc-600">
-              恢复点名称
+              快照名称
               <input
                 className="mt-1.5 w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm text-zinc-900 outline-none focus:border-zinc-400 focus:ring-2 focus:ring-zinc-100"
                 onChange={(event) => setSnapshotName(event.target.value)}
@@ -1498,22 +1569,29 @@ export function ConversationDetail({
                 onClick={createSnapshot}
                 type="button"
               >
-                创建恢复点
+                创建手动快照
               </button>
             </div>
           </div>
           {state.versions.length > 0 ? (
             <ol className="mt-4 space-y-3">
-              {state.versions.map((version) => (
+              {[...state.versions].reverse().map((version) => {
+                const isAuto = version.name.startsWith("自动恢复点");
+                return (
                 <li
                   className="rounded-xl border border-zinc-200 bg-white p-4"
                   key={version.id}
                 >
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
-                      <h3 className="font-semibold text-zinc-950">
-                        {version.name}
-                      </h3>
+                      <div className="flex items-center gap-2">
+                        <h3 className="font-semibold text-zinc-950">
+                          {version.name}
+                        </h3>
+                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${isAuto ? "bg-sky-100 text-sky-700" : "bg-amber-100 text-amber-700"}`}>
+                          {isAuto ? "Auto" : "Manual"}
+                        </span>
+                      </div>
                       <p className="mt-1 text-xs text-zinc-500">
                         {new Intl.DateTimeFormat("zh-CN", {
                           dateStyle: "medium",
@@ -1530,7 +1608,7 @@ export function ConversationDetail({
                         onClick={() => restoreSnapshot(version)}
                         type="button"
                       >
-                        恢复此版本
+                        Restore
                       </button>
                     </div>
                   </div>
@@ -1538,11 +1616,12 @@ export function ConversationDetail({
                     {version.description || "无备注"}
                   </p>
                 </li>
-              ))}
+                );
+              })}
             </ol>
           ) : (
             <p className="mt-4 rounded-xl border border-dashed border-zinc-300 bg-zinc-50 p-5 text-sm text-zinc-500">
-              尚未创建恢复点。
+              尚无版本记录。执行整理操作时将自动创建快照，也可手动创建。
             </p>
           )}
         </div>
@@ -1593,7 +1672,6 @@ export function ConversationDetail({
         </div>
       </section>
 
-      <section className="detail-section" id="section-summary"><div className="detail-section-heading"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="detail-kicker">Summary</p><h2 className="detail-title">Conversation Summary</h2><p className="detail-description">总结、最终结论与待确认点由你确认后保存；Analyzer 只生成 Proposal 草稿。</p></div><div className="flex flex-wrap items-center gap-2 text-xs">{summaryModified ? <span className="rounded-full bg-amber-100 px-2.5 py-1 font-semibold text-amber-800">● Modified</span> : summaryLastSaved ? <span className="rounded-full bg-emerald-100 px-2.5 py-1 font-semibold text-emerald-800">● Saved {summaryLastSaved}</span> : null}{proposals.length > 0 ? <span className="rounded-full bg-sky-100 px-2.5 py-1 font-semibold text-sky-800">Proposal Available</span> : null}{!summaryDraft.trim() && !conclusionDraft.trim() && !pendingQuestionsDraft.trim() ? <span className="rounded-full bg-zinc-100 px-2.5 py-1 font-semibold text-zinc-600">Draft</span> : null}</div></div></div><div className="rounded-xl border border-zinc-200 bg-white p-5"><div className="mb-3 flex flex-wrap items-center gap-2"><button className="rounded-md border border-zinc-200 bg-white px-2.5 py-1.5 text-xs font-medium text-zinc-600 hover:bg-zinc-50 disabled:opacity-30" disabled={summaryUndoStack.length === 0} onClick={undoSummary} type="button" title="撤销">↩ Undo</button><button className="rounded-md border border-zinc-200 bg-white px-2.5 py-1.5 text-xs font-medium text-zinc-600 hover:bg-zinc-50 disabled:opacity-30" disabled={summaryRedoStack.length === 0} onClick={redoSummary} type="button" title="重做">↪ Redo</button><button className="rounded-md border border-zinc-200 bg-white px-2.5 py-1.5 text-xs font-medium text-zinc-600 hover:bg-zinc-50" onClick={resetSummary} type="button" title="重置为已保存版本">⟳ Reset</button><span className="text-xs text-zinc-400">| Auto-save on</span></div><div className="grid gap-4 lg:grid-cols-3"><label className="text-sm font-semibold">总结<textarea className="mt-2 min-h-28 w-full rounded-lg border border-zinc-200 p-3 font-normal" onChange={(event) => { pushSummaryUndo(event.target.value); setSummaryDraft(event.target.value); setSummaryModified(true); }} value={summaryDraft} /></label><label className="text-sm font-semibold">最终结论<textarea className="mt-2 min-h-28 w-full rounded-lg border border-zinc-200 p-3 font-normal" onChange={(event) => setConclusionDraft(event.target.value)} value={conclusionDraft} /></label><label className="text-sm font-semibold">待确认点<textarea className="mt-2 min-h-28 w-full rounded-lg border border-zinc-200 p-3 font-normal" onChange={(event) => setPendingQuestionsDraft(event.target.value)} value={pendingQuestionsDraft} /></label></div><div className="mt-4 flex flex-wrap gap-3"><button className="rounded-lg bg-zinc-950 px-4 py-2.5 text-sm font-semibold text-white" onClick={() => { saveConversationSummary(); setSummaryModified(false); setSummaryLastSaved(new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })); }} type="button">确认保存</button><button className="rounded-lg border border-zinc-200 px-4 py-2.5 text-sm font-semibold" onClick={runConversationSummaryAnalyzer} type="button">可选：从所有 Rounds 生成 AI 整理建议</button></div></div></section>
 
       <div id="section-rounds">
         {detailMode === "workspace" ? <ConversationWorkspaceMode conversationId={conversationId} onAnalyzeRound={runRoundAnalyzer} /> : <RoundWorkspace conversationId={conversationId} onAnalyzeRound={runRoundAnalyzer} />}
