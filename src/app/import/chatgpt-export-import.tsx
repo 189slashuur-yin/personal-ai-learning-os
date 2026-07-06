@@ -1,6 +1,7 @@
 "use client";
 
 import { type ChangeEvent, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { Workspace } from "@/core/entities/workspace";
 import {
@@ -38,6 +39,7 @@ export function ChatGPTExportImport({
   const [selected, setSelected] = useState<ChatGPTImportPreview | null>(null);
   const [workspaceId, setWorkspaceId] = useState("inbox");
   const [status, setStatus] = useState<string | null>(null);
+  const [importReport, setImportReport] = useState<{ appended: number; skipped: number; unsupported: number; roundsCreated: number; appendOnly: boolean; conversationId: string } | null>(null);
 
   async function chooseFile(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
@@ -76,6 +78,14 @@ export function ChatGPTExportImport({
         result.conversationId,
         `ChatGPT append ${result.appended}; skipped ${result.skipped}`,
       );
+      setImportReport({
+        appended: result.appended,
+        skipped: result.skipped,
+        roundsCreated: result.roundsCreated,
+        appendOnly: selected.appendOnly,
+        conversationId: result.conversationId,
+        unsupported: selected.unsupportedCount,
+      });
       setStatus(
         `导入完成：新增 ${result.appended} Messages，跳过 ${result.skipped}，创建 ${result.roundsCreated} Rounds。${selected.appendOnly ? " 旧 Rounds 未自动覆盖，请按需手动重新生成。" : ""}`,
       );
@@ -146,6 +156,34 @@ export function ChatGPTExportImport({
                 </p>
               ) : null}
               <button className="mt-4 rounded-lg bg-zinc-950 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-40" disabled={!selected.newMessages || !selected.messages.length} onClick={confirmImport} type="button">{selected.appendOnly ? "增量导入新 Messages" : "导入所选 Conversation"}</button>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+      {importReport ? (
+        <div className="mt-5 rounded-xl border-2 border-emerald-200 bg-emerald-50 p-5">
+          <h3 className="font-semibold text-emerald-950">📋 Import Report</h3>
+          <dl className="mt-3 grid gap-3 text-sm sm:grid-cols-4">
+            <div><dt className="text-emerald-700">New · 新增</dt><dd className="mt-1 text-2xl font-bold text-emerald-900">{importReport.appended}</dd></div>
+            <div><dt className="text-emerald-700">Skipped · 跳过</dt><dd className="mt-1 text-2xl font-bold text-emerald-900">{importReport.skipped}</dd></div>
+            <div><dt className="text-emerald-700">Unsupported</dt><dd className="mt-1 text-2xl font-bold text-emerald-900">{importReport.unsupported}</dd></div>
+            <div><dt className="text-emerald-700">Rounds</dt><dd className="mt-1 text-2xl font-bold text-emerald-900">{importReport.roundsCreated}</dd></div>
+          </dl>
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            <div className="rounded-lg bg-white p-3">
+              <p className="text-sm font-semibold text-emerald-900">Existing Conversation</p>
+              <p className="mt-1 text-xs text-emerald-700">导入到已有 Conversation；未创建重复副本。</p>
+            </div>
+            <div className="rounded-lg bg-white p-3">
+              <p className="text-sm font-semibold text-amber-900">{importReport.appendOnly ? "Append only" : "New Conversation"}</p>
+              <p className="mt-1 text-xs text-amber-700">{importReport.appendOnly ? "只追加新 Message，不自动覆盖已有 Rounds。请进入 Conversation 手动 Regenerate Rounds。" : "已创建新 Conversation / Messages / Rounds。"}</p>
+            </div>
+          </div>
+          {importReport.appendOnly ? (
+            <div className="mt-4 rounded-lg border border-amber-300 bg-amber-100 p-4">
+              <p className="text-sm font-semibold text-amber-900">⚠️ 手动操作提醒</p>
+              <p className="mt-1 text-sm text-amber-800">增量导入仅 append 新 Message。如需更新 Round 结构，请在 Conversation 页面手动 Regenerate Rounds。</p>
+              <Link className="mt-3 inline-block rounded-lg bg-amber-200 px-4 py-2 text-sm font-semibold text-amber-900 hover:bg-amber-300" href={`/conversation/${importReport.conversationId}?mode=workspace`}>打开 Conversation →</Link>
             </div>
           ) : null}
         </div>

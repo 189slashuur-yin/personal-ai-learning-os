@@ -174,7 +174,8 @@ export function ConversationDetail({
   );
   const [messageSearchQuery, setMessageSearchQuery] = useState("");
   const [messageView, setMessageView] = useState<MessageView>("timeline");
-  const [isMessageDataVisible, setIsMessageDataVisible] = useState(false);
+  const [messageTimelineMode, setMessageTimelineMode] = useState<"collapsed" | "preview" | "full">("collapsed");
+  const PREVIEW_MESSAGE_COUNT = 5;
   const [detailMode, setDetailMode] = useState<"classic" | "workspace">("classic");
   const [qaPairSearchQuery, setQAPairSearchQuery] = useState("");
   const [qaPairSort, setQAPairSort] = useState<QAPairSort>("order");
@@ -960,6 +961,7 @@ export function ConversationDetail({
     setCollapsedMessageIds(new Set());
     setMessageSearchQuery("");
     setActiveSearchIndex(0);
+    setMessageTimelineMode("collapsed");
     setRestoreStatus("Restored successfully");
   }
 
@@ -1123,6 +1125,12 @@ export function ConversationDetail({
               href={`/search?q=${encodeURIComponent(conversation.title)}&workspaceId=${encodeURIComponent(conversation.workspaceId ?? DEFAULT_WORKSPACE_ID)}&type=conversation`}
             >
               搜索此 Conversation
+            </Link>
+            <Link
+              className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs font-semibold text-zinc-600 shadow-sm hover:border-zinc-300 hover:text-zinc-950"
+              href={`/feedback?page=${encodeURIComponent(`/conversation/${conversation.id}`)}`}
+            >
+              记录反馈
             </Link>
             <span className="rounded-full border border-zinc-200 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-600 shadow-sm">
               {conversation.sourceType}
@@ -1485,14 +1493,57 @@ export function ConversationDetail({
             底层原始数据默认折叠；旧 Message / Q&amp;A Pair 功能继续可用。
           </p>
         </div>
-        <button aria-expanded={isMessageDataVisible} className="mb-4 rounded-lg border border-zinc-200 bg-white px-4 py-2.5 text-sm font-medium text-zinc-700 hover:bg-zinc-50" onClick={() => setIsMessageDataVisible((visible) => !visible)} type="button">{isMessageDataVisible ? "折叠 Message Timeline" : `展开 Message Timeline（${state.messages.length}）`}</button>
-        {isMessageDataVisible ? <div>
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          <span className="text-xs font-semibold uppercase tracking-wider text-zinc-400">
+            {messageTimelineMode === "collapsed" ? "Collapsed" : messageTimelineMode === "preview" ? "Preview" : "Full"}
+          </span>
+          <button
+            aria-pressed={messageTimelineMode === "collapsed"}
+            className={`rounded-lg border px-3 py-2 text-xs font-semibold ${messageTimelineMode === "collapsed" ? "border-zinc-950 bg-zinc-950 text-white" : "border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-50"}`}
+            onClick={() => setMessageTimelineMode("collapsed")}
+            type="button"
+          >
+            Collapsed
+          </button>
+          <button
+            aria-pressed={messageTimelineMode === "preview"}
+            className={`rounded-lg border px-3 py-2 text-xs font-semibold ${messageTimelineMode === "preview" ? "border-zinc-950 bg-zinc-950 text-white" : "border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-50"}`}
+            disabled={state.messages.length === 0}
+            onClick={() => setMessageTimelineMode("preview")}
+            type="button"
+          >
+            Preview
+          </button>
+          <button
+            aria-pressed={messageTimelineMode === "full"}
+            className={`rounded-lg border px-3 py-2 text-xs font-semibold ${messageTimelineMode === "full" ? "border-zinc-950 bg-zinc-950 text-white" : "border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-50"}`}
+            disabled={state.messages.length === 0}
+            onClick={() => setMessageTimelineMode("full")}
+            type="button"
+          >
+            Full
+          </button>
+        </div>
+        {messageTimelineMode === "collapsed" ? (
+          <p className="text-sm text-zinc-500">Message Timeline 已折叠。Round 是默认阅读与操作入口。点击 Preview 查看前 {PREVIEW_MESSAGE_COUNT} 条，或 Full 查看全部。</p>
+        ) : (
+          <div>
           <div className="flex flex-wrap items-center justify-between gap-3">
             <p className="text-sm text-zinc-500">
               {state.messages.length > 0
-                ? `已生成 ${state.messages.length} 条 Message`
+                ? `已生成 ${state.messages.length} 条 Message${messageTimelineMode === "preview" ? ` · 显示前 ${Math.min(PREVIEW_MESSAGE_COUNT, state.messages.length)} 条` : ""}`
                 : "尚未生成 Message"}
             </p>
+            <div className="flex flex-wrap gap-2">
+            {messageTimelineMode === "preview" ? (
+              <button
+                className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-50"
+                onClick={() => setMessageTimelineMode("full")}
+                type="button"
+              >
+                展开全部（{state.messages.length} 条）
+              </button>
+            ) : null}
             <button
               className="rounded-lg bg-zinc-950 px-4 py-2.5 text-sm font-medium text-white hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-300"
               disabled={!draft.trim()}
@@ -1501,10 +1552,12 @@ export function ConversationDetail({
             >
               从原始文本生成 Messages
             </button>
+            </div>
           </div>
 
           {state.messages.length > 0 ? (
             <>
+              {messageTimelineMode === "full" ? (
               <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-zinc-200 bg-white px-4 py-3">
                 <p className="text-sm font-medium text-zinc-700" role="status">
                   已选择 {selectedMessageIds.size} / {state.messages.length} 条
@@ -1539,6 +1592,7 @@ export function ConversationDetail({
                   </button>
                 </div>
               </div>
+              ) : null}
               <div className="mt-4 inline-flex rounded-lg border border-zinc-200 bg-white p-1" aria-label="Message 阅读视图">
                 <button
                   aria-pressed={messageView === "timeline"}
@@ -1559,6 +1613,7 @@ export function ConversationDetail({
               </div>
               {messageView === "timeline" ? (
                 <>
+              {messageTimelineMode === "full" ? (
               <div className="mt-4 rounded-lg border border-zinc-200 bg-white p-4">
                 <div className="flex flex-wrap items-end gap-3">
                   <label className="min-w-64 flex-1 text-xs font-medium text-zinc-600">
@@ -1619,8 +1674,12 @@ export function ConversationDetail({
                   </button>
                 </div>
               </div>
+              ) : null}
               <ol className="mt-4 space-y-4">
-                {state.messages.map((message) => {
+                {(messageTimelineMode === "preview"
+                  ? state.messages.slice(0, PREVIEW_MESSAGE_COUNT)
+                  : state.messages
+                ).map((message) => {
                   const isCollapsed = collapsedMessageIds.has(message.id);
                   const isCurrentSearchMatch =
                     activeSearchMessageId === message.id;
@@ -1637,6 +1696,7 @@ export function ConversationDetail({
                         }
                       }}
                     >
+                    {messageTimelineMode === "full" ? (
                     <input
                       aria-label={`选择第 ${message.order + 1} 条 Message`}
                       checked={selectedMessageIds.has(message.id)}
@@ -1644,6 +1704,7 @@ export function ConversationDetail({
                       onChange={() => toggleMessage(message.id)}
                       type="checkbox"
                     />
+                    ) : null}
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center justify-between gap-3 text-xs">
                         <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -1659,6 +1720,7 @@ export function ConversationDetail({
                         </div>
                         <div className="flex items-center gap-3">
                           <span className="text-zinc-400">#{message.order + 1}</span>
+                          {messageTimelineMode === "full" ? (
                           <button
                             aria-expanded={!isCollapsed}
                             className="font-medium text-zinc-600 hover:text-zinc-950 disabled:cursor-not-allowed disabled:opacity-40"
@@ -1668,9 +1730,10 @@ export function ConversationDetail({
                           >
                             {isCollapsed ? "Expand" : "Collapse"}
                           </button>
+                          ) : null}
                         </div>
                       </div>
-                      {isCollapsed ? (
+                      {isCollapsed && messageTimelineMode === "full" ? (
                         <p className="mt-2 truncate text-xs text-zinc-500">
                           {message.content}
                         </p>
@@ -1715,6 +1778,7 @@ export function ConversationDetail({
                               isCurrentSearchMatch,
                             )}
                           </p>
+                          {messageTimelineMode === "full" ? (
                           <div className="mt-3 flex items-center justify-between gap-3">
                             <span className="text-xs font-medium text-emerald-700" role="status">
                               {savedMessageId === message.id ? "Saved" : ""}
@@ -1728,6 +1792,7 @@ export function ConversationDetail({
                               Edit
                             </button>
                           </div>
+                          ) : null}
                         </>
                       )}
                     </div>
@@ -1735,6 +1800,18 @@ export function ConversationDetail({
                   );
                 })}
               </ol>
+              {messageTimelineMode === "preview" && state.messages.length > PREVIEW_MESSAGE_COUNT ? (
+                <div className="mt-4 rounded-lg border border-dashed border-zinc-300 bg-zinc-50 p-4 text-center">
+                  <p className="text-sm text-zinc-500">还有 {state.messages.length - PREVIEW_MESSAGE_COUNT} 条 Message 未显示。</p>
+                  <button
+                    className="mt-2 rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50"
+                    onClick={() => setMessageTimelineMode("full")}
+                    type="button"
+                  >
+                    展开全部 {state.messages.length} 条
+                  </button>
+                </div>
+              ) : null}
                 </>
               ) : (
                 <div className="mt-4">
@@ -1766,7 +1843,7 @@ export function ConversationDetail({
                     显示 {visibleQAPairs.length} / {qaPairs.length} 个 Pair；选择 Pair 会选择其中全部 Messages。
                   </p>
                   <ol className="mt-3 space-y-3">
-                    {visibleQAPairs.map((pair) => {
+                    {visibleQAPairs.slice(0, messageTimelineMode === "preview" ? PREVIEW_MESSAGE_COUNT : undefined).map((pair) => {
                       const isCollapsed = collapsedQAPairIds.has(pair.id);
                       const allSelected = pair.messageIds.every((messageId) =>
                         selectedMessageIds.has(messageId),
@@ -1778,6 +1855,7 @@ export function ConversationDetail({
                           key={pair.id}
                         >
                           <div className="flex items-start gap-3">
+                            {messageTimelineMode === "full" ? (
                             <input
                               aria-label={`选择第 ${pair.order} 个 Q&A Pair`}
                               checked={allSelected}
@@ -1785,6 +1863,7 @@ export function ConversationDetail({
                               onChange={() => toggleQAPair(pair.messageIds)}
                               type="checkbox"
                             />
+                            ) : null}
                             <div className="min-w-0 flex-1">
                               <div className="flex flex-wrap items-center justify-between gap-2">
                                 <div className="flex items-center gap-2">
@@ -1854,7 +1933,7 @@ export function ConversationDetail({
                   </div>
                   <button
                     className="rounded-lg bg-zinc-950 px-4 py-2.5 text-sm font-medium text-white hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-300"
-                    disabled={selectedMessageIds.size === 0}
+                    disabled={selectedMessageIds.size === 0 || messageTimelineMode !== "full"}
                     onClick={runMessageAnalyzer}
                     type="button"
                   >
@@ -1875,7 +1954,8 @@ export function ConversationDetail({
               </p>
             </div>
           )}
-        </div> : <p className="text-sm text-zinc-500">Message Timeline 已折叠。Round 是默认阅读与操作入口。</p>}
+        </div>
+        )}
       </section>
 
       <section className="detail-section">

@@ -2,7 +2,20 @@
 
 本文件记录当前仓库已经完成的 Sprint 与关键提交。日期使用仓库 commit date。
 
-当前口径：Runtime Version 为 v1.0 alpha draft；Phase2 Epic M–AB 已实现并通过自动门禁；人工 QA 待执行。
+当前口径：Runtime Version 为 v1.1 alpha draft；Epic C–J 已实现并通过自动门禁；人工 QA 待执行。
+
+## 2026-07-06 — v1.1 Alpha: Long Conversation UX & Import Stabilization
+
+状态：Epic C–J implementation complete；各 Epic lint/build/diff-check checkpoint 已通过；未创建 commit。
+
+- **Message Timeline 三态**：新增 Collapsed / Preview / Full 三种模式，默认折叠；Preview 显示前 5 条并提供“展开全部”；Full 保留完整搜索/编辑/选择功能。
+- **Round Inspector**：选择 Round 后在右侧显示编辑面板，支持直接编辑 Note/Summary、查看关联 Proposal/Knowledge/Assets、上下 Round 快速切换、创建 Knowledge 与 Analyze。
+- **Import 2.0**：入口文案改为“粘贴并导入对话/导入 ChatGPT Export/手动整理轮次”；ChatGPT Export 卡片视觉突出；Manual Round Builder 按钮更明显；role alias 文档列出 User/Assistant、用户/AI、我/GPT、问/答。
+- **Search UX**：Round 搜索结果可跳转到对应 Round；Conversation/Knowledge/Round/Proposal 默认优先；Raw Message 仍在高级模式。
+- **Error / Feedback**：Feedback 增加 page 字段，支持从 Conversation 页面一键跳转并自动捕获路径；Data Health 增加 duplicate import risk 与 orphan round 检查。
+- **Docs & Help**：Help 增加 v1.1 新功能说明与全部新增概念；CHANGELOG/HANDOFF/QA_CHECKLIST 同步。
+
+## 2026-07-06 — v1.0 Phase2 Alpha: Second Brain Workspace
 
 ## 2026-07-06 — v1.0 Phase2 Alpha: Second Brain Workspace
 

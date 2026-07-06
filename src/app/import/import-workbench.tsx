@@ -147,12 +147,12 @@ export function ImportWorkbench() {
     <section className="mt-8 space-y-6">
       <div className="grid gap-4 md:grid-cols-3">
         {([
-          ["paste", "粘贴并导入对话", "一次粘贴多轮问答；确认前必须 Preview"],
-          ["txt", "Import TXT", "读取本地纯文本文件"],
-          ["json", "ChatGPT Export JSON", "导入 zip 解压后的 conversations.json"],
+          ["paste", "粘贴并导入对话", "直接粘贴多轮问答文本；支持六种角色别名"],
+          ["txt", "导入 TXT 文件", "从本地纯文本文件导入"],
+          ["json", "📦 导入 ChatGPT Export", "导入官方 Export zip 解压后的 conversations.json"],
         ] as const).map(([value, label, description]) => (
           <button
-            className={`rounded-xl border p-5 text-left ${mode === value ? "border-zinc-900 bg-zinc-950 text-white" : "border-zinc-200 bg-white text-zinc-900"}`}
+            className={`rounded-xl border p-5 text-left ${mode === value ? "border-zinc-900 bg-zinc-950 text-white" : value === "json" ? "border-emerald-300 bg-emerald-50 text-zinc-900 hover:border-emerald-400" : "border-zinc-200 bg-white text-zinc-900"}`}
             key={value}
             onClick={() => selectMode(value)}
             type="button"
@@ -179,7 +179,7 @@ export function ImportWorkbench() {
                 <select className="mt-2 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2.5" onChange={(event) => setParserId(event.target.value as ConversationParserId)} value={parserId}>
                   {conversationParserIds.map((id) => <option key={id} value={id}>{parserLabels[id]}</option>)}
                 </select>
-              </label><details className="rounded-lg border border-zinc-200 p-4"><summary className="cursor-pointer text-sm font-semibold">Parser Profile 配置</summary><div className="mt-3 grid gap-3"><label className="text-xs font-medium">User role aliases<input className="mt-1 w-full rounded border border-zinc-200 px-3 py-2" onChange={(event) => setUserAliases(event.target.value)} value={userAliases} /></label><label className="text-xs font-medium">Assistant role aliases<input className="mt-1 w-full rounded border border-zinc-200 px-3 py-2" onChange={(event) => setAssistantAliases(event.target.value)} value={assistantAliases} /></label><label className="text-xs font-medium">Separators<input className="mt-1 w-full rounded border border-zinc-200 px-3 py-2" onChange={(event) => setSeparators(event.target.value)} value={separators} /></label><p className="text-xs text-zinc-500">当前 parser type：{parserLabels[parserId]}。内置支持 User/Assistant、问/答、我/GPT、用户/AI；自定义 Profile 先作为本次导入记录，不会改变旧数据。</p></div></details></>
+              </label><details className="rounded-lg border border-zinc-200 p-4"><summary className="cursor-pointer text-sm font-semibold">Parser Profile 配置</summary><div className="mt-3 grid gap-3"><label className="text-xs font-medium">User role aliases<input className="mt-1 w-full rounded border border-zinc-200 px-3 py-2" onChange={(event) => setUserAliases(event.target.value)} value={userAliases} /></label><label className="text-xs font-medium">Assistant role aliases<input className="mt-1 w-full rounded border border-zinc-200 px-3 py-2" onChange={(event) => setAssistantAliases(event.target.value)} value={assistantAliases} /></label><label className="text-xs font-medium">Separators<input className="mt-1 w-full rounded border border-zinc-200 px-3 py-2" onChange={(event) => setSeparators(event.target.value)} value={separators} /></label><p className="text-xs text-zinc-500">当前 parser type：{parserLabels[parserId]}。</p><p className="mt-1 text-xs font-semibold text-zinc-600">支持的 role alias：</p><ul className="mt-1 list-inside list-disc text-xs text-zinc-500"><li>User / Assistant</li><li>用户 / AI</li><li>我 / GPT</li><li>问 / 答</li></ul><p className="mt-2 text-xs text-zinc-500">自定义 Profile 先作为本次导入记录，不会改变旧数据。</p></div></details></>
             )}
             <label className="block text-sm font-medium text-zinc-800">
               Conversation 标题
@@ -209,7 +209,7 @@ export function ImportWorkbench() {
               )}
             </div>
             {preview?.warnings.map((warning) => <p className="rounded-lg bg-amber-50 px-4 py-3 text-sm text-amber-800" key={warning}>{warning} 建议进入 Manual Round Builder。</p>)}
-            {preview ? <button className="rounded-lg border border-zinc-300 px-4 py-2 text-sm font-semibold" onClick={startManualBuilder} type="button">进入 Manual Round Builder</button> : null}
+            {preview ? <button className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-2.5 text-sm font-semibold text-amber-900 hover:bg-amber-100" onClick={startManualBuilder} type="button">✋ 手动整理轮次（Manual Round Builder）</button> : null}
             {manualRounds ? <section className="rounded-xl border border-amber-200 bg-amber-50 p-4"><div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-semibold text-amber-950">Manual Round Builder</h3><div className="flex gap-2"><button className="text-xs font-semibold" onClick={() => setManualRounds((current) => [...(current ?? []), { question: "", answer: "" }])} type="button">新增 Round</button><button className="text-xs font-semibold" onClick={() => setManualRounds([{ question: rawText, answer: "" }])} type="button">剩余文本作为一个 Round</button><button className="text-xs font-semibold" onClick={() => setManualRounds(rawText.split(/\n\s*\n/).filter((chunk) => chunk.trim()).map((chunk) => ({ question: chunk.trim(), answer: "" })))} type="button">按空行粗分</button></div></div><p className="mt-2 text-xs text-amber-800">在左侧原文选中文本，再点击 question/answer 的“填入选中”按钮。</p><div className="mt-3 max-h-[30rem] space-y-3 overflow-auto">{manualRounds.map((round, index) => <div className="rounded-lg bg-white p-3" key={index}><div className="flex justify-between text-xs font-semibold"><span>Round {index + 1}</span><span className="flex gap-2"><button disabled={index === 0} onClick={() => setManualRounds((current) => { const next = [...(current ?? [])]; [next[index - 1], next[index]] = [next[index], next[index - 1]]; return next; })} type="button">上移</button><button disabled={index === manualRounds.length - 1} onClick={() => setManualRounds((current) => { const next = [...(current ?? [])]; [next[index + 1], next[index]] = [next[index], next[index + 1]]; return next; })} type="button">下移</button><button className="text-red-600" onClick={() => setManualRounds((current) => current?.filter((_, itemIndex) => itemIndex !== index) ?? null)} type="button">删除</button></span></div><label className="mt-2 block text-xs">Question <button className="ml-2 text-sky-700" onClick={() => { setManualTarget({ index, field: "question" }); window.setTimeout(useSelection, 0); }} type="button">填入选中</button><textarea className="mt-1 min-h-20 w-full rounded border border-zinc-200 p-2 text-sm" onChange={(event) => updateManualRound(index, "question", event.target.value)} value={round.question} /></label><label className="mt-2 block text-xs">Answer <button className="ml-2 text-sky-700" onClick={() => { setManualTarget({ index, field: "answer" }); const selected = rawTextRef.current ? rawText.slice(rawTextRef.current.selectionStart, rawTextRef.current.selectionEnd).trim() : ""; if (selected) updateManualRound(index, "answer", selected); }} type="button">填入选中</button><textarea className="mt-1 min-h-20 w-full rounded border border-zinc-200 p-2 text-sm" onChange={(event) => updateManualRound(index, "answer", event.target.value)} value={round.answer} /></label></div>)}</div></section> : null}
             {effectivePreview ? (
               <div>
@@ -228,7 +228,7 @@ export function ImportWorkbench() {
             {error ? <p className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700" role="alert">{error}</p> : null}
             <button className="w-full rounded-lg bg-zinc-950 px-5 py-3 text-sm font-medium text-white disabled:bg-zinc-300" disabled={!effectivePreview?.canConfirm || !title.trim()} onClick={confirmImport} type="button">确认导入 Conversation / Messages / Rounds</button>
             <p className="text-xs leading-5 text-zinc-500">确认前不会写入 Conversation、Message 或 Round。</p>
-            <p className="text-xs leading-5 text-zinc-500">ChatGPT shared link、浏览器插件与原生 export 仅为未来入口；本版本不抓取网页、不读取浏览器历史。</p>
+            <p className="text-xs leading-5 text-zinc-500">ChatGPT shared link 与浏览器插件入口为未来保留；本版本不实现抓取网页或读取浏览器历史。</p>
           </div>
         </div>
       )}

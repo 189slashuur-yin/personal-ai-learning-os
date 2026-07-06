@@ -17,6 +17,12 @@ const concepts = [
   ["Asset / 附件", "当前只记录文件名、路径和说明，不读取或删除真实文件。文件移动后需要 Relink；未来可接本地脚本复制到 data/assets。"],
   ["Recipe", "本地工作流模板，用来记录步骤；它不是 Agent，本版本不会自动执行或调用 Ollama 跑流程。"],
   ["ChatGPT Export", "当前只支持 conversations.json 中的 User / Assistant 文本。附件、图片、tool call、canvas、voice、shared link 会跳过或不处理；重复导入按 external message id，缺失时按 content hash 增量去重。"],
+  ["Import 2.0", "导入入口明确分为三类：粘贴并导入对话、导入 ChatGPT Export、手动整理轮次。支持 User/Assistant、用户/AI、我/GPT、问/答四种 role alias；Manual Round Builder 入口更明显。shared link 与浏览器插件为未来预留。"],
+  ["Conversation Navigator", "左侧可折叠导航面板，展示所有 Round 的序号、标题、Summary/Proposal/Knowledge 状态。折叠后仅显示 Round 序号圆点，点击可滚动到对应 Round。"],
+  ["Message Timeline 三态", "底层 Message Timeline 支持 Collapsed / Preview / Full 三种模式。默认 Collapsed 避免长对话直接丢入巨大列表；Preview 显示前 5 条并提供展开全部；Full 保留完整搜索、编辑与选择功能。"],
+  ["Round Inspector", "选择 Round 后右侧显示 Inspector 面板，可直接编辑 Round Note 与 Summary，查看关联 Proposal、Knowledge、Assets，执行 Analyze，以及上下 Round 快速切换。"],
+  ["Error / Feedback", "Analyze 运行状态显示 provider、startedAt 与 running/failed/timeout；失败提供 Retry、Switch to Demo、Increase Timeout。Feedback 页面支持从任意页面一键跳转并自动捕获页面路径。"],
+  ["Data Health", "本地只读健康报告，覆盖 orphan proposal/knowledge/asset/round、missing sourceRoundId、duplicate import risk 与 invalid workspace。不自动修改数据。"],
 ] as const;
 
 const flow = [
@@ -74,6 +80,20 @@ export default function HelpPage() {
               <p className="mt-2 text-sm leading-6 text-zinc-600">{description}</p>
             </article>
           ))}
+        </div>
+      </section>
+
+      <section className="mt-10 rounded-xl border border-emerald-200 bg-emerald-50 p-5">
+        <h2 className="font-semibold text-emerald-950">v1.1 新功能</h2>
+        <div className="mt-2 space-y-2 text-sm leading-6 text-emerald-900">
+          <p><strong>Conversation Navigator：</strong>左侧可折叠的 Round 导航面板，支持搜索与快速跳转。</p>
+          <p><strong>Message Timeline 三态：</strong>Collapsed（默认折叠）、Preview（显示前 5 条）、Full（完整功能），避免长对话直接展示全部消息。</p>
+          <p><strong>Round Inspector：</strong>选择 Round 后右侧出现编辑面板，可直接编辑 Note/Summary，查看关联内容，上下切换 Round。</p>
+          <p><strong>Import 2.0：</strong>入口文案更直观，ChatGPT Export 独立突出，Manual Round Builder 更明显，role alias 文档清晰。</p>
+          <p><strong>Search UX：</strong>Round 结果可跳转到对应 Round；Conversation / Knowledge / Round / Proposal 默认优先。</p>
+          <p><strong>Error / Feedback：</strong>Analyze 状态显示 provider/startedAt/status，失败可 Retry/Switch/Increase Timeout；Feedback 一键记录并自动带当前页面。</p>
+          <p><strong>Data Health：</strong>增加 duplicate import risk、orphan round；详细说明 missing sourceRoundId。</p>
+          <p className="mt-3 text-xs">已知限制：不实现语义搜索、不引入新搜索库、不做三栏复杂布局、不实现 shared link 抓取或浏览器插件。</p>
         </div>
       </section>
 

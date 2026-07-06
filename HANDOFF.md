@@ -1,6 +1,263 @@
-# v1.0 Phase2 — Second Brain Workspace Handoff
+# v1.1 Alpha — Long Conversation UX & Import Stabilization Handoff
 
-## 2026-07-06 Epic AB checkpoint
+## 2026-07-06 Epic C-J checkpoint (FINAL)
+
+Epic C–J 全部实现；每个 Epic 的 lint/build/diff-check checkpoint 均通过。未创建 commit，未删除旧数据，未做数据库迁移。
+
+---
+
+## Epic C: Message Timeline 三态
+
+**目标**：避免长对话直接把用户丢进巨大 Raw Message Timeline。
+
+**实现**：
+- Message Timeline 替换了二态的 `isMessageDataVisible` boolean 为三态 `messageTimelineMode: "collapsed" | "preview" | "full"`
+- Collapsed（默认）：显示「Message Timeline 已折叠。Round 是默认阅读与操作入口。点击 Preview 查看前 5 条，或 Full 查看全部。」
+- Preview：显示前 `PREVIEW_MESSAGE_COUNT=5` 条 Message（只读，无复选框/Edit），底部显示剩余数量与「展开全部 N 条」按钮
+- Full：完整 Timeline，保留搜索、全选/清空、Expand/Collapse、Edit、Analyze 全部功能
+- 三态通过 Collapsed / Preview / Full 三按钮切换，当前模式显示文案标签
+- Restore Snapshot 后重置为 collapsed
+- 与 Epic B Round Navigator 不冲突
+
+**修改文件**：`src/app/conversation/[id]/conversation-detail.tsx`
+
+---
+
+## Epic D: Round Inspector
+
+**目标**：让用户在当前 Round 旁边直接管理核心内容。
+
+**实现**：
+- 在 Classic Mode 的 RoundWorkspace 中新增 Round Inspector 面板
+- 点击 Round 的「Inspect」按钮（选中后显示「✓ Inspecting」）打开右侧 Inspector
+- Inspector 显示：
+  - Round Note（可编辑，直接保存）
+  - Round Summary（可编辑，直接保存）
+  - Proposal / AI 整理建议（列出关联 Proposal 链接）
+  - Knowledge / 已确认知识（列出关联 Knowledge 链接）
+  - Assets（列出关联 Assets，可新增）
+  - Analyze 当前 Round 按钮
+  - 从当前 Round 创建 Knowledge 按钮
+- 上一 Round / 下一 Round 快捷导航按钮（显示当前位置 X / N）
+- 关闭按钮可收起 Inspector
+- 布局：选中 Round 时列表与 Inspector 并排（`lg:grid-cols-[1fr_340px]`）
+- 不实现复杂三栏最终版；只在现有页面内可用
+
+**新增依赖**：RoundWorkspace 新增导入 `BrowserProposalStorage`、`BrowserAssetStorage`、`AssetService`、`RoundKnowledgeService`、相关类型
+
+**修改文件**：`src/app/conversation/[id]/round-workspace.tsx`
+
+---
+
+## Epic E: Import 2.0
+
+**目标**：让导入入口更直观，降低手动导入痛苦。
+
+**实现**：
+- 入口菜单文案更新：
+  - 「粘贴并导入对话」— 支持六种角色别名
+  - 「导入 TXT 文件」— 从本地纯文本文件导入
+  - 「📦 导入 ChatGPT Export」— 绿色边框突出显示
+- ChatGPT Export 入口在非选中态有 `border-emerald-300 bg-emerald-50` 视觉突出
+- Manual Round Builder 按钮改为琥珀色醒目的「✋ 手动整理轮次（Manual Round Builder）」
+- Parser Profile 配置区增加明确的 role alias 文档列表：
+  - User / Assistant
+  - 用户 / AI
+  - 我 / GPT
+  - 问 / 答
+- Import 页面描述更新为「粘贴对话、导入 ChatGPT Export 或手动整理轮次；预览后再确认写入本地」
+- Shared link / 浏览器插件入口文本保留为未来预留说明
+- 不改变现有 import pipeline 行为
+
+**修改文件**：`src/app/import/import-workbench.tsx`、`src/app/import/page.tsx`
+
+---
+
+## Epic F: Search UX
+
+**目标**：搜索结果更像「找内容」，而不是杂乱实体列表。
+
+**实现**：
+- 默认结果分组顺序：Conversation → Knowledge → Round → Proposal → Asset → Task
+- Raw Message 默认隐藏，仅在勾选「高级模式：包含 Raw Message」后出现
+- Round 结果新增「跳转到对应 Round →」深链（使用 `entityId` 和 `metadata.conversationId`）
+- Knowledge 结果保留「查看来源 Round →」深链
+- 搜索 placeholder 更新为「搜索 Conversation、已确认知识、Round、AI 整理建议…」
+- 保留现有 fuzzy 行为，不引入新搜索库，不实现语义搜索
+
+**修改文件**：`src/app/search/search-experience.tsx`
+
+---
+
+## Epic G: Error / Log / Feedback
+
+**目标**：用户遇到卡住时知道发生了什么，并能记录反馈。
+
+**实现**：
+- **Feedback**：
+  - Feedback Entity 增加可选 `page` 字段（向后兼容）
+  - BrowserFeedbackStorage.save() 接受可选 `page`
+  - Feedback 页面新增快速记录表单（分类、自动捕获页面 URL、内容、提交）
+  - Conversation Detail 增加「记录反馈」链接，跳转 `/feedback?page=/conversation/{id}`
+  - Feedback 列表每项显示 `来源：页面路径`
+- **Data Health**：
+  - 新增 `duplicate import risk` 检查：共享 `externalConversationId` 的多条 Conversation
+  - 新增 `orphan round` 检查：所属 Conversation 已删除的 Round
+  - 优化现有检查的描述文案（更具体的信息）
+- **Analyze 状态**：已有 providerName、startedAt、status（running/failed/timeout）、latencyMs 显示，以及 Retry/Switch to Demo/Increase Timeout 操作按钮
+
+**修改文件**：`src/core/entities/feedback.ts`、`src/infrastructure/storage/browser-feedback-storage.ts`、`src/app/feedback/feedback-list.tsx`、`src/app/conversation/[id]/conversation-detail.tsx`、`src/app/data-health/data-health-report.tsx`
+
+---
+
+## Epic H: Docs & QA
+
+**目标**：同步 v1.1 文档和手工验收。
+
+**实现**：
+- **Help**：新增 v1.1 新功能区域（Conversation Navigator、Message Timeline 三态、Round Inspector、Import 2.0、Search UX、Error/Feedback）；新增 7 个核心概念条目
+- **CHANGELOG**：新增 v1.1 Alpha 条目，记录全部 Epic C-J 变更
+- **QA_CHECKLIST**：新增 18 条 V11-01 至 V11-18 手动验收项
+- **Release Draft**：新增 `docs/releases/v1.1-draft.md`，包含 What's New、Known Limitations、Architecture Impact、Manual QA Steps、Release Blocker
+- **HANDOFF**：本文件完整记录 Epic C-J 实现
+
+**修改文件**：`CHANGELOG.md`、`docs/QA_CHECKLIST.md`、`src/app/help/page.tsx`、`HANDOFF.md`
+**新增文件**：`docs/releases/v1.1-draft.md`
+
+---
+
+## Epic I: Conversation Workspace
+
+**目标**：实现更接近第二大脑的工作台布局，但不推翻现有架构。
+
+**实现**：
+- Workspace Mode 保留为独立模式（Classic / Workspace Mode 切换按钮）
+- Workspace Mode 布局：
+  - 左侧：RoundNavigator（由 conversation-detail.tsx 的 `<div className="flex gap-6">` 提供）
+  - 中间：Round 列表 或 选中 Round 的完整内容（Question + Answer + Summary + Note）
+  - 右侧：Round Inspector 面板
+- 中间区域支持两种视图：
+  - Round 列表视图：搜索/排序 + 所有 Round 卡片，点击进入聚焦视图
+  - Round 聚焦视图：显示完整 Q/A/Summary/Note，上一/下一 Round 导航，「← 返回列表」按钮
+- 右侧 Inspector 包含：Note 编辑、Summary 编辑、Linked Proposal/Knowledge/Assets、Analyze、Create Knowledge、Update Knowledge Draft
+- 与 Epic B/C/D 复用组件，不另造重复组件
+- 不做拖拽，不做复杂图谱
+
+**修改文件**：`src/app/conversation/[id]/conversation-workspace-mode.tsx`
+
+---
+
+## Epic J: Daily Sync
+
+**目标**：让重复导入 ChatGPT Export 更适合日常使用。
+
+**实现**：
+- 导入完成后显示 📋 Import Report 卡片，四列数据：
+  - New · 新增（appended Messages 数量）
+  - Skipped · 跳过（去重跳过的重复 Message）
+  - Unsupported（附件/图片/tool call 等不支持的内容）
+  - Rounds（创建的 Round 数量）
+- Report 卡片下方显示：
+  - 「Existing Conversation」确认未创建重复副本
+  - 「Append only」或「New Conversation」模式指示
+- Append only 时显示 ⚠️ 手动操作提醒卡片：
+  - 「增量导入仅 append 新 Message。如需更新 Round 结构，请在 Conversation 页面手动 Regenerate Rounds。」
+  - 「打开 Conversation →」按钮直接跳转
+- 现有机制保留：preview 中 existing/new/skipped 计数，confirm 前 append only 提示，大型对话阈值警告
+
+**修改文件**：`src/app/import/chatgpt-export-import.tsx`
+
+---
+
+## 最终质量检查
+
+```
+npm run lint    ✅ 通过
+npm run build   ✅ 通过（19 个路由）
+git diff --check ✅ 通过（无空白错误）
+```
+
+---
+
+## 修改文件清单（14 个修改 + 1 个新增）
+
+| 文件 | Epic | 变更类型 |
+|------|------|----------|
+| `src/app/conversation/[id]/conversation-detail.tsx` | C, G | Message Timeline 三态 + 记录反馈链接 |
+| `src/app/conversation/[id]/round-workspace.tsx` | D | Round Inspector 面板 |
+| `src/app/import/import-workbench.tsx` | E | Import 2.0 入口文案与 role alias |
+| `src/app/import/page.tsx` | E | 页面描述更新 |
+| `src/app/import/chatgpt-export-import.tsx` | J | Import Report 卡片 |
+| `src/app/search/search-experience.tsx` | F | Round 深链 + 搜索优化 |
+| `src/core/entities/feedback.ts` | G | Feedback.page 可选字段 |
+| `src/infrastructure/storage/browser-feedback-storage.ts` | G | save() 支持 page |
+| `src/app/feedback/feedback-list.tsx` | G | 快速反馈表单 + page 显示 |
+| `src/app/data-health/data-health-report.tsx` | G | duplicate import risk + orphan round |
+| `src/app/conversation/[id]/conversation-workspace-mode.tsx` | I | 三栏 Workspace 布局 |
+| `src/app/help/page.tsx` | H | v1.1 功能文档 |
+| `CHANGELOG.md` | H | v1.1 条目 |
+| `docs/QA_CHECKLIST.md` | H | v1.1 手动验收 |
+| `docs/releases/v1.1-draft.md` | H | **新增** — v1.1 Release Draft |
+
+---
+
+## Release Blocker
+
+- 人工 QA 未执行（18 条 V11-01 至 V11-18 待验收）
+- 未创建 commit
+- 浏览器手动回归测试未执行
+
+---
+
+## Manual QA Steps
+
+按 `docs/QA_CHECKLIST.md` V11-01–V11-18 执行：
+
+1. Message Timeline 三态切换（V11-01–V11-04）
+2. Round Inspector 编辑/导航/创建（V11-05–V11-08）
+3. Import 2.0 入口与文案（V11-09–V11-11）
+4. Search Round 深链 + Raw Message 隐藏（V11-12–V11-13）
+5. Feedback 一键记录 + page 捕获（V11-14–V11-15）
+6. Data Health 新检查项（V11-16）
+7. Help 页面完整性（V11-17）
+8. 旧功能回归（V11-18）
+
+---
+
+## 是否建议 commit
+
+✅ 建议 commit。所有 Epic C-J 通过自动门禁，无 breaking change。
+
+建议 commit message：
+
+```
+feat: v1.1 alpha — Long Conversation UX & Import Stabilization
+
+Epic C: Message Timeline 三态 (Collapsed/Preview/Full)
+Epic D: Round Inspector with Note/Summary editing & navigation
+Epic E: Import 2.0 — clearer entry points, role alias docs
+Epic F: Search UX — Round deep-link, priority ordering
+Epic G: Error/Feedback — page-capture feedback, data health checks
+Epic H: Docs & QA — v1.1 release draft, help, changelog, QA checklist
+Epic I: Conversation Workspace — three-column layout with RoundNavigator
+Epic J: Daily Sync — import report card with new/skipped/unsupported/rounds
+
+No breaking changes. All existing data models preserved.
+Lint, build, and diff-check pass.
+```
+
+---
+
+## 已知限制
+
+- Message Timeline 三态仅在 Conversation Detail 页面；Preview 模式不提供搜索/编辑/选择
+- Round Inspector 仅在 Classic Mode 的 Round Workspace；Workspace Mode 有自己的 Inspect 面板
+- Import 2.0 不实现 shared link 抓取或浏览器插件
+- Search 不实现语义搜索、Embedding 或 RAG
+- Feedback 不上传任何数据，仅保存在浏览器 LocalStorage
+- Data Health 为只读报告，不会自动修复问题
+- 不做数据库迁移，不删除旧数据
+
 
 - AB App Data Export/Import、Entity Export、ChatGPT `conversations.json` 最小导入与增量/去重已实现。
 - App Data 导入支持 key/entity count Preview、按领域选择、二次确认与写入失败回滚；备份脚本保留。

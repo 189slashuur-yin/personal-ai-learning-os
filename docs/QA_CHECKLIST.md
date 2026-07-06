@@ -1,6 +1,29 @@
 # Manual QA Checklist
 
-本清单包含 v1.0 Phase1/Phase2 与既有版本回归。它是手工验收基线，不代表测试已经执行，不包含自动化测试。完整 Phase2 执行计划见 `docs/qa/V10-MANUAL-QA-PLAN.md`。
+本清单包含 v1.1、v1.0 Phase1/Phase2 与既有版本回归。它是手工验收基线，不代表测试已经执行，不包含自动化测试。完整 Phase2 执行计划见 `docs/qa/V10-MANUAL-QA-PLAN.md`。
+
+## v1.1 — Long Conversation UX & Import Stabilization
+
+| ID | 操作 | 预期结果 | 阻塞条件 | 模块 |
+| --- | --- | --- | --- | --- |
+| V11-01 | 打开有 Message 的 Conversation，验证 Message Timeline 默认 Collapsed。 | 显示“Message Timeline 已折叠”；Collapsed 按钮高亮。 | Timeline 默认展开。 | Message Timeline |
+| V11-02 | 点击 Preview 按钮。 | 显示前 5 条 Message（只读、无复选框）；底部显示剩余数量与“展开全部”。 | 超过 5 条未截断或显示不全。 | Message Timeline |
+| V11-03 | 点击 Full 按钮或“展开全部”。 | 显示完整 Timeline，含复选框、搜索、Expand/Collapse、Edit。 | 功能缺失。 | Message Timeline |
+| V11-04 | 在三态之间切换多次。 | Collapsed/Preview/Full 标签正确显示；状态不交叉混乱。 | 状态残留。 | Message Timeline |
+| V11-05 | 在 Round Workspace 点击 Round 的“Inspect”按钮。 | 右侧出现 Round Inspector 面板；显示可编辑 Note、Summary、关联内容。 | 面板不出现或内容不匹配。 | Round Inspector |
+| V11-06 | 在 Inspector 中编辑 Note 与 Summary 并保存。 | 刷新后保留；Round 列表同步更新。 | 数据丢失。 | Round Inspector |
+| V11-07 | 在 Inspector 中使用“上一 Round / 下一 Round”按钮。 | 切换 Round 并刷新面板；边界时按钮禁用。 | 越界或内容不切换。 | Round Inspector |
+| V11-08 | 在 Inspector 中点击“Analyze 当前 Round”与“创建 Knowledge”。 | 正常执行；Proposal/Knowledge 关联正确。 | 操作无效或数据错误。 | Round Inspector |
+| V11-09 | 打开 Import 页面，查看三个入口按钮。 | “粘贴并导入对话”、“导入 TXT 文件”、“📦 导入 ChatGPT Export”；ChatGPT Export 有绿色突出样式。 | 文案回退或样式缺失。 | Import 2.0 |
+| V11-10 | 展开 Parser Profile 配置，查看 role alias 文档。 | 列出 User/Assistant、用户/AI、我/GPT、问/答 四种 alias。 | 文档缺失。 | Import 2.0 |
+| V11-11 | 在粘贴模式有 Preview 时，确认 Manual Round Builder 按钮醒目。 | 按钮使用琥珀色主题，文案“✋ 手动整理轮次（Manual Round Builder）”。 | 按钮不明显。 | Import 2.0 |
+| V11-12 | 在 Search 页面搜索 Round 相关关键词。 | Round 结果卡片显示“跳转到对应 Round →”链接；点击跳转正确。 | 无 Round 深链或跳转错误。 | Search UX |
+| V11-13 | 验证 Raw Message 默认隐藏。 | 不勾选高级模式时不出现 Message 结果。 | Message 默认出现。 | Search UX |
+| V11-14 | 从 Conversation Detail 点击“记录反馈”。 | 跳转 /feedback?page=...；页面自动填入来源。 | 参数丢失。 | Feedback |
+| V11-15 | 在 Feedback 页面提交反馈。 | 列表刷新；显示 category、时间、page 来源。 | 保存失败或 page 不显示。 | Feedback |
+| V11-16 | 打开 Data Health 页面。 | 显示 duplicate import risk、orphan round 等新检查项。 | 新检查项缺失。 | Data Health |
+| V11-17 | 打开 Help 页面。 | 显示 v1.1 新功能区域、新增概念条目。 | 内容缺失。 | Help |
+| V11-18 | 回归旧功能：Import → Conversation → Round Analyze → Review → Knowledge。 | 主流程不被 v1.1 UI 变更影响。 | 被阻断。 | Regression |
 
 ## v1.0 Phase1 — Conversation / Round
 

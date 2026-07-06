@@ -158,7 +158,8 @@ function ResultCard({ result, query }: { result: SearchDocumentMatch; query: str
               <span>匹配字段 · {result.matchedFields.join("、")}</span>
             ) : null}
           </div>
-          {result.entityType === "knowledge" && typeof result.metadata?.sourceRoundId === "string" && typeof result.metadata?.conversationId === "string" ? <Link className="mt-3 inline-block text-xs font-semibold text-sky-700" href={`/conversation/${result.metadata.conversationId}?mode=workspace&round=${encodeURIComponent(result.metadata.sourceRoundId)}`}>查看来源 Round →</Link> : null}
+          {result.entityType === "round" && typeof result.metadata?.conversationId === "string" ? <Link className="mt-3 inline-block text-xs font-semibold text-sky-700" href={`/conversation/${result.metadata.conversationId}?mode=workspace&round=${encodeURIComponent(result.entityId)}#round-${result.entityId}`}>跳转到对应 Round →</Link> : null}
+          {result.entityType === "knowledge" && typeof result.metadata?.sourceRoundId === "string" && typeof result.metadata?.conversationId === "string" ? <Link className="mt-3 inline-block text-xs font-semibold text-emerald-700" href={`/conversation/${result.metadata.conversationId}?mode=workspace&round=${encodeURIComponent(result.metadata.sourceRoundId)}`}>查看来源 Round →</Link> : null}
         </div>
         <Link aria-label={`打开 ${result.title}`} className="mt-1 text-zinc-400 transition group-hover:translate-x-0.5" href={result.href}>→</Link>
       </div>
@@ -242,7 +243,7 @@ export function SearchExperience({
             autoFocus
             className="min-w-0 flex-1 border-0 bg-transparent px-1 py-3 text-base text-zinc-950 outline-none placeholder:text-zinc-400"
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="搜索 Conversation、已确认知识、Round、AI 整理建议、Asset…"
+            placeholder="搜索 Conversation、已确认知识、Round、AI 整理建议…"
             type="search"
             value={query}
           />
