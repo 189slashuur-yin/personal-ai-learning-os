@@ -48,6 +48,7 @@ import { ProposalWorkspace } from "./proposal-workspace";
 import { ConversationAssets } from "./conversation-assets";
 import { RoundWorkspace } from "./round-workspace";
 import { ConversationWorkspaceMode } from "./conversation-workspace-mode";
+import { RoundNavigator } from "./round-navigator";
 import { CapabilityBadges } from "@/app/capability-badges";
 
 type ConversationDetailProps = {
@@ -1130,6 +1131,10 @@ export function ConversationDetail({
         </div>
       </header>
 
+      <div className="flex gap-6">
+        <RoundNavigator conversationId={conversation.id} />
+        <div className="min-w-0 flex-1">
+
       {taskNotice ? (
         <div className="mt-6 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-800" role="status">
           <span>{taskNotice}</span>
@@ -1980,6 +1985,8 @@ export function ConversationDetail({
           </div>
         )}
       </section>
+        </div>
+      </div>
     </main>
   );
 }
