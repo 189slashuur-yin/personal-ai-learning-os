@@ -1,10 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { Conversation } from "@/core/entities/conversation";
 import { DEFAULT_WORKSPACE_ID, type Workspace } from "@/core/entities/workspace";
 import {
+  batchDeleteConversationWorkspace,
+  type BatchDeleteResult,
   deleteConversationWorkspace,
   duplicateConversationWorkspace,
   type ConversationWorkspaceStorages,
@@ -30,6 +32,7 @@ type ConversationItem = {
   workspaceColor?: string;
   knowledgeCount: number;
   messageCount: number;
+  roundCount: number;
   proposalCount: number;
 };
 
@@ -79,6 +82,7 @@ function loadConversationData(): { items: ConversationItem[]; workspaces: Worksp
         conversation.workspaceId ?? DEFAULT_WORKSPACE_ID,
       )?.color,
       messageCount: storages.messages.getByConversationId(conversation.id).length,
+      roundCount: storages.rounds?.getByConversationId(conversation.id).length ?? 0,
       proposalCount: conversationProposals.length,
       knowledgeCount: storages.knowledgeCards
         .getAll()
@@ -92,6 +96,11 @@ export function ConversationList() {
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [workspaceFilter, setWorkspaceFilter] = useState("all");
   const [isCreating, setIsCreating] = useState(false);
+
+  // P0-8: Batch selection
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [quickFilter, setQuickFilter] = useState<"all" | "empty" | "imported" | "failed-import">("all");
+  const [deleteResult, setDeleteResult] = useState<BatchDeleteResult | null>(null);
 
   useEffect(() => {
     const loadTimer = window.setTimeout(() => {
@@ -112,6 +121,42 @@ export function ConversationList() {
     return () => window.clearTimeout(loadTimer);
   }, []);
 
+  // P0-8: Derived sets for quick filters
+  const emptyConversationIds = useMemo(
+    () =>
+      new Set(
+        (items ?? [])
+          .filter((item) => item.messageCount === 0 || item.roundCount === 0)
+          .map((item) => item.conversation.id),
+      ),
+    [items],
+  );
+
+  const importedConversationIds = useMemo(
+    () =>
+      new Set(
+        (items ?? [])
+          .filter((item) => item.conversation.externalSource === "chatgpt")
+          .map((item) => item.conversation.id),
+      ),
+    [items],
+  );
+
+  const failedImportIds = useMemo(
+    () =>
+      new Set(
+        (items ?? [])
+          .filter(
+            (item) =>
+              item.conversation.externalSource === "chatgpt" &&
+              item.messageCount === 0 &&
+              item.roundCount === 0,
+          )
+          .map((item) => item.conversation.id),
+      ),
+    [items],
+  );
+
   function handleDelete(conversation: Conversation) {
     const confirmed = window.confirm(
       `确定删除「${conversation.title}」吗？关联的 Rounds、Messages、Source、Proposal、KnowledgeCard、AnalyzerRun、Conversation History 与 Asset metadata 也会删除；真实本地文件不会删除，关联 Task 会保留并显示 source missing。`,
@@ -123,6 +168,11 @@ export function ConversationList() {
 
     deleteConversationWorkspace(conversation.id, createWorkspaceStorages());
     setItems(loadConversationData().items);
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      next.delete(conversation.id);
+      return next;
+    });
   }
 
   function handleDuplicate(conversation: Conversation) {
@@ -141,6 +191,51 @@ export function ConversationList() {
     setWorkspaces(data.workspaces);
   }
 
+  // P0-8: Batch selection helpers
+  function toggleSelect(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function selectAllVisible() {
+    setSelectedIds(new Set(visibleItems.map((item) => item.conversation.id)));
+  }
+
+  function deselectAll() {
+    setSelectedIds(new Set());
+  }
+
+  function selectAllEmpty() {
+    setSelectedIds(new Set(emptyConversationIds));
+  }
+
+  // P0-8: Batch delete
+  function handleBatchDelete() {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+
+    const emptyCount = ids.filter((id) => emptyConversationIds.has(id)).length;
+
+    const confirmed = window.confirm(
+      `确定删除 ${ids.length} 个 Conversation 及其关联数据吗？\n\n` +
+        `选中数量：${ids.length}\n` +
+        `其中 0 Message / 0 Round 的数量：${emptyCount}\n\n` +
+        `删除后将同时移除关联的 Messages、Rounds、Source 和 Proposals。\n` +
+        `Knowledge 不会自动删除，但可能产生孤立 Knowledge。`,
+    );
+
+    if (!confirmed) return;
+
+    const result = batchDeleteConversationWorkspace(ids, createWorkspaceStorages());
+    setDeleteResult(result);
+    setItems(loadConversationData().items);
+    setSelectedIds(new Set());
+  }
+
   if (!items) {
     return (
       <p className="mt-10 text-sm text-zinc-500" role="status">
@@ -149,10 +244,29 @@ export function ConversationList() {
     );
   }
 
-  const visibleItems = items.filter(
-    (item) =>
-      workspaceFilter === "all" || item.conversation.workspaceId === workspaceFilter,
-  );
+  const visibleItems = items.filter((item) => {
+    // Workspace filter
+    if (workspaceFilter !== "all" && item.conversation.workspaceId !== workspaceFilter) {
+      return false;
+    }
+    // Quick filter
+    switch (quickFilter) {
+      case "empty":
+        return emptyConversationIds.has(item.conversation.id);
+      case "imported":
+        return importedConversationIds.has(item.conversation.id);
+      case "failed-import":
+        return failedImportIds.has(item.conversation.id);
+      default:
+        return true;
+    }
+  });
+
+  const allVisibleSelected =
+    visibleItems.length > 0 &&
+    visibleItems.every((item) => selectedIds.has(item.conversation.id));
+
+  const isFiltering = quickFilter !== "all";
 
   return (
     <>
@@ -195,40 +309,241 @@ export function ConversationList() {
         ))}
       </div>
 
+      {/* P0-8: Batch selection toolbar & quick filters */}
+      <div className="mt-4 flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2" aria-label="批量操作">
+          <button
+            className="rounded-lg border border-zinc-300 px-3 py-1.5 text-xs font-semibold hover:bg-zinc-50"
+            onClick={selectAllVisible}
+            type="button"
+            disabled={allVisibleSelected || visibleItems.length === 0}
+          >
+            全选当前
+          </button>
+          <button
+            className="rounded-lg border border-zinc-300 px-3 py-1.5 text-xs font-semibold hover:bg-zinc-50"
+            onClick={deselectAll}
+            type="button"
+            disabled={selectedIds.size === 0}
+          >
+            取消全选
+          </button>
+          {selectedIds.size > 0 ? (
+            <>
+              <span className="ml-1 text-xs text-zinc-500">
+                {selectedIds.size} 已选择
+              </span>
+              <button
+                className="rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-100"
+                onClick={handleBatchDelete}
+                type="button"
+              >
+                🗑 删除选中
+              </button>
+            </>
+          ) : null}
+        </div>
+
+        <div className="ml-auto flex flex-wrap items-center gap-2" aria-label="快捷筛选">
+          <span className="text-xs text-zinc-400">筛选：</span>
+          <button
+            className={`rounded-full border px-3 py-1.5 text-xs font-medium ${
+              quickFilter === "all"
+                ? "border-zinc-950 bg-zinc-950 text-white"
+                : "border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-50"
+            }`}
+            onClick={() => { setQuickFilter("all"); setSelectedIds(new Set()); }}
+            type="button"
+          >
+            全部
+          </button>
+          <button
+            className={`rounded-full border px-3 py-1.5 text-xs font-medium ${
+              quickFilter === "empty"
+                ? "border-amber-600 bg-amber-100 text-amber-900"
+                : "border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-50"
+            }`}
+            onClick={() => { setQuickFilter("empty"); setSelectedIds(new Set()); }}
+            type="button"
+          >
+            Empty ({emptyConversationIds.size})
+          </button>
+          <button
+            className={`rounded-full border px-3 py-1.5 text-xs font-medium ${
+              quickFilter === "imported"
+                ? "border-sky-600 bg-sky-100 text-sky-900"
+                : "border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-50"
+            }`}
+            onClick={() => { setQuickFilter("imported"); setSelectedIds(new Set()); }}
+            type="button"
+          >
+            Imported ({importedConversationIds.size})
+          </button>
+          <button
+            className={`rounded-full border px-3 py-1.5 text-xs font-medium ${
+              quickFilter === "failed-import"
+                ? "border-red-400 bg-red-50 text-red-700"
+                : "border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-50"
+            }`}
+            onClick={() => { setQuickFilter("failed-import"); setSelectedIds(new Set()); }}
+            type="button"
+          >
+            Failed Imports ({failedImportIds.size})
+          </button>
+          {quickFilter === "empty" ? (
+            <button
+              className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-800 hover:bg-amber-100"
+              onClick={selectAllEmpty}
+              type="button"
+            >
+              一键选择所有 Empty
+            </button>
+          ) : null}
+        </div>
+      </div>
+
+      {/* P0-8: Delete result summary */}
+      {deleteResult ? (
+        <div className="mt-4 rounded-xl border-2 border-emerald-200 bg-emerald-50 p-5">
+          <h3 className="font-semibold text-emerald-950">
+            ✅ 批量删除完成
+          </h3>
+          <dl className="mt-3 grid gap-3 text-sm sm:grid-cols-5">
+            <div>
+              <dt className="text-emerald-700">删除 Conversation</dt>
+              <dd className="mt-1 text-2xl font-bold text-emerald-900">
+                {deleteResult.deletedConversations}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-emerald-700">删除 Message</dt>
+              <dd className="mt-1 text-2xl font-bold text-emerald-900">
+                {deleteResult.deletedMessages}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-emerald-700">删除 Round</dt>
+              <dd className="mt-1 text-2xl font-bold text-emerald-900">
+                {deleteResult.deletedRounds}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-emerald-700">删除 Source</dt>
+              <dd className="mt-1 text-2xl font-bold text-emerald-900">
+                {deleteResult.deletedSources}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-emerald-700">删除 Proposal</dt>
+              <dd className="mt-1 text-2xl font-bold text-emerald-900">
+                {deleteResult.deletedProposals}
+              </dd>
+            </div>
+          </dl>
+          {deleteResult.orphanedKnowledgeCount > 0 ? (
+            <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3">
+              <p className="text-sm font-semibold text-amber-900">
+                ⚠️ 可能存在 {deleteResult.orphanedKnowledgeCount} 个孤立 Knowledge
+              </p>
+              <p className="mt-1 text-xs text-amber-800">
+                这些 Knowledge 原本关联的 Proposal 已被删除，但 Knowledge 本身保留在本地存储中。可在 Data Health 页面查看详情，或手动清理。
+              </p>
+            </div>
+          ) : (
+            <p className="mt-2 text-xs text-emerald-700">
+              无孤立 Knowledge。
+            </p>
+          )}
+          <button
+            className="mt-3 rounded-lg border border-emerald-300 bg-white px-4 py-2 text-xs font-semibold text-emerald-800 hover:bg-emerald-100"
+            onClick={() => setDeleteResult(null)}
+            type="button"
+          >
+            关闭
+          </button>
+        </div>
+      ) : null}
+
       {visibleItems.length === 0 ? (
         <section className="mt-8 flex min-h-72 flex-col items-center justify-center rounded-2xl border border-dashed border-zinc-300 bg-white px-6 text-center">
           <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-zinc-100 text-xl text-zinc-500">
             +
           </div>
-          <h2 className="mt-4 font-semibold text-zinc-950">暂无 Conversation。</h2>
+          <h2 className="mt-4 font-semibold text-zinc-950">
+            {isFiltering ? "当前筛选条件下无 Conversation。" : "暂无 Conversation。"}
+          </h2>
           <p className="mt-2 max-w-sm text-sm leading-6 text-zinc-500">
-            创建一个工作空间，再粘贴对话或导入 TXT 原始文本。
+            {isFiltering
+              ? "尝试切换筛选条件查看其他 Conversation。"
+              : "创建一个工作空间，再粘贴对话或导入 TXT 原始文本。"}
           </p>
-          <button
-            className="mt-5 rounded-lg bg-zinc-950 px-4 py-2.5 text-sm font-medium text-white"
-            onClick={() => setIsCreating(true)}
-            type="button"
-          >
-            创建 Conversation
-          </button>
+          {isFiltering ? (
+            <button
+              className="mt-5 rounded-lg border border-zinc-200 bg-white px-4 py-2.5 text-sm font-medium text-zinc-700"
+              onClick={() => setQuickFilter("all")}
+              type="button"
+            >
+              清除筛选
+            </button>
+          ) : (
+            <button
+              className="mt-5 rounded-lg bg-zinc-950 px-4 py-2.5 text-sm font-medium text-white"
+              onClick={() => setIsCreating(true)}
+              type="button"
+            >
+              创建 Conversation
+            </button>
+          )}
         </section>
       ) : (
         <div className="mt-6 grid gap-4 sm:grid-cols-2">
-          {visibleItems.map((item) => (
-            <div className="rounded-2xl border border-zinc-200 bg-white p-2" key={item.conversation.id}>
-              <ConversationCard
-                onDelete={handleDelete}
-                onDuplicate={handleDuplicate}
-                {...item}
-              />
-              <label className="mx-3 mb-3 block text-xs text-zinc-500">
-                移动到 Workspace / Folder
-                <select className="ml-2 rounded border border-zinc-200 bg-white px-2 py-1.5" onChange={(event) => handleMove(item.conversation.id, event.target.value)} value={item.conversation.workspaceId ?? DEFAULT_WORKSPACE_ID}>
-                  {workspaces.filter((workspace) => !workspace.archivedAt).map((workspace) => <option key={workspace.id} value={workspace.id}>{workspace.name}</option>)}
-                </select>
-              </label>
-            </div>
-          ))}
+          {visibleItems.map((item) => {
+            const isSelected = selectedIds.has(item.conversation.id);
+            const isEmpty =
+              item.messageCount === 0 || item.roundCount === 0;
+            return (
+              <div
+                className={`rounded-2xl border p-2 transition ${
+                  isSelected
+                    ? "border-zinc-950 bg-zinc-50 ring-1 ring-zinc-950"
+                    : "border-zinc-200 bg-white"
+                }`}
+                key={item.conversation.id}
+              >
+                {/* P0-8: Batch select checkbox */}
+                <label className="mx-3 mb-1 flex cursor-pointer items-center gap-2 pt-1 text-xs text-zinc-500">
+                  <input
+                    type="checkbox"
+                    checked={isSelected}
+                    onChange={() => toggleSelect(item.conversation.id)}
+                    className="h-4 w-4 accent-zinc-950"
+                  />
+                  选择
+                  {isEmpty ? (
+                    <span className="ml-1 rounded bg-amber-100 px-1.5 py-0.5 text-xs text-amber-700">
+                      Empty
+                    </span>
+                  ) : null}
+                  {item.conversation.externalSource === "chatgpt" ? (
+                    <span className="ml-1 rounded bg-sky-100 px-1.5 py-0.5 text-xs text-sky-700">
+                      Imported
+                    </span>
+                  ) : null}
+                </label>
+                <ConversationCard
+                  onDelete={handleDelete}
+                  onDuplicate={handleDuplicate}
+                  {...item}
+                />
+                <label className="mx-3 mb-3 block text-xs text-zinc-500">
+                  移动到 Workspace / Folder
+                  <select className="ml-2 rounded border border-zinc-200 bg-white px-2 py-1.5" onChange={(event) => handleMove(item.conversation.id, event.target.value)} value={item.conversation.workspaceId ?? DEFAULT_WORKSPACE_ID}>
+                    {workspaces.filter((workspace) => !workspace.archivedAt).map((workspace) => <option key={workspace.id} value={workspace.id}>{workspace.name}</option>)}
+                  </select>
+                </label>
+              </div>
+            );
+          })}
         </div>
       )}
 

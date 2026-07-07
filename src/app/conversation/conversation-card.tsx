@@ -7,6 +7,7 @@ type ConversationCardProps = {
   workspaceColor?: string;
   knowledgeCount: number;
   messageCount: number;
+  roundCount: number;
   proposalCount: number;
   onDelete: (conversation: Conversation) => void;
   onDuplicate: (conversation: Conversation) => void;
@@ -18,6 +19,7 @@ export function ConversationCard({
   workspaceColor,
   knowledgeCount,
   messageCount,
+  roundCount,
   proposalCount,
   onDelete,
   onDuplicate,
@@ -55,6 +57,10 @@ export function ConversationCard({
           <span>
             <strong className="mr-1 text-zinc-800">{messageCount}</strong>
             Messages
+          </span>
+          <span>
+            <strong className="mr-1 text-zinc-800">{roundCount}</strong>
+            Rounds
           </span>
           <span>
             <strong className="mr-1 text-zinc-800">{knowledgeCount}</strong>

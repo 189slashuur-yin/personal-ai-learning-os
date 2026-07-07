@@ -328,6 +328,27 @@ export function ImportWorkbench() {
         </ol>
         <p className="mt-2 text-xs text-emerald-700">注意：当前只导入 User / Assistant 文本；附件、图片、tool call、canvas、voice 与 shared link 会被跳过或不处理。</p>
       </details>
+
+      {/* P0-9: LocalStorage strategy notice */}
+      <details className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-5">
+        <summary className="cursor-pointer text-sm font-semibold text-amber-950">💾 存储策略说明</summary>
+        <div className="mt-3 space-y-2 text-sm leading-7 text-amber-900">
+          <p>
+            当前版本使用<strong>浏览器 LocalStorage</strong> 存储所有数据（Conversation、Message、Round、Knowledge 等）。
+            LocalStorage 适合小批量/个人试用场景，<strong>不适合一次性导入几十 MB 的大文件</strong>。
+          </p>
+          <p className="font-semibold">推荐策略：</p>
+          <ul className="list-inside list-disc space-y-1">
+            <li>每次导入少量重要对话（建议单次不超过 3000 条 Message 或 200 万字符）</li>
+            <li>导入前先清理 0 Message / 0 Round 的失败对话（在 Conversation 页使用 Empty 筛选）</li>
+            <li>如导入被中断，减少选择数量后分批导入</li>
+            <li>定期在 Data Health 页面检查数据完整性</li>
+          </ul>
+          <p className="mt-2 text-xs text-amber-700">
+            后续版本计划迁移到 <strong>IndexedDB</strong>，届时将支持更大规模的本地数据存储。本轮不实现 IndexedDB 和服务器存储。
+          </p>
+        </div>
+      </details>
       <div className="grid gap-4 md:grid-cols-2">
         <button
           className={`rounded-xl border p-5 text-left ${

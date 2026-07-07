@@ -36,6 +36,110 @@ function runAssetLifecycle(
   }
 }
 
+export type BatchDeleteResult = {
+  deletedConversations: number;
+  deletedMessages: number;
+  deletedRounds: number;
+  deletedSources: number;
+  deletedProposals: number;
+  orphanedKnowledgeCount: number;
+  /** Knowledge cards that were linked to deleted proposals */
+  orphanedKnowledgeIds: string[];
+};
+
+export function batchDeleteConversationWorkspace(
+  conversationIds: string[],
+  storages: ConversationWorkspaceStorages,
+): BatchDeleteResult {
+  const idSet = new Set(conversationIds);
+  let deletedMessages = 0;
+  let deletedRounds = 0;
+  let deletedSources = 0;
+  let deletedProposals = 0;
+
+  // Collect all source IDs for these conversations
+  const allSources = storages.sources.getAll();
+  const sourceIds: string[] = [];
+  for (const source of allSources) {
+    if (source.conversationId && idSet.has(source.conversationId)) {
+      sourceIds.push(source.id);
+    }
+  }
+  const sourceIdSet = new Set(sourceIds);
+
+  // Collect proposal IDs (by conversationId or sourceId)
+  const allProposals = storages.proposals.getAll();
+  const proposalIds: string[] = [];
+  for (const proposal of allProposals) {
+    if (
+      (proposal.conversationId && idSet.has(proposal.conversationId)) ||
+      (proposal.sourceId && sourceIdSet.has(proposal.sourceId))
+    ) {
+      proposalIds.push(proposal.id);
+    }
+  }
+  const proposalIdSet = new Set(proposalIds);
+
+  // Count knowledge cards that will become orphaned — DO NOT delete them
+  let orphanedKnowledgeCount = 0;
+  const orphanedKnowledgeIds: string[] = [];
+  for (const card of storages.knowledgeCards.getAll()) {
+    if (proposalIdSet.has(card.proposalId)) {
+      orphanedKnowledgeCount += 1;
+      orphanedKnowledgeIds.push(card.id);
+    }
+  }
+
+  // Count before deletion
+  for (const conversationId of conversationIds) {
+    deletedMessages += storages.messages.getByConversationId(conversationId).length;
+    deletedRounds += storages.rounds?.getByConversationId(conversationId).length ?? 0;
+  }
+  deletedSources = sourceIds.length;
+  deletedProposals = proposalIds.length;
+
+  // Delete proposals (linked by sourceIds and by conversationId)
+  storages.proposals.removeBySourceIds(sourceIds);
+  for (const conversationId of conversationIds) {
+    storages.proposals.removeByConversationId(conversationId);
+  }
+
+  // Delete sources
+  for (const conversationId of conversationIds) {
+    storages.sources.removeByConversationId(conversationId);
+  }
+
+  // Delete messages and rounds
+  for (const conversationId of conversationIds) {
+    storages.messages.removeByConversationId(conversationId);
+    storages.rounds?.removeByConversationId(conversationId);
+  }
+
+  // Delete analyzer runs, versions, assets
+  for (const conversationId of conversationIds) {
+    storages.analyzerRuns?.removeByConversationId(conversationId);
+    storages.versions?.removeByConversationId(conversationId);
+    runAssetLifecycle(storages.assets, (service) => {
+      service.removeForEntity("conversation", conversationId);
+    });
+  }
+
+  // Delete conversations
+  for (const conversationId of conversationIds) {
+    storages.conversations.remove(conversationId);
+  }
+
+  return {
+    deletedConversations: conversationIds.length,
+    deletedMessages,
+    deletedRounds,
+    deletedSources,
+    deletedProposals,
+    orphanedKnowledgeCount,
+    orphanedKnowledgeIds,
+  };
+}
+
 export function deleteConversationWorkspace(
   conversationId: string,
   storages: ConversationWorkspaceStorages,
