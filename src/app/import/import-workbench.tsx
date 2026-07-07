@@ -21,7 +21,12 @@ import { BrowserAppEventLogStorage } from "@/infrastructure/storage/browser-feed
 import { RoundService } from "@/core/services/round-service";
 import { ConversationVersionService } from "@/core/services/conversation-version-service";
 import { BrowserConversationVersionStorage } from "@/infrastructure/storage/browser-conversation-version-storage";
-import { ChatGPTExportImport } from "./chatgpt-export-import";
+import {
+  ChatGPTExportImport,
+  type ChatGPTExportImportSharedState,
+  type ChatGPTExportImportCallbacks,
+} from "./chatgpt-export-import";
+import type { ChatGPTConversationPreview } from "@/core/services/chatgpt-export-import";
 
 const pipeline = new ImportParserPipeline();
 const parserLabels: Record<ConversationParserId, string> = {
@@ -57,6 +62,64 @@ export function ImportWorkbench() {
   const rawTextRef = useRef<HTMLTextAreaElement>(null);
 
   const [existingConversations, setExistingConversations] = useState<Conversation[]>([]);
+
+  // Shared ChatGPT export file state (P0-1: preserved across path switches)
+  const [chatGptFileInfo, setChatGptFileInfo] = useState<{
+    name: string;
+    size: number;
+  } | null>(null);
+  const [chatGptLoading, setChatGptLoading] = useState(false);
+  const [chatGptParseError, setChatGptParseError] = useState<string | null>(
+    null,
+  );
+  const [chatGptConversations, setChatGptConversations] = useState<
+    ChatGPTConversationPreview[]
+  >([]);
+  const [chatGptLargeWarning, setChatGptLargeWarning] = useState(false);
+  const [chatGptSelectedIds, setChatGptSelectedIds] = useState<Set<string>>(
+    new Set(),
+  );
+
+  const chatGptSharedState: ChatGPTExportImportSharedState = {
+    fileInfo: chatGptFileInfo,
+    loading: chatGptLoading,
+    parseError: chatGptParseError,
+    conversations: chatGptConversations,
+    largeFileWarning: chatGptLargeWarning,
+    selectedIds: chatGptSelectedIds,
+  };
+
+  const chatGptCallbacks: ChatGPTExportImportCallbacks = {
+    onClearFile: () => {
+      setChatGptFileInfo(null);
+      setChatGptParseError(null);
+      setChatGptConversations([]);
+      setChatGptLargeWarning(false);
+      setChatGptLoading(false);
+    },
+    onParseStart: () => {
+      setChatGptLoading(true);
+      setChatGptParseError(null);
+      setChatGptLargeWarning(false);
+    },
+    onParseError: (error: string) => {
+      setChatGptParseError(error);
+      setChatGptLoading(false);
+    },
+    onFileParsed: (
+      fileInfo: { name: string; size: number },
+      conversations: ChatGPTConversationPreview[],
+      isLarge: boolean,
+    ) => {
+      setChatGptFileInfo(fileInfo);
+      setChatGptConversations(conversations);
+      setChatGptLargeWarning(isLarge);
+      setChatGptLoading(false);
+    },
+    onSelectedIdsChange: (ids: Set<string>) => {
+      setChatGptSelectedIds(ids);
+    },
+  };
 
   // R10: Conversation Merge
   const [mergeSourceId, setMergeSourceId] = useState("");
@@ -316,7 +379,7 @@ export function ImportWorkbench() {
           </div>
 
           {mode === "json" ? (
-            <ChatGPTExportImport mode="new" workspaces={workspaces} existingConversations={existingConversations} />
+            <ChatGPTExportImport mode="new" workspaces={workspaces} existingConversations={existingConversations} sharedState={chatGptSharedState} callbacks={chatGptCallbacks} />
           ) : (
         <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
           <div className="space-y-5 rounded-xl border border-zinc-200 bg-white p-6">
@@ -386,7 +449,7 @@ export function ImportWorkbench() {
         )}
         </>
       ) : (
-        <ChatGPTExportImport mode="existing" workspaces={workspaces} existingConversations={existingConversations} />
+        <ChatGPTExportImport mode="existing" workspaces={workspaces} existingConversations={existingConversations} sharedState={chatGptSharedState} callbacks={chatGptCallbacks} />
       )}
 
       {/* R10: Merge Conversation */}
