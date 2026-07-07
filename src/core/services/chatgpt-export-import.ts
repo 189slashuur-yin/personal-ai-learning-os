@@ -5,6 +5,7 @@ import type { SourceStorage } from "@/core/contracts/source-storage";
 import type { Message, MessageRole } from "@/core/entities/message";
 import { ImportParserPipeline } from "@/core/services/import-parser-pipeline";
 import { ImportService } from "@/core/services/import-service";
+import { RoundService } from "@/core/services/round-service";
 
 type ChatGPTNode = {
   id?: string;
@@ -191,9 +192,33 @@ export class ChatGPTExportImportService {
     };
   }
 
-  importConversation(preview: ChatGPTImportPreview, workspaceId?: string) {
+  previewAppendToConversation(
+    conversation: ChatGPTConversationPreview,
+    targetConversationId: string,
+  ): { newMessages: number; skipped: number; existingTotal: number } {
+    const existingMessages = this.messages.getByConversationId(targetConversationId);
+    const externalIds = new Set(
+      existingMessages.flatMap((m) => (m.externalMessageId ? [m.externalMessageId] : [])),
+    );
+    const hashes = new Set(
+      existingMessages.map((m) => m.contentHash ?? contentHash(m.role, m.content)),
+    );
+    const newCount = conversation.messages.filter((m) => {
+      if (m.externalMessageId && externalIds.has(m.externalMessageId)) return false;
+      if (hashes.has(m.contentHash)) return false;
+      return true;
+    }).length;
+    return {
+      newMessages: newCount,
+      skipped: conversation.messages.length - newCount,
+      existingTotal: existingMessages.length,
+    };
+  }
+
+  importConversation(preview: ChatGPTImportPreview, options?: { workspaceId?: string; forceNew?: boolean }) {
+    const { workspaceId, forceNew } = options ?? {};
     const timestamp = new Date().toISOString();
-    if (!preview.existingConversationId) {
+    if (forceNew || !preview.existingConversationId) {
       const transcript = preview.messages
         .map((message) => `${message.role === "user" ? "User" : "Assistant"}: ${message.content}`)
         .join("\n\n");
@@ -268,5 +293,99 @@ export class ChatGPTExportImportService {
       updatedAt: newMessages.length ? timestamp : existing.updatedAt,
     });
     return { conversationId: existing.id, appended: newMessages.length, skipped: preview.messages.length - newMessages.length, roundsCreated: 0 };
+  }
+
+  appendToConversation(
+    preview: ChatGPTConversationPreview,
+    targetConversationId: string,
+  ): { conversationId: string; appendedMessages: number; appendedRounds: number; skipped: number; unsupported: number } {
+    const timestamp = new Date().toISOString();
+    const target = this.conversations.getById(targetConversationId);
+    if (!target) throw new Error("Target conversation not found.");
+
+    const existingMessages = this.messages.getByConversationId(targetConversationId);
+    const existingExternalIds = new Set(
+      existingMessages.flatMap((m) => (m.externalMessageId ? [m.externalMessageId] : [])),
+    );
+    const existingHashes = new Set(
+      existingMessages.map((m) => m.contentHash ?? contentHash(m.role, m.content)),
+    );
+
+    const additions = preview.messages.filter((m) => {
+      if (m.externalMessageId && existingExternalIds.has(m.externalMessageId)) return false;
+      if (existingHashes.has(m.contentHash)) return false;
+      return true;
+    });
+
+    const skipped = preview.messages.length - additions.length;
+    if (additions.length === 0) {
+      return {
+        conversationId: target.id,
+        appendedMessages: 0,
+        appendedRounds: 0,
+        skipped,
+        unsupported: preview.unsupportedCount,
+      };
+    }
+
+    const startOrder =
+      existingMessages.reduce((max, m) => Math.max(max, m.order), -1) + 1;
+    const newMessages: Message[] = additions.map((m, i) => ({
+      id: crypto.randomUUID(),
+      conversationId: target.id,
+      role: m.role as MessageRole,
+      content: m.content,
+      order: startOrder + i,
+      createdAt: m.createdAt ?? timestamp,
+      updatedAt: timestamp,
+      externalMessageId: m.externalMessageId,
+      contentHash: m.contentHash,
+    }));
+    this.messages.saveMany(newMessages);
+
+    const transcript = additions
+      .map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`)
+      .join("\n\n");
+    const parserPreview = this.pipeline.preview(
+      {
+        name: "append",
+        channel: "clipboard",
+        content: transcript,
+        mediaType: undefined,
+      },
+      "chatgpt",
+    );
+
+    const roundService = new RoundService(this.rounds);
+    let appendedRounds = 0;
+    for (const round of parserPreview.rounds) {
+      const mappedIds = round.messageIndexes
+        .map((idx: number) => newMessages[idx]?.id)
+        .filter(Boolean) as string[];
+      if (mappedIds.length > 0) {
+        roundService.createRound({
+          conversationId: target.id,
+          title: round.title,
+          question: round.question,
+          answer: round.answer,
+          messageIds: mappedIds,
+        });
+        appendedRounds += 1;
+      }
+    }
+
+    this.conversations.save({
+      ...target,
+      importedAt: target.importedAt ?? timestamp,
+      updatedAt: timestamp,
+    });
+
+    return {
+      conversationId: target.id,
+      appendedMessages: additions.length,
+      appendedRounds,
+      skipped,
+      unsupported: preview.unsupportedCount,
+    };
   }
 }

@@ -44,6 +44,9 @@ export function ImportWorkbench() {
   const [rawText, setRawText] = useState("");
   const [title, setTitle] = useState("");
   const [workspaceId, setWorkspaceId] = useState("inbox");
+  const [importPath, setImportPath] = useState<"new" | "existing">(
+    targetConversationId ? "existing" : "new",
+  );
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [userAliases, setUserAliases] = useState("User, 问, 我, 用户");
@@ -53,13 +56,7 @@ export function ImportWorkbench() {
   const [manualTarget, setManualTarget] = useState<{ index: number; field: "question" | "answer" } | null>(null);
   const rawTextRef = useRef<HTMLTextAreaElement>(null);
 
-  // K1: Existing Conversation Import
   const [existingConversations, setExistingConversations] = useState<Conversation[]>([]);
-  const [selectedConversationId, setSelectedConversationId] = useState("");
-  const [appendMode, setAppendMode] = useState<"messages" | "rounds">("messages");
-  const [existingRawText, setExistingRawText] = useState("");
-  const [existingParserId, setExistingParserId] = useState<ConversationParserId>("chatgpt");
-  const [existingImportReport, setExistingImportReport] = useState<{ appendedMessages: number; appendedRounds: number; skipped: number } | null>(null);
 
   // R10: Conversation Merge
   const [mergeSourceId, setMergeSourceId] = useState("");
@@ -110,88 +107,9 @@ export function ImportWorkbench() {
           .filter((workspace) => !workspace.archivedAt),
       );
       setExistingConversations(conversationStorage.getAll());
-      if (targetConversationId) {
-        setSelectedConversationId(targetConversationId);
-      }
     }, 0);
     return () => window.clearTimeout(timer);
   }, [targetConversationId]);
-
-  // K1: Existing conversation preview
-  const existingPreview = useMemo(
-    () =>
-      existingRawText.trim()
-        ? pipeline.preview(
-            {
-              name: "Existing Import",
-              channel: "clipboard",
-              content: existingRawText,
-              mediaType: undefined,
-            },
-            existingParserId,
-          )
-        : null,
-    [existingParserId, existingRawText],
-  );
-
-  function confirmExistingImport() {
-    if (!existingPreview?.canConfirm || !selectedConversationId) return;
-    try {
-      const conversationStorage = new BrowserConversationStorage();
-      const messageStorage = new BrowserMessageStorage();
-      const roundStorage = new BrowserRoundStorage();
-      const conversation = conversationStorage.getById(selectedConversationId);
-      if (!conversation) { setError("所选 Conversation 不存在。"); return; }
-
-      const existingMessages = messageStorage.getByConversationId(selectedConversationId);
-      const existingRounds = roundStorage.getByConversationId(selectedConversationId);
-
-      if (appendMode === "messages") {
-        // Append messages only - don't create rounds
-        const maxOrder = existingMessages.reduce((max, m) => Math.max(max, m.order), -1);
-        const newMessages = existingPreview.messages.map((msg, i) => ({
-          id: crypto.randomUUID(),
-          conversationId: selectedConversationId,
-          role: msg.role,
-          content: msg.content,
-          order: maxOrder + 1 + i,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        }));
-        messageStorage.replaceByConversationId(selectedConversationId, [...existingMessages, ...newMessages]);
-        setExistingImportReport({ appendedMessages: newMessages.length, appendedRounds: 0, skipped: 0 });
-      } else {
-        // Append rounds
-        const roundService = new RoundService(roundStorage);
-        const newMessages = existingPreview.messages.map((msg, i) => ({
-          id: crypto.randomUUID(),
-          conversationId: selectedConversationId,
-          role: msg.role,
-          content: msg.content,
-          order: existingMessages.length + i + 1,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        }));
-        const messageIds = newMessages.map((m) => m.id);
-        messageStorage.replaceByConversationId(selectedConversationId, [...existingMessages, ...newMessages]);
-        let roundIndex = existingRounds.length;
-        for (const round of existingPreview.rounds) {
-          roundIndex++;
-          roundService.createRound({
-            conversationId: selectedConversationId,
-            title: round.title || `Round ${roundIndex}`,
-            question: round.question,
-            answer: round.answer,
-            messageIds: round.messageIndexes ? round.messageIndexes.map((idx: number) => messageIds[idx] ?? newMessages[idx]?.id).filter(Boolean) : [],
-          });
-        }
-        setExistingImportReport({ appendedMessages: newMessages.length, appendedRounds: existingPreview.rounds.length, skipped: 0 });
-      }
-      new BrowserAppEventLogStorage().record("import created", selectedConversationId, `existing ${appendMode}`);
-    } catch {
-      setError("导入失败，请确认浏览器允许本地保存后重试。");
-    }
-  }
 
   // R10: Merge preview
   function previewMerge() {
@@ -347,27 +265,59 @@ export function ImportWorkbench() {
         </ol>
         <p className="mt-2 text-xs text-emerald-700">注意：当前只导入 User / Assistant 文本；附件、图片、tool call、canvas、voice 与 shared link 会被跳过或不处理。</p>
       </details>
-      <div className="grid gap-4 md:grid-cols-3">
-        {([
-          ["paste", "粘贴并导入对话", "直接粘贴多轮问答文本；支持六种角色别名"],
-          ["txt", "导入 TXT 文件", "从本地纯文本文件导入"],
-          ["json", "📦 导入 ChatGPT Export", "导入官方 Export zip 解压后的 conversations.json"],
-        ] as const).map(([value, label, description]) => (
-          <button
-            className={`rounded-xl border p-5 text-left ${mode === value ? "border-zinc-900 bg-zinc-950 text-white" : value === "json" ? "border-emerald-300 bg-emerald-50 text-zinc-900 hover:border-emerald-400" : "border-zinc-200 bg-white text-zinc-900"}`}
-            key={value}
-            onClick={() => selectMode(value)}
-            type="button"
-          >
-            <span className="block font-semibold">{label}</span>
-            <span className={`mt-2 block text-sm ${mode === value ? "text-zinc-300" : "text-zinc-500"}`}>{description}</span>
-          </button>
-        ))}
+      <div className="grid gap-4 md:grid-cols-2">
+        <button
+          className={`rounded-xl border p-5 text-left ${
+            importPath === "new"
+              ? "border-zinc-900 bg-zinc-950 text-white"
+              : "border-zinc-200 bg-white text-zinc-900"
+          }`}
+          onClick={() => setImportPath("new")}
+          type="button"
+        >
+          <span className="block text-lg font-semibold">📄 新建 Conversation</span>
+          <span className={`mt-2 block text-sm ${importPath === "new" ? "text-zinc-300" : "text-zinc-500"}`}>
+            从 ChatGPT Export 或文本创建一个新的 Conversation。
+          </span>
+        </button>
+        <button
+          className={`rounded-xl border p-5 text-left ${
+            importPath === "existing"
+              ? "border-sky-900 bg-sky-950 text-white"
+              : "border-zinc-200 bg-white text-zinc-900"
+          }`}
+          onClick={() => setImportPath("existing")}
+          type="button"
+        >
+          <span className="block text-lg font-semibold">📥 导入到已有 Conversation</span>
+          <span className={`mt-2 block text-sm ${importPath === "existing" ? "text-sky-200" : "text-zinc-500"}`}>
+            把新内容追加到已有 Conversation 后面，不覆盖旧内容{targetConversationId ? "（已选择目标）" : ""}。
+          </span>
+        </button>
       </div>
+      {importPath === "new" ? (
+        <>
+          <div className="mt-6 grid gap-4 md:grid-cols-3">
+            {([
+              ["paste", "粘贴并导入对话", "直接粘贴多轮问答文本；支持六种角色别名"],
+              ["txt", "导入 TXT 文件", "从本地纯文本文件导入"],
+              ["json", "📦 导入 ChatGPT Export", "导入官方 Export zip 解压后的 conversations.json / conversations-*.json"],
+            ] as const).map(([value, label, description]) => (
+              <button
+                className={`rounded-xl border p-5 text-left ${mode === value ? "border-zinc-900 bg-zinc-950 text-white" : value === "json" ? "border-emerald-300 bg-emerald-50 text-zinc-900 hover:border-emerald-400" : "border-zinc-200 bg-white text-zinc-900"}`}
+                key={value}
+                onClick={() => selectMode(value)}
+                type="button"
+              >
+                <span className="block font-semibold">{label}</span>
+                <span className={`mt-2 block text-sm ${mode === value ? "text-zinc-300" : "text-zinc-500"}`}>{description}</span>
+              </button>
+            ))}
+          </div>
 
-      {mode === "json" ? (
-        <ChatGPTExportImport workspaces={workspaces} />
-      ) : (
+          {mode === "json" ? (
+            <ChatGPTExportImport mode="new" workspaces={workspaces} existingConversations={existingConversations} />
+          ) : (
         <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
           <div className="space-y-5 rounded-xl border border-zinc-200 bg-white p-6">
             {mode === "txt" ? (
@@ -433,121 +383,11 @@ export function ImportWorkbench() {
             <p className="text-xs leading-5 text-zinc-500">ChatGPT shared link 与浏览器插件入口为未来保留；本版本不实现抓取网页或读取浏览器历史。</p>
           </div>
         </div>
-      )}
-
-      {/* K1: Import into Existing Conversation */}
-      <details className="mt-6 rounded-xl border border-sky-200 bg-sky-50 p-5" open={!!targetConversationId || undefined}>
-        <summary className="cursor-pointer text-sm font-semibold text-sky-950">📥 Import into Existing Conversation{targetConversationId ? "（已选择目标对话）" : ""}</summary>
-        <p className="mt-2 text-xs text-sky-800">新内容会追加到当前 Conversation 后面，不覆盖旧内容。{targetConversationId ? ` 目标：${existingConversations.find((c) => c.id === targetConversationId)?.title ?? "—"}` : ""}</p>
-        {!existingImportReport ? (
-          <div className="mt-4 space-y-4">
-            <label className="block text-sm font-medium text-zinc-800">
-              选择已有 Conversation
-              <select
-                className="mt-2 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2.5"
-                onChange={(event) => setSelectedConversationId(event.target.value)}
-                value={selectedConversationId}
-              >
-                <option value="">— 请选择 —</option>
-                {existingConversations.map((conv) => (
-                  <option key={conv.id} value={conv.id}>{conv.title} ({conv.sourceType})</option>
-                ))}
-              </select>
-            </label>
-            {selectedConversationId ? (
-              <>
-                <div className="flex gap-2">
-                  <button
-                    className={`rounded-lg border px-3 py-2 text-xs font-semibold ${appendMode === "messages" ? "border-zinc-950 bg-zinc-950 text-white" : "border-zinc-200 bg-white text-zinc-600"}`}
-                    onClick={() => setAppendMode("messages")}
-                    type="button"
-                  >
-                    Append Messages
-                  </button>
-                  <button
-                    className={`rounded-lg border px-3 py-2 text-xs font-semibold ${appendMode === "rounds" ? "border-zinc-950 bg-zinc-950 text-white" : "border-zinc-200 bg-white text-zinc-600"}`}
-                    onClick={() => setAppendMode("rounds")}
-                    type="button"
-                  >
-                    Append Rounds
-                  </button>
-                </div>
-                <p className="text-xs text-zinc-500">
-                  {appendMode === "messages"
-                    ? "仅追加新 Messages，不创建 Round。保留历史 Round 不变。"
-                    : "追加新 Messages 并生成新 Rounds。历史 Round 保留，新 Round 追加在末尾。"}
-                </p>
-                <label className="block text-sm font-medium text-zinc-800">
-                  Parser
-                  <select className="mt-2 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2.5" onChange={(event) => setExistingParserId(event.target.value as ConversationParserId)} value={existingParserId}>
-                    {conversationParserIds.map((id) => <option key={id} value={id}>{parserLabels[id]}</option>)}
-                  </select>
-                </label>
-                <label className="block text-sm font-medium text-zinc-800">
-                  对话原文
-                  <textarea
-                    className="mt-2 min-h-48 w-full rounded-lg border border-zinc-300 px-4 py-3 font-mono text-sm leading-6"
-                    onChange={(event) => { setExistingRawText(event.target.value); setExistingImportReport(null); }}
-                    placeholder={"User: 你好\nAssistant: 你好！"}
-                    value={existingRawText}
-                  />
-                </label>
-                {existingPreview ? (
-                  <div className="rounded-lg border border-zinc-200 bg-white p-4">
-                    <p className="text-sm font-semibold">Import Preview</p>
-                    <p className="mt-2 text-xs text-zinc-500">
-                      {existingPreview.messageCount} Messages · {existingPreview.roundCount} Rounds · {parserLabels[existingPreview.parserId]} parser v{existingPreview.parserVersion}
-                    </p>
-                    {existingPreview.warnings.map((w) => <p className="mt-1 text-xs text-amber-700" key={w}>{w}</p>)}
-                    <p className="mt-2 text-xs text-zinc-400">追加到：{existingConversations.find((c) => c.id === selectedConversationId)?.title ?? "—"}</p>
-                    <p className="mt-1 text-xs text-zinc-400">模式：{appendMode === "messages" ? "仅追加 Messages" : "追加 Messages + 创建 Rounds"}</p>
-                    <div className="mt-3 flex gap-2">
-                      <button
-                        className="rounded-lg bg-zinc-950 px-4 py-2 text-xs font-semibold text-white hover:bg-zinc-800 disabled:bg-zinc-300"
-                        disabled={!existingPreview.canConfirm}
-                        onClick={confirmExistingImport}
-                        type="button"
-                      >
-                        Confirm Import
-                      </button>
-                      <button
-                        className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-xs font-semibold text-zinc-600"
-                        onClick={() => { setExistingRawText(""); setExistingImportReport(null); setSelectedConversationId(""); }}
-                        type="button"
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  </div>
-                ) : null}
-              </>
-            ) : null}
-          </div>
-        ) : (
-          <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 p-4">
-            <p className="font-semibold text-emerald-900">📋 Import Report</p>
-            <div className="mt-2 grid grid-cols-3 gap-3 text-sm">
-              <div className="rounded-lg bg-white p-3 text-center">
-                <p className="text-2xl font-bold text-emerald-700">{existingImportReport.appendedMessages}</p>
-                <p className="text-xs text-zinc-500">Messages Appended</p>
-              </div>
-              <div className="rounded-lg bg-white p-3 text-center">
-                <p className="text-2xl font-bold text-emerald-700">{existingImportReport.appendedRounds}</p>
-                <p className="text-xs text-zinc-500">Rounds Created</p>
-              </div>
-              <div className="rounded-lg bg-white p-3 text-center">
-                <p className="text-2xl font-bold text-zinc-500">{existingImportReport.skipped}</p>
-                <p className="text-xs text-zinc-500">Skipped</p>
-              </div>
-            </div>
-            <p className="mt-2 text-xs text-emerald-800">旧数据未被覆盖。历史 Round 已保留。新内容已追加。</p>
-            <div className="mt-3 flex gap-2">
-              <Link className="rounded-lg bg-emerald-700 px-4 py-2 text-xs font-semibold text-white hover:bg-emerald-800" href={`/conversation/${selectedConversationId}`}>打开 Conversation →</Link>
-              <button className="rounded-lg border border-emerald-300 bg-white px-4 py-2 text-xs font-semibold text-emerald-800" onClick={() => { setExistingImportReport(null); setExistingRawText(""); setSelectedConversationId(""); }} type="button">导入更多</button>
-            </div>
-          </div>
         )}
-      </details>
+        </>
+      ) : (
+        <ChatGPTExportImport mode="existing" workspaces={workspaces} existingConversations={existingConversations} />
+      )}
 
       {/* R10: Merge Conversation */}
       <details className="mt-6 rounded-xl border border-purple-200 bg-purple-50 p-5">
