@@ -1,3 +1,59 @@
+# PALOS v1.4 Finalization — IndexedDB Default Storage + Unified Import UX Handoff
+
+## 2026-07-08 checkpoint
+
+本轮完成 PALOS 业务存储默认收敛到 IndexedDB，并统一 Import / App Data / destructive persistence 的关键路径。未创建 commit，未删除现有测试，未回退 Storage Reliability Fix。
+
+### 完成内容
+
+- IndexedDB 成为业务数据默认存储；无 storage mode key 的新用户会直接使用 IndexedDB。
+- LocalStorage 保留为轻量配置、UI preference、current pointer、legacy migration source 和 debug/rollback 工具。
+- Import 页面一级路径统一为「新建 Conversation」与「追加到已有 Conversation」，两条路径均支持 ChatGPT Export 与手动文本。
+- Existing + Text 复用 `ImportParserPipeline` / `ImportService`，追加 Source、Messages、Rounds，并更新 Conversation `updatedAt`，不覆盖旧内容。
+- ChatGPT Export 接受 `conversations.json` / `conversations-*.json`，不限制 Conversation 数量；超过 30000 Messages 或 2000 万字符只做二次确认，不硬阻断。
+- 批量 ChatGPT Import / Append 继续在 IndexedDB flush transaction complete 后才显示 success；失败时重新 preload cache，不展示成功。
+- App Data Export 现在包含 IndexedDB 业务 stores；Import App Data 可 restore IndexedDB stores 并 reload 后保持。
+- Settings 的 Storage Engine Migration 改为 Legacy Data Migration；无旧 LocalStorage 数据时显示无需迁移；切回 LocalStorage 移入 Advanced / Debug。
+- Conversation 创建、列表读取、删除、批量删除和复制改走 storage factory；IndexedDB 模式下等待 flush 后刷新 UI。
+- Clear App Data 新增 IndexedDB business data clear path，不静默删除 legacy LocalStorage。
+
+### 修改文件
+
+- `src/infrastructure/storage/storage-factory.ts`
+- `src/infrastructure/storage/app-data-storage.ts`
+- `src/core/services/import-service.ts`
+- `src/app/import/import-workbench.tsx`
+- `src/app/import/chatgpt-export-import.tsx`
+- `src/app/settings/data-management.tsx`
+- `src/app/conversation/conversation-list.tsx`
+- `src/app/conversation/create-conversation-dialog.tsx`
+- `tests/indexeddb-reliability.test.ts`
+- `tests/chatgpt-export-import.test.ts`
+- `PROJECT.md`
+- `ARCHITECTURE.md`
+- `HANDOFF.md`
+
+### 验证
+
+```
+npm run lint ✅
+npm run build ✅
+npm test -- --run ✅
+git diff --check ✅
+```
+
+### 已知限制与人工 QA
+
+- 全仓仍有部分历史页面直接实例化 `Browser*Storage`，本轮修复了默认存储、Import、App Data、Conversation list/create/delete 等关键路径；Knowledge/Search/Conversation detail 等旧页面后续应按页面逐步迁到 factory，避免大规模重构。
+- App Data Import 会 restore bundle 中的 IndexedDB 业务 stores；LocalStorage legacy data 不会被自动清理，避免破坏迁移来源。
+- 需要浏览器手动 QA：首次打开 IndexedDB preload、Import 100+ Conversations、Existing + Text 追加、Export → Clear → Import → Reload、Conversation delete → Reload。
+
+### 是否建议 commit
+
+建议 commit，但本轮按要求未创建 commit。
+
+---
+
 # v1.1 Alpha — Long Conversation UX & Import Stabilization Handoff
 
 ## 2026-07-06 Epic C-J checkpoint (FINAL)

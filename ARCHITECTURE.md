@@ -6,7 +6,7 @@
 - Current Focus：Phase2 Second Brain Workspace runtime implemented；manual QA pending
 - Next Recommended Phase：验证 M–AB 与旧数据回归；通过前保持 alpha
 
-当前架构结论仍受单浏览器、小数据量与 LocalStorage 边界约束。v1.0 候选必须先完成范围和验收评审，不能从本文的演进 seam 推定为已批准实现。
+当前架构结论仍受单浏览器、本地优先与浏览器存储边界约束。PALOS 业务数据默认使用 IndexedDB；LocalStorage 保留为轻量配置、UI 偏好、schema/storage metadata 与旧数据迁移来源。v1.0 候选必须先完成范围和验收评审，不能从本文的演进 seam 推定为已批准实现。
 
 ## v1.0 Phase2 runtime delta
 
@@ -168,19 +168,21 @@ Contract 描述 Core 需要的能力，而不是具体实现。目前包括 Work
 
 真实 AI Provider 若将来获准接入，必须实现此 Contract，并继续返回 Proposal；不得从 Provider 直接写 Storage 或创建 KnowledgeCard。
 
-## BrowserStorage 层
+## BrowserStorage / IndexedDB 层
 
 位置：`src/infrastructure/storage`
 
-BrowserStorage 是 Contract 的 LocalStorage Adapter，负责：
+Storage adapters 是 Contract 的浏览器持久化实现。IndexedDB 是 Conversation、Message、Round、Source、Proposal、KnowledgeCard 与 ConversationVersion 的默认正式业务存储；Browser LocalStorage adapter 保留用于 legacy compatibility、migration source、rollback/debug 与轻量配置。
 
-- LocalStorage key 的集中管理。
+Storage adapters 负责：
+
+- IndexedDB store 或 LocalStorage key 的集中管理。
 - JSON 序列化与反序列化。
 - 集合查询、保存、更新和删除。
 - 旧数据的默认值与兼容归一化。
 - `current-source`、`current-proposal`、当前 Provider 等页面流程指针。
 
-当前集合 key 使用 `ai-learning-os.*` 命名空间。`current-source` 和 `current-proposal` 只是当前流程指针，不是跨实体关系的唯一事实来源；持续数据应以集合、实体 ID 和引用字段为准。
+LocalStorage 集合 key 继续使用 `ai-learning-os.*` 命名空间。`current-source` 和 `current-proposal` 只是当前流程指针，不是跨实体关系的唯一事实来源；持续业务数据应以 IndexedDB 集合、实体 ID 和引用字段为准。
 
 所有 BrowserStorage 只能在浏览器客户端调用。Page 必须通过 Adapter 使用本地数据，禁止复制 key、JSON 解析或直接 LocalStorage 访问。
 

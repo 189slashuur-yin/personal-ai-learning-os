@@ -200,6 +200,9 @@ export function ConversationDetail({
   const moreMenuRef = useRef<HTMLDivElement>(null);
   const moreMenuButtonRef = useRef<HTMLButtonElement>(null);
 
+  // P0-5: Raw Timeline toggle
+  const [rawTimelineOpen, setRawTimelineOpen] = useState(false);
+
   // K3: Summary undo/redo
   const [summaryUndoStack, setSummaryUndoStack] = useState<string[]>([]);
   const [summaryRedoStack, setSummaryRedoStack] = useState<string[]>([]);
@@ -380,7 +383,7 @@ export function ConversationDetail({
     return () => window.clearTimeout(loadTimer);
   }, [conversationId, providerDetails.id]);
 
-  // R9: Close More Menu on outside click
+  // R9: Close More Menu on outside click and Esc
   useEffect(() => {
     if (!moreMenuOpen) return;
     function handleClick(event: MouseEvent) {
@@ -393,8 +396,15 @@ export function ConversationDetail({
         setMoreMenuOpen(false);
       }
     }
+    function handleKey(event: globalThis.KeyboardEvent) {
+      if (event.key === "Escape") setMoreMenuOpen(false);
+    }
     document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
+    document.addEventListener("keydown", handleKey);
+    return () => {
+      document.removeEventListener("mousedown", handleClick);
+      document.removeEventListener("keydown", handleKey);
+    };
   }, [moreMenuOpen]);
 
   useEffect(() => {
@@ -1291,6 +1301,61 @@ export function ConversationDetail({
           Clipboard 导入成功：{conversation.title} · {conversation.sourceType} · {state.messages.length} Messages · {state.messages.filter((message) => message.role === "unknown").length} Unknown。
         </p>
       ) : null}
+
+      {/* P0-5: Raw Timeline / 原始对话 — prominent entry point */}
+      <section className="mt-6 rounded-xl border border-zinc-200 bg-white">
+        <button
+          className="flex w-full items-center justify-between p-5 text-left"
+          onClick={() => setRawTimelineOpen((prev) => !prev)}
+          type="button"
+        >
+          <div>
+            <h2 className="text-lg font-semibold text-zinc-900">原始对话 / Raw Timeline</h2>
+            <p className="mt-1 text-sm text-zinc-500">
+              {state.messages.length > 0
+                ? `${state.messages.length} 条 Message — 点击展开查看完整原始对话记录`
+                : "暂无原始 Messages"}
+            </p>
+          </div>
+          <span className="text-zinc-400 text-xl">{rawTimelineOpen ? "▾" : "▸"}</span>
+        </button>
+        {rawTimelineOpen ? (
+          <div className="border-t border-zinc-100 px-5 pb-5">
+            {state.messages.length > 0 ? (
+              <ol className="mt-4 max-h-[32rem] space-y-3 overflow-auto">
+                {state.messages.map((message) => (
+                  <li
+                    key={message.id}
+                    className={`flex max-w-[90%] gap-3 rounded-xl border p-4 sm:max-w-[82%] ${
+                      message.role === "user"
+                        ? "ml-auto border-sky-200 bg-sky-50"
+                        : message.role === "assistant"
+                          ? "mr-auto border-violet-200 bg-violet-50"
+                          : "mx-auto border-zinc-200 bg-zinc-50"
+                    }`}
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-x-3 text-xs">
+                        <span className="font-semibold uppercase tracking-[0.12em] text-zinc-600">
+                          {messageRoleLabels[message.role]}
+                        </span>
+                        <span className="text-zinc-400">#{message.order + 1}</span>
+                      </div>
+                      <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-zinc-800">
+                        {message.content}
+                      </p>
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            ) : (
+              <p className="mt-4 rounded-lg bg-zinc-50 px-4 py-6 text-center text-sm text-zinc-500">
+                暂无原始 Messages，可能是失败导入或空 Conversation。
+              </p>
+            )}
+          </div>
+        ) : null}
+      </section>
 
       <nav aria-label="Conversation 整理流程" className="mt-8 rounded-xl border border-sky-200 bg-sky-50 p-5">
         <div className="flex flex-wrap items-center justify-between gap-3">

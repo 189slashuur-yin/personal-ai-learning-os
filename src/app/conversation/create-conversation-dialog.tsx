@@ -6,7 +6,11 @@ import {
   conversationSourceTypes,
   type ConversationSourceType,
 } from "@/core/entities/conversation";
-import { BrowserConversationStorage } from "@/infrastructure/storage/browser-conversation-storage";
+import {
+  createConversationStorage,
+  getStorageMode,
+} from "@/infrastructure/storage/storage-factory";
+import { flushCachesToIndexedDB } from "@/infrastructure/storage/indexeddb/preload";
 
 type CreateConversationDialogProps = {
   onClose: () => void;
@@ -20,7 +24,7 @@ export function CreateConversationDialog({
   const [sourceType, setSourceType] =
     useState<ConversationSourceType>("Manual");
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
     const trimmedTitle = title.trim();
@@ -32,7 +36,7 @@ export function CreateConversationDialog({
     const timestamp = new Date().toISOString();
     const id = crypto.randomUUID();
 
-    new BrowserConversationStorage().save({
+    createConversationStorage().save({
       id,
       title: trimmedTitle,
       sourceType,
@@ -40,6 +44,9 @@ export function CreateConversationDialog({
       updatedAt: timestamp,
       lastOpenedAt: timestamp,
     });
+    if (getStorageMode() === "indexedDB") {
+      await flushCachesToIndexedDB();
+    }
 
     router.push(`/conversation/${id}`);
   }

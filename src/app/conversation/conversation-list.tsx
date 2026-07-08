@@ -11,17 +11,16 @@ import {
   duplicateConversationWorkspace,
   type ConversationWorkspaceStorages,
 } from "@/core/services/conversation-workspace";
-import { BrowserConversationStorage } from "@/infrastructure/storage/browser-conversation-storage";
-import { BrowserConversationVersionStorage } from "@/infrastructure/storage/browser-conversation-version-storage";
 import { BrowserAnalyzerRunStorage } from "@/infrastructure/storage/browser-analyzer-run-storage";
 import { BrowserAssetStorage } from "@/infrastructure/storage/browser-asset-storage";
-import { BrowserKnowledgeCardStorage } from "@/infrastructure/storage/browser-knowledge-card-storage";
-import { BrowserMessageStorage } from "@/infrastructure/storage/browser-message-storage";
-import { BrowserProposalStorage } from "@/infrastructure/storage/browser-proposal-storage";
-import { BrowserSourceStorage } from "@/infrastructure/storage/browser-source-storage";
 import { BrowserTaskStorage } from "@/infrastructure/storage/browser-task-storage";
 import { BrowserWorkspaceStorage } from "@/infrastructure/storage/browser-workspace-storage";
-import { BrowserRoundStorage } from "@/infrastructure/storage/browser-round-storage";
+import {
+  createStorageInstances,
+  ensureIndexedDBLoaded,
+  getStorageMode,
+} from "@/infrastructure/storage/storage-factory";
+import { flushCachesToIndexedDB } from "@/infrastructure/storage/indexeddb/preload";
 import { WorkspaceService } from "@/core/services/workspace-service";
 import { ConversationCard } from "./conversation-card";
 import { CreateConversationDialog } from "./create-conversation-dialog";
@@ -37,16 +36,17 @@ type ConversationItem = {
 };
 
 function createWorkspaceStorages(): ConversationWorkspaceStorages {
+  const businessStorages = createStorageInstances();
   return {
-    conversations: new BrowserConversationStorage(),
-    sources: new BrowserSourceStorage(),
-    proposals: new BrowserProposalStorage(),
-    knowledgeCards: new BrowserKnowledgeCardStorage(),
-    messages: new BrowserMessageStorage(),
+    conversations: businessStorages.conversations,
+    sources: businessStorages.sources,
+    proposals: businessStorages.proposals,
+    knowledgeCards: businessStorages.knowledgeCards,
+    messages: businessStorages.messages,
     analyzerRuns: new BrowserAnalyzerRunStorage(),
-    versions: new BrowserConversationVersionStorage(),
+    versions: businessStorages.conversationVersions,
     assets: new BrowserAssetStorage(),
-    rounds: new BrowserRoundStorage(),
+    rounds: businessStorages.rounds,
   };
 }
 
@@ -104,18 +104,24 @@ export function ConversationList() {
 
   useEffect(() => {
     const loadTimer = window.setTimeout(() => {
-      const data = loadConversationData();
-      setItems(data.items);
-      setWorkspaces(data.workspaces);
-      const requestedWorkspace = new URLSearchParams(window.location.search).get(
-        "workspace",
-      );
-      if (
-        requestedWorkspace &&
-        data.workspaces.some((workspace) => workspace.id === requestedWorkspace)
-      ) {
-        setWorkspaceFilter(requestedWorkspace);
+      async function load() {
+        if (getStorageMode() === "indexedDB") {
+          await ensureIndexedDBLoaded();
+        }
+        const data = loadConversationData();
+        setItems(data.items);
+        setWorkspaces(data.workspaces);
+        const requestedWorkspace = new URLSearchParams(window.location.search).get(
+          "workspace",
+        );
+        if (
+          requestedWorkspace &&
+          data.workspaces.some((workspace) => workspace.id === requestedWorkspace)
+        ) {
+          setWorkspaceFilter(requestedWorkspace);
+        }
       }
+      void load();
     }, 0);
 
     return () => window.clearTimeout(loadTimer);
@@ -157,7 +163,16 @@ export function ConversationList() {
     [items],
   );
 
-  function handleDelete(conversation: Conversation) {
+  async function persistAndReload() {
+    if (getStorageMode() === "indexedDB") {
+      await flushCachesToIndexedDB();
+    }
+    const data = loadConversationData();
+    setItems(data.items);
+    setWorkspaces(data.workspaces);
+  }
+
+  async function handleDelete(conversation: Conversation) {
     const confirmed = window.confirm(
       `确定删除「${conversation.title}」吗？关联的 Rounds、Messages、Source、Proposal、KnowledgeCard、AnalyzerRun、Conversation History 与 Asset metadata 也会删除；真实本地文件不会删除，关联 Task 会保留并显示 source missing。`,
     );
@@ -167,7 +182,7 @@ export function ConversationList() {
     }
 
     deleteConversationWorkspace(conversation.id, createWorkspaceStorages());
-    setItems(loadConversationData().items);
+    await persistAndReload();
     setSelectedIds((prev) => {
       const next = new Set(prev);
       next.delete(conversation.id);
@@ -175,15 +190,15 @@ export function ConversationList() {
     });
   }
 
-  function handleDuplicate(conversation: Conversation) {
+  async function handleDuplicate(conversation: Conversation) {
     duplicateConversationWorkspace(conversation.id, createWorkspaceStorages());
-    setItems(loadConversationData().items);
+    await persistAndReload();
   }
 
   function handleMove(conversationId: string, workspaceId: string) {
     new WorkspaceService(
       new BrowserWorkspaceStorage(),
-      new BrowserConversationStorage(),
+      createStorageInstances().conversations,
       new BrowserTaskStorage(),
     ).moveConversation(conversationId, workspaceId);
     const data = loadConversationData();
@@ -214,7 +229,7 @@ export function ConversationList() {
   }
 
   // P0-8: Batch delete
-  function handleBatchDelete() {
+  async function handleBatchDelete() {
     const ids = Array.from(selectedIds);
     if (ids.length === 0) return;
 
@@ -232,7 +247,7 @@ export function ConversationList() {
 
     const result = batchDeleteConversationWorkspace(ids, createWorkspaceStorages());
     setDeleteResult(result);
-    setItems(loadConversationData().items);
+    await persistAndReload();
     setSelectedIds(new Set());
   }
 

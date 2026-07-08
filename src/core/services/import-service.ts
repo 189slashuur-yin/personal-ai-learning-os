@@ -88,4 +88,69 @@ export class ImportService {
       parserVersion: preview.parserVersion,
     };
   }
+
+  appendToConversation(preview: ImportPreview, conversationId: string) {
+    if (!preview.canConfirm || preview.errors.length > 0) {
+      throw new Error("Import preview contains errors and cannot be appended.");
+    }
+
+    const conversation = this.conversations.getById(conversationId);
+    if (!conversation) {
+      throw new Error("Target conversation not found.");
+    }
+
+    const timestamp = new Date().toISOString();
+    const existingMessages = this.messages.getByConversationId(conversationId);
+    const startOrder =
+      existingMessages.reduce((max, message) => Math.max(max, message.order), -1) + 1;
+    const appendedMessages: Message[] = preview.messages.map((message, index) => ({
+      id: crypto.randomUUID(),
+      conversationId,
+      role: message.role,
+      content: message.content,
+      order: startOrder + index,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    }));
+    const messageIds = appendedMessages.map((message) => message.id);
+    const existingRounds = this.rounds.getByConversationId(conversationId);
+    const startRoundOrder =
+      existingRounds.reduce((max, round) => Math.max(max, round.order), 0) + 1;
+    const appendedRounds: Round[] = preview.rounds.map((round, index) => ({
+      id: crypto.randomUUID(),
+      conversationId,
+      order: startRoundOrder + index,
+      title: round.title,
+      question: round.question,
+      answer: round.answer,
+      messageIds: round.messageIndexes.map((messageIndex) => messageIds[messageIndex]),
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    }));
+
+    this.sources.save({
+      id: crypto.randomUUID(),
+      conversationId,
+      kind: "text",
+      name: preview.artifact.name,
+      content: preview.artifact.content,
+      importedAt: timestamp,
+      updatedAt: timestamp,
+    });
+    this.messages.saveMany(appendedMessages);
+    this.rounds.saveMany(appendedRounds);
+    this.conversations.save({
+      ...conversation,
+      updatedAt: timestamp,
+      lastOpenedAt: timestamp,
+    });
+
+    return {
+      conversationId,
+      messageCount: appendedMessages.length,
+      roundCount: appendedRounds.length,
+      parserId: preview.parserId,
+      parserVersion: preview.parserVersion,
+    };
+  }
 }

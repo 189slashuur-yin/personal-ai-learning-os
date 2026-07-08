@@ -2,7 +2,7 @@
 
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { type ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
+import { type ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   conversationParserIds,
   type ConversationParserId,
@@ -12,21 +12,27 @@ import type { Conversation } from "@/core/entities/conversation";
 import { ImportParserPipeline } from "@/core/services/import-parser-pipeline";
 import { ImportService } from "@/core/services/import-service";
 import { WorkspaceService } from "@/core/services/workspace-service";
-import { BrowserConversationStorage } from "@/infrastructure/storage/browser-conversation-storage";
-import { BrowserMessageStorage } from "@/infrastructure/storage/browser-message-storage";
-import { BrowserRoundStorage } from "@/infrastructure/storage/browser-round-storage";
-import { BrowserSourceStorage } from "@/infrastructure/storage/browser-source-storage";
 import { BrowserWorkspaceStorage } from "@/infrastructure/storage/browser-workspace-storage";
 import { BrowserAppEventLogStorage } from "@/infrastructure/storage/browser-feedback-storage";
 import { RoundService } from "@/core/services/round-service";
 import { ConversationVersionService } from "@/core/services/conversation-version-service";
-import { BrowserConversationVersionStorage } from "@/infrastructure/storage/browser-conversation-version-storage";
 import {
   ChatGPTExportImport,
   type ChatGPTExportImportSharedState,
   type ChatGPTExportImportCallbacks,
 } from "./chatgpt-export-import";
 import type { ChatGPTConversationPreview } from "@/core/services/chatgpt-export-import";
+import {
+  getStorageMode,
+  ensureIndexedDBLoaded,
+  createConversationStorage,
+  createSourceStorage,
+  createMessageStorage,
+  createRoundStorage,
+  createConversationVersionStorage,
+  type StorageMode,
+} from "@/infrastructure/storage/storage-factory";
+import { flushCachesToIndexedDB } from "@/infrastructure/storage/indexeddb/preload";
 
 const pipeline = new ImportParserPipeline();
 const parserLabels: Record<ConversationParserId, string> = {
@@ -52,16 +58,24 @@ export function ImportWorkbench() {
   const [importPath, setImportPath] = useState<"new" | "existing">(
     targetConversationId ? "existing" : "new",
   );
+  const [existingTargetId, setExistingTargetId] = useState(targetConversationId);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [importReport, setImportReport] = useState<string | null>(null);
   const [userAliases, setUserAliases] = useState("User, 问, 我, 用户");
   const [assistantAliases, setAssistantAliases] = useState("Assistant, 答, GPT, AI");
   const [separators, setSeparators] = useState("换行 + 角色标签");
   const [manualRounds, setManualRounds] = useState<Array<{ question: string; answer: string }> | null>(null);
   const [manualTarget, setManualTarget] = useState<{ index: number; field: "question" | "answer" } | null>(null);
   const rawTextRef = useRef<HTMLTextAreaElement>(null);
+  // P0: Breadcrumb for auto-selecting a newly created conversation as the
+  // "import to existing" target. Set before navigating away or right before
+  // reload, consumed by loadExistingData.
+  const lastCreatedIdRef = useRef<string | null>(null);
 
   const [existingConversations, setExistingConversations] = useState<Conversation[]>([]);
+  const [storageMode, setStorageModeState] = useState<StorageMode>("localStorage");
+  const [idbReady, setIdbReady] = useState(false);
 
   // Shared ChatGPT export file state (P0-1: preserved across path switches)
   const [chatGptFileInfo, setChatGptFileInfo] = useState<{
@@ -119,6 +133,12 @@ export function ImportWorkbench() {
     onSelectedIdsChange: (ids: Set<string>) => {
       setChatGptSelectedIds(ids);
     },
+    onImportCompleted: (newIds: string[]) => {
+      if (newIds.length > 0) {
+        lastCreatedIdRef.current = newIds[0];
+      }
+      void loadExistingData();
+    },
   };
 
   // R10: Conversation Merge
@@ -158,9 +178,19 @@ export function ImportWorkbench() {
     return { ...preview, parserId: "manual" as const, format: "manual" as const, messages, rounds, messageCount: messages.length, roundCount: rounds.length, unknownMessageCount: 0, canConfirm: rounds.length > 0 && messages.length > 0, warnings: [], errors: [] };
   }, [manualRounds, preview]);
 
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      const conversationStorage = new BrowserConversationStorage();
+  // P0: Shared data-loading function — called on mount, param change, and window focus.
+  // This ensures existingConversations stays fresh when the user creates a
+  // Conversation on another page/tab and returns to Import without a hard reload.
+  const loadExistingData = useCallback(async () => {
+    try {
+      const mode = getStorageMode();
+      setStorageModeState(mode);
+      setIdbReady(mode === "localStorage");
+      if (mode === "indexedDB") {
+        await ensureIndexedDBLoaded();
+      }
+
+      const conversationStorage = createConversationStorage();
       setWorkspaces(
         new WorkspaceService(
           new BrowserWorkspaceStorage(),
@@ -170,9 +200,37 @@ export function ImportWorkbench() {
           .filter((workspace) => !workspace.archivedAt),
       );
       setExistingConversations(conversationStorage.getAll());
-    }, 0);
-    return () => window.clearTimeout(timer);
-  }, [targetConversationId]);
+
+      // P0: Auto-select the newly created conversation as "import to existing" target
+      const pendingNewId = lastCreatedIdRef.current;
+      if (pendingNewId) {
+        lastCreatedIdRef.current = null;
+        if (conversationStorage.getById(pendingNewId)) {
+          setExistingTargetId(pendingNewId);
+        }
+      }
+
+      setIdbReady(true);
+      setError(null);
+    } catch {
+      setIdbReady(false);
+      setError("IndexedDB 数据加载失败，当前页面不会显示空数据作为成功状态。请刷新或切回 LocalStorage。");
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadExistingData();
+  }, [loadExistingData, targetConversationId]);
+
+  // P0: Refresh existingConversations when the page regains focus
+  // (e.g. user creates a Conversation on another page/tab and returns)
+  useEffect(() => {
+    function onFocus() {
+      void loadExistingData();
+    }
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [loadExistingData]);
 
   // R10: Merge preview
   function previewMerge() {
@@ -180,9 +238,9 @@ export function ImportWorkbench() {
       setError("请选择不同的源和目标 Conversation。");
       return;
     }
-    const convStorage = new BrowserConversationStorage();
-    const msgStorage = new BrowserMessageStorage();
-    const roundStorage = new BrowserRoundStorage();
+    const convStorage = createConversationStorage();
+    const msgStorage = createMessageStorage();
+    const roundStorage = createRoundStorage();
     const source = convStorage.getById(mergeSourceId);
     const target = convStorage.getById(mergeTargetId);
     if (!source || !target) { setError("Conversation 不存在。"); return; }
@@ -201,14 +259,14 @@ export function ImportWorkbench() {
     setError(null);
   }
 
-  function confirmMerge() {
+  async function confirmMerge() {
     if (!mergePreview || !mergeSourceId || !mergeTargetId) return;
     if (!window.confirm(`将「${mergePreview.sourceTitle}」的全部内容合并到「${mergePreview.targetTitle}」？\n\n源：${mergePreview.sourceMessages} Messages · ${mergePreview.sourceRounds} Rounds\n目标：${mergePreview.targetMessages} Messages · ${mergePreview.targetRounds} Rounds\n\n合并后目标将包含两边的全部内容。源 Conversation 保持不变。`)) return;
     try {
-      const convStorage = new BrowserConversationStorage();
-      const msgStorage = new BrowserMessageStorage();
-      const roundStorage = new BrowserRoundStorage();
-      const versionStorage = new BrowserConversationVersionStorage();
+      const convStorage = createConversationStorage();
+      const msgStorage = createMessageStorage();
+      const roundStorage = createRoundStorage();
+      const versionStorage = createConversationVersionStorage();
       const target = convStorage.getById(mergeTargetId);
       if (!target) { setError("目标 Conversation 不存在。"); return; }
 
@@ -256,20 +314,25 @@ export function ImportWorkbench() {
 
       // Update target conversation timestamp
       convStorage.save({ ...target, updatedAt: new Date().toISOString() });
+      if (getStorageMode() === "indexedDB") {
+        await flushCachesToIndexedDB();
+      }
 
       setMergeReport(`✅ 已合并：${appendedMessages.length} Messages · ${sourceRounds.length} Rounds →「${mergePreview.targetTitle}」`);
       setMergePreview(null);
       setMergeSourceId("");
       setMergeTargetId("");
-    } catch {
-      setError("合并失败，请确认浏览器允许本地保存后重试。");
+    } catch (error) {
+      setError(
+        error instanceof Error
+          ? `合并失败：${error.message}`
+          : "合并失败，请确认浏览器允许本地保存后重试。",
+      );
     }
   }
 
   function selectMode(nextMode: "paste" | "txt" | "json") {
     setMode(nextMode);
-    setRawText("");
-    setTitle("");
     setError(null);
     if (nextMode === "txt") setParserId("txt");
   }
@@ -287,19 +350,54 @@ export function ImportWorkbench() {
     setError(null);
   }
 
-  function confirmImport() {
+  async function confirmImport() {
     if (!effectivePreview?.canConfirm) return;
+    if (importPath === "existing" && !existingTargetId) {
+      setError("请先选择目标 Conversation；新内容会追加到该 Conversation 后面。");
+      return;
+    }
     try {
-      const result = new ImportService(
-        new BrowserConversationStorage(),
-        new BrowserSourceStorage(),
-        new BrowserMessageStorage(),
-        new BrowserRoundStorage(),
-      ).confirm(effectivePreview, { title, workspaceId });
-      new BrowserAppEventLogStorage().record("import created", result.conversationId, `${result.roundCount} rounds`);
+      const importService = new ImportService(
+        createConversationStorage(),
+        createSourceStorage(),
+        createMessageStorage(),
+        createRoundStorage(),
+      );
+      if (importPath === "existing") {
+        const existingConv = existingConversations.find((c) => c.id === existingTargetId);
+        const targetTitle = existingConv?.title ?? "未知";
+        const result = importService.appendToConversation(effectivePreview, existingTargetId);
+        if (getStorageMode() === "indexedDB") {
+          await flushCachesToIndexedDB();
+        }
+        new BrowserAppEventLogStorage().record("import created", existingTargetId, `appended ${result.messageCount} messages · ${result.roundCount} rounds to "${targetTitle}"`);
+        setImportReport(`✅ 已追加到「${targetTitle}」：${result.messageCount} Messages · ${result.roundCount} Rounds`);
+        // Refresh existingConversations so updatedAt reflects in the list (P0-2)
+        void loadExistingData();
+        // Do NOT clear user input or mode (P0-4)
+        setError(null);
+        return;
+      }
+
+      const result = importService.confirm(effectivePreview, { title, workspaceId });
+      if (getStorageMode() === "indexedDB") {
+        await flushCachesToIndexedDB();
+      }
+
+      // P0: Track newly created conversation so loadExistingData auto-selects it
+      lastCreatedIdRef.current = result.conversationId;
+
+      new BrowserAppEventLogStorage().record("import created", result.conversationId, `created ${result.roundCount} rounds`);
+      // P0-2: Refresh existingConversations immediately after creation
+      void loadExistingData();
+      setImportReport(`✅ 已新建「${title || effectivePreview.suggestedTitle}」：${result.messageCount} Messages · ${result.roundCount} Rounds`);
       router.push(`/conversation/${result.conversationId}?imported=rounds`);
-    } catch {
-      setError("导入失败，没有报告成功；请确认浏览器允许本地保存后重试。");
+    } catch (error) {
+      setError(
+        error instanceof Error
+          ? `导入失败：${error.message}`
+          : "导入失败，没有报告成功；请确认浏览器允许本地保存后重试。",
+      );
     }
   }
 
@@ -329,26 +427,47 @@ export function ImportWorkbench() {
         <p className="mt-2 text-xs text-emerald-700">注意：当前只导入 User / Assistant 文本；附件、图片、tool call、canvas、voice 与 shared link 会被跳过或不处理。</p>
       </details>
 
-      {/* P0-9: LocalStorage strategy notice */}
-      <details className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-5">
-        <summary className="cursor-pointer text-sm font-semibold text-amber-950">💾 存储策略说明</summary>
-        <div className="mt-3 space-y-2 text-sm leading-7 text-amber-900">
-          <p>
-            当前版本使用<strong>浏览器 LocalStorage</strong> 存储所有数据（Conversation、Message、Round、Knowledge 等）。
-            LocalStorage 适合小批量/个人试用场景，<strong>不适合一次性导入几十 MB 的大文件</strong>。
+      <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-5">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-sm font-semibold text-emerald-950">
+            当前业务存储：{storageMode === "indexedDB" ? "IndexedDB" : "LocalStorage (legacy/debug)"}
           </p>
-          <p className="font-semibold">推荐策略：</p>
-          <ul className="list-inside list-disc space-y-1">
-            <li>每次导入少量重要对话（建议单次不超过 3000 条 Message 或 200 万字符）</li>
-            <li>导入前先清理 0 Message / 0 Round 的失败对话（在 Conversation 页使用 Empty 筛选）</li>
-            <li>如导入被中断，减少选择数量后分批导入</li>
-            <li>定期在 Data Health 页面检查数据完整性</li>
-          </ul>
-          <p className="mt-2 text-xs text-amber-700">
-            后续版本计划迁移到 <strong>IndexedDB</strong>，届时将支持更大规模的本地数据存储。本轮不实现 IndexedDB 和服务器存储。
-          </p>
+          <span className="rounded-full bg-emerald-200 px-3 py-0.5 text-xs font-semibold text-emerald-800">
+            默认 IndexedDB
+          </span>
         </div>
-      </details>
+        <p className="mt-3 text-sm leading-7 text-emerald-900">
+          PALOS 默认把 Conversation、Message、Round、Source、Proposal、Knowledge 和 Snapshot 写入 IndexedDB。LocalStorage 仅保留轻量配置、UI 偏好和旧数据迁移兼容。
+        </p>
+      </div>
+
+      {/* IndexedDB loading state */}
+      {storageMode === "indexedDB" && !idbReady ? (
+        <div className="mt-3 rounded-lg bg-sky-50 px-4 py-3 text-sm text-sky-800">
+          IndexedDB 数据加载中…
+        </div>
+      ) : null}
+
+      {/* P0-1: Current mode display banner */}
+      <div className="rounded-xl border border-zinc-300 bg-zinc-50 p-4">
+        <p className="text-sm font-semibold text-zinc-800">
+          当前模式：{importPath === "new" ? "新建 Conversation" : "导入到已有 Conversation"}
+          {" / "}
+          {mode === "json" ? "ChatGPT Export" : mode === "txt" ? "TXT 文件" : "手动文本"}
+        </p>
+        {importPath === "existing" ? (
+          <p className="mt-1 text-sm text-zinc-600">
+            当前目标：{existingTargetId && existingConversations.find((c) => c.id === existingTargetId)
+              ? existingConversations.find((c) => c.id === existingTargetId)!.title
+              : "未选择 — 请先选择目标 Conversation；新内容会追加到该 Conversation 后面。"}
+          </p>
+        ) : (
+          <p className="mt-1 text-sm text-zinc-600">
+            将创建新的 Conversation。
+          </p>
+        )}
+      </div>
+
       <div className="grid gap-4 md:grid-cols-2">
         <button
           className={`rounded-xl border p-5 text-left ${
@@ -379,29 +498,80 @@ export function ImportWorkbench() {
           </span>
         </button>
       </div>
-      {importPath === "new" ? (
-        <>
-          <div className="mt-6 grid gap-4 md:grid-cols-3">
-            {([
-              ["paste", "粘贴并导入对话", "直接粘贴多轮问答文本；支持六种角色别名"],
-              ["txt", "导入 TXT 文件", "从本地纯文本文件导入"],
-              ["json", "📦 导入 ChatGPT Export", "导入官方 Export zip 解压后的 conversations.json / conversations-*.json"],
-            ] as const).map(([value, label, description]) => (
-              <button
-                className={`rounded-xl border p-5 text-left ${mode === value ? "border-zinc-900 bg-zinc-950 text-white" : value === "json" ? "border-emerald-300 bg-emerald-50 text-zinc-900 hover:border-emerald-400" : "border-zinc-200 bg-white text-zinc-900"}`}
-                key={value}
-                onClick={() => selectMode(value)}
-                type="button"
-              >
-                <span className="block font-semibold">{label}</span>
-                <span className={`mt-2 block text-sm ${mode === value ? "text-zinc-300" : "text-zinc-500"}`}>{description}</span>
-              </button>
-            ))}
-          </div>
+      <div className="mt-6 grid gap-4 md:grid-cols-2">
+        {([
+          ["json", "ChatGPT Export", "导入官方 Export zip 解压后的 conversations.json / conversations-*.json"],
+          ["paste", "手动文本", "粘贴多轮问答文本；也可以选择 TXT 文件"],
+        ] as const).map(([value, label, description]) => (
+          <button
+            className={`rounded-xl border p-5 text-left ${(mode === value || (value === "paste" && mode === "txt")) ? "border-zinc-900 bg-zinc-950 text-white" : value === "json" ? "border-emerald-300 bg-emerald-50 text-zinc-900 hover:border-emerald-400" : "border-zinc-200 bg-white text-zinc-900"}`}
+            key={value}
+            onClick={() => selectMode(value)}
+            type="button"
+          >
+            <span className="block font-semibold">{label}</span>
+            <span className={`mt-2 block text-sm ${(mode === value || (value === "paste" && mode === "txt")) ? "text-zinc-300" : "text-zinc-500"}`}>{description}</span>
+          </button>
+        ))}
+      </div>
 
-          {mode === "json" ? (
-            <ChatGPTExportImport mode="new" workspaces={workspaces} existingConversations={existingConversations} sharedState={chatGptSharedState} callbacks={chatGptCallbacks} />
+      {importPath === "existing" ? (
+        <div className="rounded-xl border border-zinc-200 bg-white p-5">
+          {existingConversations.length === 0 ? (
+            <p className="text-sm text-amber-700">暂无可追加目标。请先新建一个 Conversation。</p>
           ) : (
+            <>
+            <label className="block text-sm font-medium text-zinc-800">
+              选择目标 Conversation
+              <select
+                className="mt-2 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2.5"
+                onChange={(event) => { setExistingTargetId(event.target.value); setError(null); }}
+                value={existingTargetId}
+              >
+                <option value="">— 请选择 —</option>
+                {existingConversations.map((conversation) => (
+                  <option key={conversation.id} value={conversation.id}>
+                    {conversation.title} ({conversation.sourceType})
+                  </option>
+                ))}
+              </select>
+            </label>
+            {!existingTargetId ? (
+              <p className="mt-2 text-sm text-amber-600">
+                ⚠️ 请先选择目标 Conversation；新内容会追加到该 Conversation 后面。
+              </p>
+            ) : (
+              <p className="mt-2 text-sm text-emerald-700">
+                新内容将追加到「{existingConversations.find((c) => c.id === existingTargetId)?.title ?? "—"}」后面，不覆盖旧内容。
+              </p>
+            )}
+            </>
+          )}
+        </div>
+      ) : null}
+
+      {mode === "json" ? (
+        <ChatGPTExportImport mode={importPath} workspaces={workspaces} existingConversations={existingConversations} sharedState={chatGptSharedState} callbacks={chatGptCallbacks} initialTargetConversationId={existingTargetId || targetConversationId || undefined} />
+      ) : (
+        <>
+          {importPath === "new" ? (
+            <div className="mt-6 grid gap-4 md:grid-cols-2">
+              {([
+                ["paste", "粘贴并导入对话", "直接粘贴多轮问答文本；支持六种角色别名"],
+                ["txt", "导入 TXT 文件", "从本地纯文本文件导入"],
+              ] as const).map(([value, label, description]) => (
+                <button
+                  className={`rounded-xl border p-5 text-left ${mode === value ? "border-zinc-900 bg-zinc-950 text-white" : "border-zinc-200 bg-white text-zinc-900"}`}
+                  key={value}
+                  onClick={() => selectMode(value)}
+                  type="button"
+                >
+                  <span className="block font-semibold">{label}</span>
+                  <span className={`mt-2 block text-sm ${mode === value ? "text-zinc-300" : "text-zinc-500"}`}>{description}</span>
+                </button>
+              ))}
+            </div>
+          ) : null}
         <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
           <div className="space-y-5 rounded-xl border border-zinc-200 bg-white p-6">
             {mode === "txt" ? (
@@ -417,16 +587,20 @@ export function ImportWorkbench() {
                 </select>
               </label><details className="rounded-lg border border-zinc-200 p-4"><summary className="cursor-pointer text-sm font-semibold">识别格式 / Role 识别规则</summary><div className="mt-3 grid gap-3"><label className="text-xs font-medium">User role aliases<input className="mt-1 w-full rounded border border-zinc-200 px-3 py-2" onChange={(event) => setUserAliases(event.target.value)} value={userAliases} /></label><label className="text-xs font-medium">Assistant role aliases<input className="mt-1 w-full rounded border border-zinc-200 px-3 py-2" onChange={(event) => setAssistantAliases(event.target.value)} value={assistantAliases} /></label><label className="text-xs font-medium">Separators<input className="mt-1 w-full rounded border border-zinc-200 px-3 py-2" onChange={(event) => setSeparators(event.target.value)} value={separators} /></label><p className="text-xs text-zinc-500">当前 parser type：{parserLabels[parserId]}。</p><p className="mt-1 text-xs font-semibold text-zinc-600">默认支持的角色别名（无需配置）：</p><ul className="mt-1 list-inside list-disc text-xs text-zinc-500"><li>User / Assistant</li><li>用户 / AI</li><li>我 / GPT</li><li>问 / 答</li></ul><p className="mt-2 text-xs text-zinc-500">后续支持自定义 alias。以上输入先作为本次导入记录，不会改变旧数据。</p></div></details></>
             )}
-            <label className="block text-sm font-medium text-zinc-800">
-              Conversation 标题
-              <input className="mt-2 w-full rounded-lg border border-zinc-300 px-3 py-2.5" onChange={(event) => setTitle(event.target.value)} placeholder={preview?.suggestedTitle ?? "Imported Conversation"} value={title} />
-            </label>
-            <label className="block text-sm font-medium text-zinc-800">
-              Workspace
-              <select className="mt-2 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2.5" onChange={(event) => setWorkspaceId(event.target.value)} value={workspaceId}>
-                {workspaces.map((workspace) => <option key={workspace.id} value={workspace.id}>{workspace.name}</option>)}
-              </select>
-            </label>
+            {importPath === "new" ? (
+              <>
+                <label className="block text-sm font-medium text-zinc-800">
+                  Conversation 标题
+                  <input className="mt-2 w-full rounded-lg border border-zinc-300 px-3 py-2.5" onChange={(event) => setTitle(event.target.value)} placeholder={preview?.suggestedTitle ?? "Imported Conversation"} value={title} />
+                </label>
+                <label className="block text-sm font-medium text-zinc-800">
+                  Workspace
+                  <select className="mt-2 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2.5" onChange={(event) => setWorkspaceId(event.target.value)} value={workspaceId}>
+                    {workspaces.map((workspace) => <option key={workspace.id} value={workspace.id}>{workspace.name}</option>)}
+                  </select>
+                </label>
+              </>
+            ) : null}
             {mode === "paste" ? (
               <label className="block text-sm font-medium text-zinc-800">
                 对话原文
@@ -462,15 +636,19 @@ export function ImportWorkbench() {
               </div>
             ) : null}
             {error ? <p className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700" role="alert">{error}</p> : null}
-            <button className="w-full rounded-lg bg-zinc-950 px-5 py-3 text-sm font-medium text-white disabled:bg-zinc-300" disabled={!effectivePreview?.canConfirm || !title.trim()} onClick={confirmImport} type="button">确认导入 Conversation / Messages / Rounds</button>
+            {importReport ? <p className="rounded-lg bg-emerald-50 px-4 py-3 text-sm text-emerald-700" role="status">{importReport}</p> : null}
+            <button className="w-full rounded-lg bg-zinc-950 px-5 py-3 text-sm font-medium text-white disabled:bg-zinc-300" disabled={!idbReady || !effectivePreview?.canConfirm || (importPath === "new" ? !title.trim() : !existingTargetId)} onClick={confirmImport} type="button">
+              {importPath === "new"
+                ? "导入为新 Conversation"
+                : existingTargetId
+                  ? `追加文本到目标 Conversation「${existingConversations.find((c) => c.id === existingTargetId)?.title ?? "—"}」`
+                  : "请先选择目标 Conversation"}
+            </button>
             <p className="text-xs leading-5 text-zinc-500">确认前不会写入 Conversation、Message 或 Round。</p>
             <p className="text-xs leading-5 text-zinc-500">ChatGPT shared link 与浏览器插件入口为未来保留；本版本不实现抓取网页或读取浏览器历史。</p>
           </div>
         </div>
-        )}
         </>
-      ) : (
-        <ChatGPTExportImport mode="existing" workspaces={workspaces} existingConversations={existingConversations} sharedState={chatGptSharedState} callbacks={chatGptCallbacks} />
       )}
 
       {/* R10: Merge Conversation */}
@@ -533,7 +711,7 @@ export function ImportWorkbench() {
                 </div>
                 <p className="mt-3 text-xs text-zinc-500">合并后目标将包含 {mergePreview.targetMessages + mergePreview.sourceMessages} Messages · {mergePreview.targetRounds + mergePreview.sourceRounds} Rounds。</p>
                 <div className="mt-3 flex gap-2">
-                  <button className="rounded-lg bg-purple-700 px-4 py-2 text-xs font-semibold text-white hover:bg-purple-800" onClick={confirmMerge} type="button">Confirm Merge</button>
+                  <button className="rounded-lg bg-purple-700 px-4 py-2 text-xs font-semibold text-white hover:bg-purple-800 disabled:bg-zinc-300" disabled={!idbReady} onClick={confirmMerge} type="button">Confirm Merge</button>
                   <button className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-xs font-semibold text-zinc-600" onClick={() => setMergePreview(null)} type="button">Cancel</button>
                 </div>
               </div>
