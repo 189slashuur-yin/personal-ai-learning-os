@@ -2784,3 +2784,145 @@ describe("PALOS v1.4.9 — Round persistence across flush/clear/reload", () => {
     expect(savedRounds.length).toBeGreaterThan(0);
   });
 });
+
+// ============================================================================
+// PALOS v1.4.10 — DataHealth canonical storage (P0-6 fix)
+// ============================================================================
+describe("PALOS v1.4.10 — DataHealth uses canonical storage", () => {
+  it("DataHealth-equivalent reads find IndexedDB data (not stale localStorage)", async () => {
+    // Populate IndexedDB with data — this is where the real business data lives
+    await replaceStores({
+      conversations: [conversation("dh-c1"), conversation("dh-c2")],
+      messages: [
+        message("dh-m1", "dh-c1", 0),
+        message("dh-m2", "dh-c1", 1),
+        message("dh-m3", "dh-c2", 0),
+      ],
+      rounds: [round("dh-r1", "dh-c1", 1), round("dh-r2", "dh-c2", 1)],
+      sources: [],
+      proposals: [
+        {
+          id: "dh-p1",
+          title: "dh proposal",
+          summary: "summary",
+          sourceId: "dh-s1",
+          conversationId: "dh-c1",
+          status: "Pending" as const,
+          createdAt: now,
+          updatedAt: now,
+        },
+      ],
+      "knowledge-cards": [
+        {
+          id: "dh-k1",
+          proposalId: "dh-p1",
+          title: "dh knowledge",
+          summary: "summary",
+          content: "content",
+          sourceId: "dh-s1",
+          status: "Active" as const,
+          createdAt: now,
+          updatedAt: now,
+        },
+      ],
+      "conversation-versions": [],
+    });
+
+    // Ensure localStorage is EMPTY for these keys (simulates IndexedDB-only state)
+    const ls = (window as unknown as { localStorage: { removeItem: (k: string) => void; getItem: (k: string) => string | null } }).localStorage;
+    ls.removeItem("ai-learning-os.conversations");
+    ls.removeItem("ai-learning-os.messages");
+    ls.removeItem("ai-learning-os.rounds");
+    ls.removeItem("ai-learning-os.proposals");
+    ls.removeItem("ai-learning-os.knowledge-cards");
+
+    clearCaches();
+    await preloadAll();
+
+    // Simulate DataHealth reads using canonical storage (the fix)
+    const conversations = createStorageInstances().conversations.getAll();
+    const messages = createStorageInstances().messages.getAll();
+    const rounds = createStorageInstances().rounds!.getAll();
+    const proposals = createStorageInstances().proposals.getAll();
+    const knowledgeCards = createStorageInstances().knowledgeCards.getAll();
+
+    // All data must be found via canonical storage
+    expect(conversations).toHaveLength(2);
+    expect(messages).toHaveLength(3);
+    expect(rounds).toHaveLength(2);
+    expect(proposals).toHaveLength(1);
+    expect(knowledgeCards).toHaveLength(1);
+
+    // Empty conversation detection must work with canonical data
+    const messagesByConv = new Map<string, number>();
+    messages.forEach((m) => messagesByConv.set(m.conversationId, (messagesByConv.get(m.conversationId) ?? 0) + 1));
+    const roundCountByConv = new Map<string, number>();
+    rounds.forEach((r) => roundCountByConv.set(r.conversationId, (roundCountByConv.get(r.conversationId) ?? 0) + 1));
+
+    for (const conv of conversations) {
+      const msgCount = messagesByConv.get(conv.id) ?? 0;
+      const rndCount = roundCountByConv.get(conv.id) ?? 0;
+      // Neither conversation should be detected as "empty" since both have messages & rounds
+      expect(`${conv.id}: msg=${msgCount} round=${rndCount}`).not.toContain("0");
+    }
+
+    // Orphan detection must work: proposals referencing deleted conversations
+    const conversationIds = new Set(conversations.map((c) => c.id));
+    const orphanProposals = proposals.filter((p) => p.conversationId && !conversationIds.has(p.conversationId));
+    expect(orphanProposals).toHaveLength(0); // dh-c1 still exists
+
+    // Orphan knowledge must be detectable
+    const proposalIds = new Set(proposals.map((p) => p.id));
+    const orphanKnowledge = knowledgeCards.filter((k) => !proposalIds.has(k.proposalId));
+    expect(orphanKnowledge).toHaveLength(0); // dh-k1 references dh-p1 which exists
+  });
+
+  it("DataHealth empty-conversation detection works after delete", async () => {
+    // Populate data, delete one conversation, verify DataHealth detects the remaining correctly
+    await replaceStores({
+      conversations: [conversation("dh-full"), conversation("dh-empty")],
+      messages: [message("dh-fm", "dh-full", 0)],
+      rounds: [round("dh-fr", "dh-full", 1)],
+      sources: [],
+      proposals: [],
+      "knowledge-cards": [],
+      "conversation-versions": [],
+    });
+    clearCaches();
+    await preloadAll();
+
+    // Delete dh-full via workspace service
+    const storages = createStorageInstances("indexedDB");
+    deleteConversationWorkspace("dh-full", {
+      ...storages,
+      versions: storages.conversationVersions,
+      rounds: storages.rounds,
+    });
+    await flushCachesToIndexedDB();
+    clearCaches();
+    await preloadAll();
+
+    // DataHealth-equivalent read after delete
+    const conversations = createStorageInstances().conversations.getAll();
+    const messages = createStorageInstances().messages.getAll();
+    const rounds = createStorageInstances().rounds!.getAll();
+
+    // dh-full should be gone, dh-empty should remain
+    expect(conversations).toHaveLength(1);
+    expect(conversations[0].id).toBe("dh-empty");
+
+    // dh-empty should be flagged as empty (0 messages, 0 rounds)
+    const messagesByConv = new Map<string, number>();
+    messages.forEach((m) => messagesByConv.set(m.conversationId, (messagesByConv.get(m.conversationId) ?? 0) + 1));
+    const roundCountByConv = new Map<string, number>();
+    rounds.forEach((r) => roundCountByConv.set(r.conversationId, (roundCountByConv.get(r.conversationId) ?? 0) + 1));
+
+    const emptyConversations = conversations.filter((conv) => {
+      const msgCount = messagesByConv.get(conv.id) ?? 0;
+      const rndCount = roundCountByConv.get(conv.id) ?? 0;
+      return msgCount === 0 || rndCount === 0;
+    });
+    expect(emptyConversations).toHaveLength(1);
+    expect(emptyConversations[0].id).toBe("dh-empty");
+  });
+});

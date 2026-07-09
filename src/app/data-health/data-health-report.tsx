@@ -1,12 +1,16 @@
 "use client";
 import { useEffect, useState } from "react";
 import { BrowserAssetStorage } from "@/infrastructure/storage/browser-asset-storage";
-import { BrowserConversationStorage } from "@/infrastructure/storage/browser-conversation-storage";
-import { BrowserKnowledgeCardStorage } from "@/infrastructure/storage/browser-knowledge-card-storage";
-import { BrowserProposalStorage } from "@/infrastructure/storage/browser-proposal-storage";
-import { BrowserRoundStorage } from "@/infrastructure/storage/browser-round-storage";
 import { BrowserWorkspaceStorage } from "@/infrastructure/storage/browser-workspace-storage";
-import { BrowserMessageStorage } from "@/infrastructure/storage/browser-message-storage";
+import {
+  createConversationStorage,
+  createKnowledgeCardStorage,
+  createMessageStorage,
+  createProposalStorage,
+  createRoundStorage,
+  ensureIndexedDBLoaded,
+  getStorageMode,
+} from "@/infrastructure/storage/storage-factory";
 type Finding = { kind: string; id: string; detail: string };
 
 function estimateLocalStorageUsage(): { totalBytes: number; keyCount: number } {
@@ -27,14 +31,22 @@ export function DataHealthReport() {
   const [storageUsage, setStorageUsage] = useState<{ totalBytes: number; keyCount: number } | null>(null);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => {
-      const conversations = new BrowserConversationStorage().getAll();
+    const timer = window.setTimeout(async () => {
+      // Preload IndexedDB data into memory for IndexedDB mode;
+      // localStorage mode reads directly from localStorage.
+      if (getStorageMode() === "indexedDB") {
+        await ensureIndexedDBLoaded();
+      }
+
+      // Use canonical storage via factory helpers — respects storage mode.
+      const conversations = createConversationStorage().getAll();
       const conversationIds = new Set(conversations.map((item) => item.id));
-      const rounds = new BrowserRoundStorage().getAll();
+      const rounds = createRoundStorage().getAll();
       const roundIds = new Set(rounds.map((item) => item.id));
-      const proposals = new BrowserProposalStorage().getAll();
+      const proposals = createProposalStorage().getAll();
       const proposalIds = new Set(proposals.map((item) => item.id));
-      const knowledge = new BrowserKnowledgeCardStorage().getAll();
+      const knowledge = createKnowledgeCardStorage().getAll();
+      // Workspaces and assets still use Browser*Storage (no IndexedDB equivalent yet)
       const workspaces = new BrowserWorkspaceStorage().getAll();
       const workspaceIds = new Set(workspaces.map((item) => item.id));
       const entityIds = new Set([...conversationIds, ...roundIds, ...knowledge.map((item) => item.id)]);
@@ -51,7 +63,7 @@ export function DataHealthReport() {
       // orphan rounds: rounds whose conversationId is missing
       rounds.filter((item) => !conversationIds.has(item.conversationId)).forEach((item) => next.push({ kind: "orphan round", id: item.id, detail: "所属 Conversation 已删除" }));
       // P0-9: Empty conversations (0 messages / 0 rounds)
-      const messages = new BrowserMessageStorage().getAll();
+      const messages = createMessageStorage().getAll();
       const messagesByConv = new Map<string, number>();
       messages.forEach((m) => messagesByConv.set(m.conversationId, (messagesByConv.get(m.conversationId) ?? 0) + 1));
       const roundCountByConv = new Map<string, number>();
@@ -105,7 +117,7 @@ export function DataHealthReport() {
                   <strong>存储键数：</strong>{storageUsage.keyCount}
                 </span>
                 <span>
-                  <strong>Conversation 数：</strong>{findings ? new BrowserConversationStorage().getAll().length : "—"}
+                  <strong>Conversation 数：</strong>{findings ? createConversationStorage().getAll().length : "—"}
                 </span>
               </div>
               <p className="mt-2 text-xs text-zinc-400">
