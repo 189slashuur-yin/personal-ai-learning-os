@@ -73,6 +73,7 @@ type DetailState =
       proposals: Proposal[];
       knowledgeCard: KnowledgeCard | null;
       knowledgeCount: number;
+      roundCount: number;
       versions: ConversationVersion[];
     };
 
@@ -366,6 +367,7 @@ export function ConversationDetail({
       const messages = createMessageStorage().getByConversationId(
         conversationId,
       );
+      const rounds = createRoundStorage().getByConversationId(conversationId);
       const versions =
         createConversationVersionStorage().getByConversationId(
           conversationId,
@@ -394,6 +396,7 @@ export function ConversationDetail({
         proposals,
         knowledgeCard,
         knowledgeCount,
+        roundCount: rounds.length,
         versions,
       });
       }
@@ -514,7 +517,7 @@ export function ConversationDetail({
     );
   }
 
-  const { conversation, source, proposals, knowledgeCard, knowledgeCount } = state;
+  const { conversation, source, proposals, knowledgeCard, knowledgeCount, roundCount } = state;
   const importProfileService = new ImportProfileService();
   const importProfile = conversation.importProfileId
     ? importProfileService.getById(conversation.importProfileId)
@@ -1312,7 +1315,48 @@ export function ConversationDetail({
               : null}
           </div>
         </div>
+
+        {/* v1.5.1: Lightweight header stats */}
+        <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-1 text-xs text-zinc-500">
+          <span>
+            Messages:{" "}
+            <strong className="text-zinc-700">{state.messages.length}</strong>
+          </span>
+          <span>
+            Rounds:{" "}
+            <strong className="text-zinc-700">{roundCount}</strong>
+          </span>
+          <span>
+            Sources:{" "}
+            <strong className="text-zinc-700">{source ? 1 : 0}</strong>
+          </span>
+          <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 font-semibold text-zinc-600">
+            {conversation.sourceType}
+          </span>
+          {source?.importedAt ? (
+            <span>
+              Imported:{" "}
+              {new Intl.DateTimeFormat("zh-CN", {
+                dateStyle: "medium",
+                timeStyle: "short",
+              }).format(new Date(source.importedAt))}
+            </span>
+          ) : null}
+        </div>
       </header>
+
+      {/* v1.5.1: Warning when Messages exist but Rounds are missing */}
+      {state.messages.length > 0 && roundCount === 0 ? (
+        <div
+          className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800"
+          role="alert"
+        >
+          <span className="font-semibold">
+            ⚠️ Messages 已存在，但 Rounds 为空。
+          </span>{" "}
+          可查看 Raw Timeline 或重新导入/后续再生成。
+        </div>
+      ) : null}
 
       <div className="flex gap-6">
         <RoundNavigator conversationId={conversation.id} />
@@ -1522,6 +1566,12 @@ export function ConversationDetail({
             <dt className="text-zinc-500">Messages</dt>
             <dd className="mt-1 font-medium text-zinc-900">
               {state.messages.length} 条
+            </dd>
+          </div>
+          <div>
+            <dt className="text-zinc-500">Rounds</dt>
+            <dd className="mt-1 font-medium text-zinc-900">
+              {roundCount} 条
             </dd>
           </div>
           <div>
@@ -1775,6 +1825,17 @@ export function ConversationDetail({
         </div>
       </section>
 
+
+      {/* v1.5.1: Compact warning near Rounds section when Messages exist but Rounds are missing */}
+      {state.messages.length > 0 && roundCount === 0 && detailMode === "classic" ? (
+        <div
+          className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-xs text-amber-800"
+          role="alert"
+        >
+          <span className="font-semibold">⚠️ Messages 已存在，但 Rounds 为空。</span>{" "}
+          可查看上方 Raw Timeline，或重新导入/后续再生成。
+        </div>
+      ) : null}
 
       <div id="section-rounds">
         {detailMode === "workspace" ? <ConversationWorkspaceMode conversationId={conversationId} onAnalyzeRound={runRoundAnalyzer} /> : <RoundWorkspace conversationId={conversationId} onAnalyzeRound={runRoundAnalyzer} />}
