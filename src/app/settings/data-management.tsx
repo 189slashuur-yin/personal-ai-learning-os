@@ -139,19 +139,46 @@ export function DataManagement() {
     }
   }
 
+  // PALOS business localStorage keys that should be cleared on "Clear All".
+  // These match the keys exported by BrowserAppDataStorage and read by
+  // Dashboard / Search / Recent Imports via Browser*Storage classes.
+  const PALOS_LOCALSTORAGE_KEYS = [
+    "ai-learning-os.workspaces",
+    "ai-learning-os.conversations",
+    "ai-learning-os.sources",
+    "ai-learning-os.current-source",
+    "ai-learning-os.messages",
+    "ai-learning-os.rounds",
+    "ai-learning-os.proposals",
+    "ai-learning-os.current-proposal",
+    "ai-learning-os.knowledge-cards",
+    "ai-learning-os.assets",
+    "ai-learning-os.tasks",
+    "ai-learning-os.tags",
+    "ai-learning-os.analyzer-runs",
+    "ai-learning-os.conversation-versions",
+    "ai-learning-os.recipes",
+    "ai-learning-os.feedback",
+    "ai-learning-os.app-event-log",
+    "ai-learning-os.provider-configurations",
+    "ai-learning-os.analyzer-prompt-templates",
+    "ai-learning-os.current-provider",
+  ];
+
   async function clearBusinessData() {
     if (
       !window.confirm(
-        "将清空 IndexedDB 中的 PALOS 业务数据：Conversation、Message、Round、Source、Proposal、KnowledgeCard 和 ConversationVersion。LocalStorage 轻量配置与旧数据不会被删除；继续？",
+        "将清空 IndexedDB 与 LocalStorage 中的全部 PALOS 业务数据：Conversation、Message、Round、Source、Proposal、KnowledgeCard、ConversationVersion，以及 LocalStorage 中的导入记录、搜索数据等。轻量配置（如主题）保留。继续？",
       )
     ) return;
     if (
       !window.confirm(
-        "二次确认：清空 IndexedDB 业务数据后，刷新页面也不会恢复。请确认已完成 App Data Export。",
+        "二次确认：清空后刷新页面也不会恢复。请确认已完成 App Data Export。",
       )
     ) return;
 
     try {
+      // 1. Clear IndexedDB business stores
       await replaceStores({
         conversations: [],
         messages: [],
@@ -161,9 +188,21 @@ export function DataManagement() {
         "knowledge-cards": [],
         "conversation-versions": [],
       });
+
+      // 2. Clear in-memory caches
       clearCaches();
       await preloadAll();
-      setCopyStatus("IndexedDB 业务数据已清空。LocalStorage 旧数据与轻量配置未删除。");
+
+      // 3. Clear all PALOS localStorage business keys
+      for (const key of PALOS_LOCALSTORAGE_KEYS) {
+        try {
+          window.localStorage.removeItem(key);
+        } catch {
+          // non-critical per-key failure
+        }
+      }
+
+      setCopyStatus("PALOS 业务数据已全部清空（IndexedDB + LocalStorage）。轻量配置已保留。");
     } catch (error) {
       setCopyStatus(
         error instanceof Error
@@ -352,16 +391,16 @@ export function DataManagement() {
           </div>
         ) : null}
         <div className="mt-5 rounded-lg border border-red-200 bg-red-50 p-4">
-          <p className="text-sm font-semibold text-red-900">Clear App Data</p>
+          <p className="text-sm font-semibold text-red-900">Clear All App Data</p>
           <p className="mt-1 text-xs leading-5 text-red-700">
-            仅清空 IndexedDB 正式业务数据；旧 LocalStorage 数据保留给迁移/调试，不会被静默删除。
+            清空 IndexedDB 全部业务表 + LocalStorage PALOS 业务键。轻量配置（如主题、storage-mode）保留。
           </p>
           <button
             className="mt-3 rounded-lg bg-red-700 px-4 py-2 text-sm font-semibold text-white"
             onClick={clearBusinessData}
             type="button"
           >
-            Clear IndexedDB Business Data
+            Clear All App Data
           </button>
         </div>
       </div>

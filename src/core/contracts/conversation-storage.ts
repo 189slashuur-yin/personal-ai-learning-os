@@ -5,4 +5,6 @@ export interface ConversationStorage {
   getAll(): Conversation[];
   getById(id: string): Conversation | null;
   remove(id: string): void;
+  /** Remove multiple conversations in a single operation. */
+  removeMany(ids: string[]): void;
 }

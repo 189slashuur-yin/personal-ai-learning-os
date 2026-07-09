@@ -49,16 +49,22 @@ export function ImportWorkbench() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const targetConversationId = searchParams.get("targetConversationId") ?? "";
-  const [mode, setMode] = useState<"paste" | "txt" | "json">("paste");
+  // P0-D: Read importPath and mode from URL query params to survive refresh.
+  const [mode, setMode] = useState<"paste" | "txt" | "json">(
+    (searchParams.get("inputMode") as "paste" | "txt" | "json") || "paste",
+  );
   const [parserId, setParserId] = useState<ConversationParserId>("chatgpt");
   const [artifactName, setArtifactName] = useState("Pasted Conversation");
   const [rawText, setRawText] = useState("");
   const [title, setTitle] = useState("");
   const [workspaceId, setWorkspaceId] = useState("inbox");
+  const urlImportPath = searchParams.get("importPath") as "new" | "existing" | null;
   const [importPath, setImportPath] = useState<"new" | "existing">(
-    targetConversationId ? "existing" : "new",
+    urlImportPath || (targetConversationId ? "existing" : "new"),
   );
-  const [existingTargetId, setExistingTargetId] = useState(targetConversationId);
+  const [existingTargetId, setExistingTargetId] = useState(
+    searchParams.get("existingTargetId") || targetConversationId,
+  );
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [importReport, setImportReport] = useState<string | null>(null);
@@ -231,6 +237,23 @@ export function ImportWorkbench() {
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
   }, [loadExistingData]);
+
+  // P0-D: Sync importPath / mode / existingTargetId to URL query params so they survive refresh.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    params.set("importPath", importPath);
+    params.set("inputMode", mode);
+    if (existingTargetId) {
+      params.set("existingTargetId", existingTargetId);
+    } else {
+      params.delete("existingTargetId");
+    }
+    const next = params.toString();
+    const current = window.location.search.replace(/^\?/, "");
+    if (next !== current) {
+      window.history.replaceState(null, "", `${window.location.pathname}?${next}`);
+    }
+  }, [importPath, mode, existingTargetId]);
 
   // R10: Merge preview
   function previewMerge() {
@@ -551,7 +574,14 @@ export function ImportWorkbench() {
       ) : null}
 
       {mode === "json" ? (
-        <ChatGPTExportImport mode={importPath} workspaces={workspaces} existingConversations={existingConversations} sharedState={chatGptSharedState} callbacks={chatGptCallbacks} initialTargetConversationId={existingTargetId || targetConversationId || undefined} />
+        <ChatGPTExportImport
+          mode={importPath}
+          workspaces={workspaces}
+          existingConversations={existingConversations}
+          sharedState={chatGptSharedState}
+          callbacks={chatGptCallbacks}
+          targetConversationId={existingTargetId || targetConversationId}
+        />
       ) : (
         <>
           {importPath === "new" ? (

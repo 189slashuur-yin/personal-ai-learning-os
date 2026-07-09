@@ -444,7 +444,8 @@ describe("ChatGPTExportImportService.importConversation", () => {
     expect(result2.conversationId).toBe(result1.conversationId);
     expect(result2.appended).toBe(1); // One new message
     expect(result2.skipped).toBe(3); // Three duplicates skipped
-    expect(result2.roundsCreated).toBe(0); // Append mode does not create rounds
+    // v1.4.9: Append mode now generates rounds for new messages
+    expect(result2.roundsCreated).toBeGreaterThan(0);
 
     const finalMessages = messages.getByConversationId(result1.conversationId);
     expect(finalMessages.length).toBe(initialCount + 1);
@@ -715,5 +716,592 @@ describe("ChatGPTExportImportService — import summary counts", () => {
     expect(result.appended).toBeGreaterThanOrEqual(0);
     expect(result.skipped).toBeGreaterThanOrEqual(0);
     expect(typeof result.roundsCreated).toBe("number");
+  });
+});
+
+// ============================================================================
+// P0-E: Dedup tests — New mode & Existing append
+// ============================================================================
+describe("ChatGPTExportImportService — P0-E dedup", () => {
+  it("New mode: skips import when externalConversationId already exists (forceNew=true)", () => {
+    const conversations = new InMemoryConversationStorage();
+    const messages = new InMemoryMessageStorage();
+
+    // Pre-populate a ChatGPT-imported conversation with the same externalConversationId
+    conversations.save({
+      id: "existing-conv",
+      title: "Already Imported",
+      sourceType: "ChatGPT",
+      externalSource: "chatgpt",
+      externalConversationId: "conv-basic-001",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      lastOpenedAt: new Date().toISOString(),
+    });
+    messages.save({
+      id: "existing-msg",
+      conversationId: "existing-conv",
+      role: "user",
+      content: "Hello, how are you?",
+      order: 0,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      externalMessageId: "msg-user-1",
+    });
+
+    const text = loadFixture("chatgpt-basic.json");
+    const service = new ChatGPTExportImportService(
+      conversations,
+      new InMemorySourceStorage(),
+      messages,
+      new InMemoryRoundStorage(),
+    );
+
+    const previews = service.parseExport(text);
+    const importPreview = service.previewImport(previews[0]);
+
+    // previewImport detects the existing conversation
+    expect(importPreview.existingConversationId).toBe("existing-conv");
+    expect(importPreview.appendOnly).toBe(true);
+
+    // importConversation with forceNew=true must skip, not create a copy
+    const result = service.importConversation(importPreview, { forceNew: true });
+
+    expect((result as Record<string, unknown>).skippedDuplicateConversation).toBe(true);
+    expect(result.appended).toBe(0);
+    expect(result.skipped).toBe(3); // all 3 messages skipped
+
+    // Verify no new conversation was created
+    expect(conversations.getAll()).toHaveLength(1);
+  });
+
+  it("New mode: does NOT skip when externalSource differs (same externalConversationId, different source)", () => {
+    const conversations = new InMemoryConversationStorage();
+    const messages = new InMemoryMessageStorage();
+
+    // A conversation with the same externalConversationId but NOT from chatgpt
+    conversations.save({
+      id: "manual-conv",
+      title: "Manual Import",
+      sourceType: "Manual",
+      // Deliberately NO externalSource field
+      externalConversationId: "conv-basic-001",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      lastOpenedAt: new Date().toISOString(),
+    });
+
+    const text = loadFixture("chatgpt-basic.json");
+    const service = new ChatGPTExportImportService(
+      conversations,
+      new InMemorySourceStorage(),
+      messages,
+      new InMemoryRoundStorage(),
+    );
+
+    const previews = service.parseExport(text);
+    const importPreview = service.previewImport(previews[0]);
+
+    // previewImport checks externalSource === "chatgpt", so manual source won't match
+    expect(importPreview.existingConversationId).toBeUndefined();
+    expect(importPreview.appendOnly).toBe(false);
+
+    // importConversation with forceNew=true should proceed normally (no duplicate detected)
+    const result = service.importConversation(importPreview, { forceNew: true });
+    expect((result as Record<string, unknown>).skippedDuplicateConversation).toBeFalsy();
+    expect(result.appended).toBeGreaterThan(0);
+  });
+
+  it("Existing append: skips source when externalMessageIds already exist in target (source-level dedup)", () => {
+    const conversations = new InMemoryConversationStorage();
+    const messages = new InMemoryMessageStorage();
+
+    // Create a target conversation with a message from the source
+    conversations.save({
+      id: "target-conv",
+      title: "Target",
+      sourceType: "ChatGPT",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      lastOpenedAt: new Date().toISOString(),
+    });
+    messages.save({
+      id: "target-existing-msg",
+      conversationId: "target-conv",
+      role: "user",
+      content: "Hello, how are you?",
+      order: 0,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      externalMessageId: "msg-user-1",  // matches source message
+    });
+
+    const text = loadFixture("chatgpt-basic.json");
+    const service = new ChatGPTExportImportService(
+      conversations,
+      new InMemorySourceStorage(),
+      messages,
+      new InMemoryRoundStorage(),
+    );
+
+    const previews = service.parseExport(text);
+
+    const result = service.appendToConversation(previews[0], "target-conv");
+
+    // Source-level dedup: externalMessageId "msg-user-1" already in target → skip
+    expect((result as Record<string, unknown>).skippedExistingSource).toBe(true);
+    expect(result.appendedMessages).toBe(0);
+    expect(result.skipped).toBe(3);  // all messages skipped at source level
+
+    // Verify no new messages were written to the target
+    expect(messages.getByConversationId("target-conv")).toHaveLength(1);
+  });
+
+  it("Existing append: proceeds normally when source is new (no false positive)", () => {
+    const conversations = new InMemoryConversationStorage();
+    const messages = new InMemoryMessageStorage();
+
+    // Target with some messages, but none from the source
+    conversations.save({
+      id: "target-conv",
+      title: "Target",
+      sourceType: "ChatGPT",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      lastOpenedAt: new Date().toISOString(),
+    });
+    messages.save({
+      id: "unrelated-msg",
+      conversationId: "target-conv",
+      role: "user",
+      content: "Some unrelated content",
+      order: 0,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      externalMessageId: "completely-different-id",
+    });
+
+    const text = loadFixture("chatgpt-basic.json");
+    const service = new ChatGPTExportImportService(
+      conversations,
+      new InMemorySourceStorage(),
+      messages,
+      new InMemoryRoundStorage(),
+    );
+
+    const previews = service.parseExport(text);
+
+    const result = service.appendToConversation(previews[0], "target-conv");
+
+    // Source is new — should NOT be skipped at source level
+    expect((result as Record<string, unknown>).skippedExistingSource).toBeFalsy();
+    // Messages should be appended (or skipped by individual message dedup)
+    expect(result.appendedMessages + result.skipped).toBe(3);
+  });
+
+  it("Existing append: source without externalMessageIds is never falsely skipped", () => {
+    const conversations = new InMemoryConversationStorage();
+    const messages = new InMemoryMessageStorage();
+
+    conversations.save({
+      id: "target-conv",
+      title: "Target",
+      sourceType: "Manual",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      lastOpenedAt: new Date().toISOString(),
+    });
+
+    const service = new ChatGPTExportImportService(
+      conversations,
+      new InMemorySourceStorage(),
+      messages,
+      new InMemoryRoundStorage(),
+    );
+
+    // Source preview with messages that have NO externalMessageId (simulates manual import)
+    const preview: Parameters<typeof service.appendToConversation>[0] = {
+      externalConversationId: "no-ext-ids-source",
+      title: "No External IDs",
+      messages: [
+        { role: "user", content: "hello", contentHash: "hash-a", externalMessageId: undefined },
+        { role: "assistant", content: "hi", contentHash: "hash-b", externalMessageId: undefined },
+      ],
+      unsupportedCount: 0,
+      isLarge: false,
+    };
+
+    const result = service.appendToConversation(preview, "target-conv");
+
+    // sourceExternalIds set is empty → alreadyAppended is false → proceeds normally
+    expect((result as Record<string, unknown>).skippedExistingSource).toBeFalsy();
+    expect(result.appendedMessages).toBe(2);
+  });
+});
+
+// ============================================================================
+// PALOS v1.4.9 — Round Generation P0 Fix
+// ============================================================================
+describe("PALOS v1.4.9 — Round Generation (real ChatGPT fixture)", () => {
+  const text = loadFixture("chatgpt-basic.json");
+
+  // ===== New import tests =====
+  describe("New ChatGPT import", () => {
+    it("produces messages.length > 0 and rounds.length > 0", () => {
+      const conversations = new InMemoryConversationStorage();
+      const messages = new InMemoryMessageStorage();
+      const rounds = new InMemoryRoundStorage();
+      const service = new ChatGPTExportImportService(
+        conversations,
+        new InMemorySourceStorage(),
+        messages,
+        rounds,
+      );
+      const previews = service.parseExport(text);
+      const importPreview = service.previewImport(previews[0]);
+      const result = service.importConversation(importPreview);
+
+      expect(result.appended).toBeGreaterThan(0);
+      expect(result.roundsCreated).toBeGreaterThan(0);
+
+      const savedMessages = messages.getByConversationId(result.conversationId);
+      const savedRounds = rounds.getByConversationId(result.conversationId);
+
+      expect(savedMessages.length).toBeGreaterThan(0);
+      expect(savedRounds.length).toBeGreaterThan(0);
+    });
+
+    it("every Round.conversationId equals createdConversationId", () => {
+      const conversations = new InMemoryConversationStorage();
+      const messages = new InMemoryMessageStorage();
+      const rounds = new InMemoryRoundStorage();
+      const service = new ChatGPTExportImportService(
+        conversations,
+        new InMemorySourceStorage(),
+        messages,
+        rounds,
+      );
+      const previews = service.parseExport(text);
+      const importPreview = service.previewImport(previews[0]);
+      const result = service.importConversation(importPreview);
+
+      const savedRounds = rounds.getByConversationId(result.conversationId);
+      expect(savedRounds.length).toBeGreaterThan(0);
+      for (const r of savedRounds) {
+        expect(r.conversationId).toBe(result.conversationId);
+      }
+    });
+
+    it("every Round.messageIds references messages that exist in getByConversationId", () => {
+      const conversations = new InMemoryConversationStorage();
+      const messages = new InMemoryMessageStorage();
+      const rounds = new InMemoryRoundStorage();
+      const service = new ChatGPTExportImportService(
+        conversations,
+        new InMemorySourceStorage(),
+        messages,
+        rounds,
+      );
+      const previews = service.parseExport(text);
+      const importPreview = service.previewImport(previews[0]);
+      const result = service.importConversation(importPreview);
+
+      const savedMessages = messages.getByConversationId(result.conversationId);
+      const savedRounds = rounds.getByConversationId(result.conversationId);
+      const messageIdSet = new Set(savedMessages.map((m) => m.id));
+
+      expect(savedRounds.length).toBeGreaterThan(0);
+      for (const r of savedRounds) {
+        expect(r.messageIds.length).toBeGreaterThan(0);
+        for (const mid of r.messageIds) {
+          expect(messageIdSet.has(mid)).toBe(true);
+        }
+      }
+    });
+
+    it("roundsCreated matches actual rounds.getByConversationId length", () => {
+      const conversations = new InMemoryConversationStorage();
+      const messages = new InMemoryMessageStorage();
+      const rounds = new InMemoryRoundStorage();
+      const service = new ChatGPTExportImportService(
+        conversations,
+        new InMemorySourceStorage(),
+        messages,
+        rounds,
+      );
+      const previews = service.parseExport(text);
+      const importPreview = service.previewImport(previews[0]);
+      const result = service.importConversation(importPreview);
+
+      expect(result.roundsCreated).toBe(
+        rounds.getByConversationId(result.conversationId).length,
+      );
+    });
+
+    it("report does NOT silently report success when parserPreview has rounds but none were created", () => {
+      // This test verifies the contract: if rounds are parsed but not created,
+      // the result must reflect that honestly (roundsCreated is 0).
+      // We use a fixture with only an unanswered user message,
+      // which deriveRoundDrafts puts in a round with 1 messageIndex.
+      // The import MUST create that round — roundsCreated must match.
+      const json = JSON.stringify([
+        {
+          id: "conv-solo-user",
+          title: "Solo User",
+          current_node: "node-1",
+          mapping: {
+            "node-1": {
+              id: "msg-1",
+              message: {
+                id: "msg-1",
+                author: { role: "user" },
+                content: { content_type: "text", parts: ["Just a question, no answer."] },
+              },
+            },
+          },
+        },
+      ]);
+      const conversations = new InMemoryConversationStorage();
+      const messages = new InMemoryMessageStorage();
+      const rounds = new InMemoryRoundStorage();
+      const service = new ChatGPTExportImportService(
+        conversations,
+        new InMemorySourceStorage(),
+        messages,
+        rounds,
+      );
+      const previews = service.parseExport(json);
+      const importPreview = service.previewImport(previews[0]);
+      const result = service.importConversation(importPreview);
+
+      // The parser will create 1 round for a solo user message
+      // (deriveRoundDrafts puts it in its own group).
+      // The import must report that round honestly.
+      const savedRounds = rounds.getByConversationId(result.conversationId);
+      expect(result.roundsCreated).toBe(savedRounds.length);
+      // If rounds were parseable, they must be created — not silently dropped.
+      if (savedRounds.length > 0) {
+        expect(result.roundsCreated).toBeGreaterThan(0);
+      }
+    });
+  });
+
+  // ===== Existing append tests =====
+  describe("Existing ChatGPT append (appendToConversation)", () => {
+    it("messages increase and rounds increase after append", () => {
+      const conversations = new InMemoryConversationStorage();
+      const messages = new InMemoryMessageStorage();
+      const rounds = new InMemoryRoundStorage();
+      const targetId = "target-append-rounds";
+      conversations.save({
+        id: targetId,
+        title: "Target",
+        sourceType: "ChatGPT",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        lastOpenedAt: new Date().toISOString(),
+      });
+
+      const service = new ChatGPTExportImportService(
+        conversations,
+        new InMemorySourceStorage(),
+        messages,
+        rounds,
+      );
+      const previews = service.parseExport(text);
+
+      const prevMsgCount = messages.getByConversationId(targetId).length;
+      const prevRoundCount = rounds.getByConversationId(targetId).length;
+
+      const result = service.appendToConversation(previews[0], targetId);
+
+      expect(result.appendedMessages).toBeGreaterThan(0);
+      expect(result.appendedRounds).toBeGreaterThan(0);
+
+      const afterMsgCount = messages.getByConversationId(targetId).length;
+      const afterRoundCount = rounds.getByConversationId(targetId).length;
+
+      expect(afterMsgCount).toBe(prevMsgCount + result.appendedMessages);
+      expect(afterRoundCount).toBe(prevRoundCount + result.appendedRounds);
+    });
+
+    it("appended Round.conversationId equals targetConversationId", () => {
+      const conversations = new InMemoryConversationStorage();
+      const messages = new InMemoryMessageStorage();
+      const rounds = new InMemoryRoundStorage();
+      const targetId = "target-round-convid";
+      conversations.save({
+        id: targetId,
+        title: "Target",
+        sourceType: "ChatGPT",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        lastOpenedAt: new Date().toISOString(),
+      });
+
+      const service = new ChatGPTExportImportService(
+        conversations,
+        new InMemorySourceStorage(),
+        messages,
+        rounds,
+      );
+      const previews = service.parseExport(text);
+      service.appendToConversation(previews[0], targetId);
+
+      const allRounds = rounds.getByConversationId(targetId);
+      expect(allRounds.length).toBeGreaterThan(0);
+      for (const r of allRounds) {
+        expect(r.conversationId).toBe(targetId);
+      }
+    });
+
+    it("appended Round.messageIds are all findable in target messages", () => {
+      const conversations = new InMemoryConversationStorage();
+      const messages = new InMemoryMessageStorage();
+      const rounds = new InMemoryRoundStorage();
+      const targetId = "target-msgids";
+      conversations.save({
+        id: targetId,
+        title: "Target",
+        sourceType: "ChatGPT",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        lastOpenedAt: new Date().toISOString(),
+      });
+
+      const service = new ChatGPTExportImportService(
+        conversations,
+        new InMemorySourceStorage(),
+        messages,
+        rounds,
+      );
+      const previews = service.parseExport(text);
+      service.appendToConversation(previews[0], targetId);
+
+      const allMessages = messages.getByConversationId(targetId);
+      const allRounds = rounds.getByConversationId(targetId);
+      const messageIdSet = new Set(allMessages.map((m) => m.id));
+
+      expect(allRounds.length).toBeGreaterThan(0);
+      for (const r of allRounds) {
+        expect(r.messageIds.length).toBeGreaterThan(0);
+        for (const mid of r.messageIds) {
+          expect(messageIdSet.has(mid)).toBe(true);
+        }
+      }
+    });
+  });
+
+  // ===== importConversation existing-append path (without forceNew) =====
+  describe("importConversation existing-append (no forceNew)", () => {
+    it("creates rounds when appending to existing conversation", () => {
+      const conversations = new InMemoryConversationStorage();
+      const messages = new InMemoryMessageStorage();
+      const rounds = new InMemoryRoundStorage();
+
+      // Pre-populate an existing conversation that matches the fixture
+      const existingId = "existing-for-rounds";
+      conversations.save({
+        id: existingId,
+        title: "Hello World Chat",
+        sourceType: "ChatGPT",
+        externalSource: "chatgpt",
+        externalConversationId: "conv-basic-001",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        lastOpenedAt: new Date().toISOString(),
+      });
+      // Add a single existing message that matches the first message in the fixture
+      function fnv1a(role: string, content: string) {
+        const input = `${role} ${content.replace(/\s+/g, " ").trim()}`;
+        let hash = 2166136261;
+        for (let i = 0; i < input.length; i++) {
+          hash ^= input.charCodeAt(i);
+          hash = Math.imul(hash, 16777619);
+        }
+        return `fnv1a-${(hash >>> 0).toString(16).padStart(8, "0")}`;
+      }
+      messages.save({
+        id: "existing-msg-1",
+        conversationId: existingId,
+        role: "user",
+        content: "Hello, how are you?",
+        order: 0,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        externalMessageId: "msg-user-1",
+        contentHash: fnv1a("user", "Hello, how are you?"),
+      });
+
+      const service = new ChatGPTExportImportService(
+        conversations,
+        new InMemorySourceStorage(),
+        messages,
+        rounds,
+      );
+      const previews = service.parseExport(text);
+      const importPreview = service.previewImport(previews[0]);
+
+      // This should detect existing and use the append path (no forceNew)
+      expect(importPreview.existingConversationId).toBe(existingId);
+      expect(importPreview.appendOnly).toBe(true);
+
+      const prevRoundCount = rounds.getByConversationId(existingId).length;
+
+      // Call WITHOUT forceNew to hit the existing-append path
+      const result = service.importConversation(importPreview);
+      expect(result.conversationId).toBe(existingId);
+      expect(result.appended).toBeGreaterThan(0);
+      // The key assertion: rounds MUST be created
+      expect(result.roundsCreated).toBeGreaterThan(0);
+
+      const afterRounds = rounds.getByConversationId(existingId);
+      expect(afterRounds.length).toBe(prevRoundCount + result.roundsCreated);
+
+      // Verify round integrity
+      const messageIdSet = new Set(
+        messages.getByConversationId(existingId).map((m) => m.id),
+      );
+      for (const r of afterRounds) {
+        expect(r.conversationId).toBe(existingId);
+        for (const mid of r.messageIds) {
+          expect(messageIdSet.has(mid)).toBe(true);
+        }
+      }
+    });
+
+    it("does not silently report roundsCreated=0 when messages are appended", () => {
+      const conversations = new InMemoryConversationStorage();
+      const messages = new InMemoryMessageStorage();
+      const rounds = new InMemoryRoundStorage();
+
+      const existingId = "no-silent-rounds";
+      conversations.save({
+        id: existingId,
+        title: "Target",
+        sourceType: "ChatGPT",
+        externalSource: "chatgpt",
+        externalConversationId: "conv-basic-001",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        lastOpenedAt: new Date().toISOString(),
+      });
+
+      const service = new ChatGPTExportImportService(
+        conversations,
+        new InMemorySourceStorage(),
+        messages,
+        rounds,
+      );
+      const previews = service.parseExport(text);
+      const importPreview = service.previewImport(previews[0]);
+
+      expect(importPreview.appendOnly).toBe(true);
+      const result = service.importConversation(importPreview);
+      expect(result.appended).toBeGreaterThan(0);
+      // The contract: if messages were appended, roundsCreated must not silently be 0
+      // unless the parser genuinely produced 0 rounds (which would be a parse failure)
+      expect(result.roundsCreated).toBeGreaterThan(0);
+    });
   });
 });

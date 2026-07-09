@@ -3,10 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Round } from "@/core/entities/round";
 import { RoundService } from "@/core/services/round-service";
-import { BrowserRoundStorage } from "@/infrastructure/storage/browser-round-storage";
+import { createRoundStorage, createConversationStorage, createMessageStorage } from "@/infrastructure/storage/storage-factory";
 import { BrowserKnowledgeCardStorage } from "@/infrastructure/storage/browser-knowledge-card-storage";
-import { BrowserConversationStorage } from "@/infrastructure/storage/browser-conversation-storage";
-import { BrowserMessageStorage } from "@/infrastructure/storage/browser-message-storage";
 import { MessageToRoundMigrationService } from "@/core/services/message-to-round-migration";
 import { BrowserConversationVersionStorage } from "@/infrastructure/storage/browser-conversation-version-storage";
 import { ConversationVersionService } from "@/core/services/conversation-version-service";
@@ -25,7 +23,7 @@ type RoundWorkspaceProps = {
 };
 
 function createService() {
-  return new RoundService(new BrowserRoundStorage());
+  return new RoundService(createRoundStorage());
 }
 
 export function RoundWorkspace({ conversationId, onAnalyzeRound }: RoundWorkspaceProps) {
@@ -93,8 +91,8 @@ export function RoundWorkspace({ conversationId, onAnalyzeRound }: RoundWorkspac
   function createAutoSnapshot(label: string) {
     try {
       new ConversationVersionService({
-        conversations: new BrowserConversationStorage(),
-        messages: new BrowserMessageStorage(),
+        conversations: createConversationStorage(),
+        messages: createMessageStorage(),
         versions: new BrowserConversationVersionStorage(),
       }).createSnapshot(conversationId, `自动恢复点 — ${label}`, `执行「${label}」操作前自动创建`);
       setAutoSnapshotNotice("已创建恢复点，可在版本恢复中撤回。");
@@ -296,9 +294,9 @@ export function RoundWorkspace({ conversationId, onAnalyzeRound }: RoundWorkspac
 
   function generateFromLegacyMessages() {
     const migration = new MessageToRoundMigrationService(
-      new BrowserConversationStorage(),
-      new BrowserMessageStorage(),
-      new BrowserRoundStorage(),
+      createConversationStorage(),
+      createMessageStorage(),
+      createRoundStorage(),
     );
     const preview = migration.previewConversation(conversationId);
     if (preview.summary.status === "blocked") {

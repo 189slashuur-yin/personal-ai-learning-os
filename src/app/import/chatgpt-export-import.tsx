@@ -21,6 +21,9 @@ import {
   flushCachesToIndexedDB,
   preloadAll,
 } from "@/infrastructure/storage/indexeddb/preload";
+import { readAll } from "@/infrastructure/storage/indexeddb/database";
+import type { Message } from "@/core/entities/message";
+import type { Round } from "@/core/entities/round";
 
 const FILE_PATTERN = /^conversations(?:-[^.]+)?\.json$/;
 const LARGE_FILE_THRESHOLD = 20 * 1024 * 1024;
@@ -111,7 +114,7 @@ function estimateRounds(conv: ChatGPTConversationPreview): number {
 
 type BatchReportItem = {
   title: string;
-  status: "success" | "failed";
+  status: "success" | "failed" | "skipped-duplicate";
   conversationId?: string;
   messageCount: number;
   roundCount: number;
@@ -255,15 +258,15 @@ export function ChatGPTExportImport({
   existingConversations,
   sharedState,
   callbacks,
-  initialTargetConversationId,
+  targetConversationId,
 }: {
   mode: "new" | "existing";
   workspaces: Workspace[];
   existingConversations: Conversation[];
   sharedState: ChatGPTExportImportSharedState;
   callbacks: ChatGPTExportImportCallbacks;
-  /** URL param: auto-select target conversation in "existing" mode */
-  initialTargetConversationId?: string;
+  /** P0-B: Controlled target conversation ID from parent ImportWorkbench. */
+  targetConversationId: string;
 }) {
   const {
     fileInfo,
@@ -285,7 +288,6 @@ export function ChatGPTExportImport({
   const [importing, setImporting] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [workspaceId, setWorkspaceId] = useState("inbox");
-  const [targetConversationId, setTargetConversationId] = useState(initialTargetConversationId || "");
   const [batchReport, setBatchReport] = useState<BatchReport | null>(null);
 
   // ---- Derived ----
@@ -330,12 +332,6 @@ export function ChatGPTExportImport({
     onSelectedIdsChange(new Set());
   }
 
-  function handleTargetChange(id: string) {
-    setTargetConversationId(id);
-    setStatus(null);
-    setBatchReport(null);
-  }
-
   // ---- File selection ----
   async function chooseFile(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
@@ -346,7 +342,6 @@ export function ChatGPTExportImport({
     onSelectedIdsChange(new Set());
     setBatchReport(null);
     setStatus(null);
-    setTargetConversationId("");
 
     if (!FILE_PATTERN.test(file.name)) {
       onParseError(
@@ -406,6 +401,25 @@ export function ChatGPTExportImport({
           workspaceId,
           forceNew: true,
         });
+
+        // P0-E: Detect skipped duplicate conversations
+        const isSkippedDuplicate = !!(result as Record<string, unknown>).skippedDuplicateConversation;
+
+        if (isSkippedDuplicate) {
+          totalSkipped += result.skipped;
+          totalUnsupported += conv.unsupportedCount;
+          items.push({
+            title: conv.title,
+            status: "skipped-duplicate",
+            conversationId: result.conversationId,
+            messageCount: 0,
+            roundCount: 0,
+            skipped: result.skipped,
+            unsupported: conv.unsupportedCount,
+          });
+          continue;
+        }
+
         new BrowserAppEventLogStorage().record(
           "import created",
           result.conversationId,
@@ -514,6 +528,26 @@ export function ChatGPTExportImport({
           conv,
           targetConversationId,
         );
+
+        // P0-E: Detect source-level duplicate (skippedExistingSource from service)
+        // This is set when the source was previously appended to this target.
+        const isFullySkipped = !!(result as Record<string, unknown>).skippedExistingSource;
+
+        if (isFullySkipped) {
+          totalSkipped += result.skipped;
+          totalUnsupported += result.unsupported;
+          items.push({
+            title: conv.title,
+            status: "skipped-duplicate",
+            conversationId: targetConversationId,
+            messageCount: 0,
+            roundCount: 0,
+            skipped: result.skipped,
+            unsupported: result.unsupported,
+          });
+          continue;
+        }
+
         new BrowserAppEventLogStorage().record(
           "import created",
           targetConversationId,
@@ -535,6 +569,39 @@ export function ChatGPTExportImport({
         });
       }
       await persistIndexedDBImportIfNeeded();
+
+      // [v1.4.6] Post-persist verification: ensure appended data survived the flush
+      // by reading directly from IndexedDB (not cache).  If messages/rounds
+      // were reported as appended but are not found in IDB, the persist
+      // failed silently and we must NOT show a success report.
+      if (totalMessages > 0 && getStorageMode() === "indexedDB") {
+        const idbMessages = await readAll<Message>("messages");
+        const targetMessagesInIDB = idbMessages.filter(
+          (m) => m.conversationId === targetConversationId,
+        );
+        if (targetMessagesInIDB.length === 0) {
+          await restoreIndexedDBCachesAfterFailure();
+          setBatchReport(null);
+          setStatus(
+            "❌ 持久化验证失败：IndexedDB 中未找到目标 Conversation 的 Messages。追加可能未写入，没有报告成功。",
+          );
+          setImporting(false);
+          return;
+        }
+
+        if (totalRounds > 0) {
+          const idbRounds = await readAll<Round>("rounds");
+          const targetRoundsInIDB = idbRounds.filter(
+            (r) => r.conversationId === targetConversationId,
+          );
+          if (targetRoundsInIDB.length === 0) {
+            console.warn(
+              "[confirmBatchAppend] Rounds not found in IDB after flush — messages OK. Rounds may have failed to parse.",
+            );
+            // Don't fail entirely — messages are the critical data
+          }
+        }
+      }
     } catch (error) {
       if (isQuotaExceededError(error)) {
         stoppedByQuota = true;
@@ -631,45 +698,6 @@ export function ChatGPTExportImport({
           </p>
         )}
       </div>
-
-      {/* ---- Target selector (existing mode) ---- */}
-      {mode === "existing" ? (
-        <div className="mt-4">
-          {existingConversations.length === 0 ? (
-            <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
-              <p className="text-sm font-semibold text-amber-900">
-                ⚠️ 暂无可追加目标
-              </p>
-              <p className="mt-1 text-xs text-amber-800">
-                当前没有任何 Conversation。请先在「新建 Conversation」模式下导入或创建一个 Conversation，然后再使用「导入到已有 Conversation」功能。
-              </p>
-            </div>
-          ) : (
-            <>
-              <label className="block text-sm font-medium text-zinc-800">
-                选择目标 Conversation
-                <select
-                  className="mt-2 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2.5"
-                  onChange={(e) => handleTargetChange(e.target.value)}
-                  value={targetConversationId}
-                >
-                  <option value="">— 请选择 —</option>
-                  {existingConversations.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.title} ({c.sourceType})
-                    </option>
-                  ))}
-                </select>
-              </label>
-              {targetConversationId && targetConv ? (
-                <p className="mt-2 text-xs text-zinc-500">
-                  新内容将追加到「{targetConv.title}」后面，不覆盖旧内容。
-                </p>
-              ) : null}
-            </>
-          )}
-        </div>
-      ) : null}
 
       {/* ---- File picker ---- */}
       <div className="mt-4 flex flex-wrap items-center gap-3">
@@ -1131,6 +1159,17 @@ export function ChatGPTExportImport({
           </dl>
 
           {batchReport.totalSkipped > 0 ? (
+            <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3">
+              <p className="text-sm font-semibold text-amber-900">
+                ℹ️ 已存在的 ChatGPT Conversation 已跳过
+              </p>
+              <p className="mt-1 text-xs text-amber-800">
+                以下 {batchReport.items.filter(i => i.status === "skipped-duplicate").length} 个 Conversation 的 externalConversationId 已存在或全部 Messages 已追加过，已自动跳过，未创建重复 Copy：{batchReport.items.filter(i => i.status === "skipped-duplicate").map(i => `「${i.title}」`).join("、")}
+              </p>
+            </div>
+          ) : null}
+
+          {batchReport.totalSkipped > 0 ? (
             <p className="mt-2 text-xs text-zinc-500">
               Skipped (重复): {batchReport.totalSkipped}
             </p>
@@ -1144,16 +1183,23 @@ export function ChatGPTExportImport({
                 className={`rounded-lg border p-3 ${
                   item.status === "success"
                     ? "border-emerald-100 bg-white"
-                    : "border-red-100 bg-red-50"
+                    : item.status === "skipped-duplicate"
+                      ? "border-amber-100 bg-amber-50"
+                      : "border-red-100 bg-red-50"
                 }`}
               >
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-semibold">
                       <span className="mr-1">
-                        {item.status === "success" ? "✅" : "❌"}
+                        {item.status === "success" ? "✅" : item.status === "skipped-duplicate" ? "⏭️" : "❌"}
                       </span>
                       {item.title}
+                      {item.status === "skipped-duplicate" ? (
+                        <span className="ml-1 rounded bg-amber-100 px-1.5 py-0.5 text-xs font-normal text-amber-700">
+                          已跳过（重复）
+                        </span>
+                      ) : null}
                     </p>
                     {item.error ? (
                       <p className="mt-1 text-xs text-red-600">{item.error}</p>

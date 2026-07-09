@@ -20,7 +20,7 @@ import {
   ensureIndexedDBLoaded,
   getStorageMode,
 } from "@/infrastructure/storage/storage-factory";
-import { flushCachesToIndexedDB } from "@/infrastructure/storage/indexeddb/preload";
+import { clearCaches, flushCachesToIndexedDB } from "@/infrastructure/storage/indexeddb/preload";
 import { WorkspaceService } from "@/core/services/workspace-service";
 import { ConversationCard } from "./conversation-card";
 import { CreateConversationDialog } from "./create-conversation-dialog";
@@ -166,6 +166,8 @@ export function ConversationList() {
   async function persistAndReload() {
     if (getStorageMode() === "indexedDB") {
       await flushCachesToIndexedDB();
+      clearCaches();
+      await ensureIndexedDBLoaded();
     }
     const data = loadConversationData();
     setItems(data.items);
@@ -183,6 +185,15 @@ export function ConversationList() {
 
     deleteConversationWorkspace(conversation.id, createWorkspaceStorages());
     await persistAndReload();
+
+    // Verify deletion
+    const verifyStorages = createWorkspaceStorages();
+    if (verifyStorages.conversations.getById(conversation.id)) {
+      console.error(
+        `[handleDelete] Conversation ${conversation.id} still present after persistAndReload.`,
+      );
+    }
+
     setSelectedIds((prev) => {
       const next = new Set(prev);
       next.delete(conversation.id);
@@ -195,15 +206,13 @@ export function ConversationList() {
     await persistAndReload();
   }
 
-  function handleMove(conversationId: string, workspaceId: string) {
+  async function handleMove(conversationId: string, workspaceId: string) {
     new WorkspaceService(
       new BrowserWorkspaceStorage(),
       createStorageInstances().conversations,
       new BrowserTaskStorage(),
     ).moveConversation(conversationId, workspaceId);
-    const data = loadConversationData();
-    setItems(data.items);
-    setWorkspaces(data.workspaces);
+    await persistAndReload();
   }
 
   // P0-8: Batch selection helpers
@@ -233,6 +242,9 @@ export function ConversationList() {
     const ids = Array.from(selectedIds);
     if (ids.length === 0) return;
 
+    // Clear previous delete result before starting new delete
+    setDeleteResult(null);
+
     const emptyCount = ids.filter((id) => emptyConversationIds.has(id)).length;
 
     const confirmed = window.confirm(
@@ -245,9 +257,59 @@ export function ConversationList() {
 
     if (!confirmed) return;
 
-    const result = batchDeleteConversationWorkspace(ids, createWorkspaceStorages());
-    setDeleteResult(result);
-    await persistAndReload();
+    // Record pre-delete counts for accurate reporting
+    const preDeleteStorages = createWorkspaceStorages();
+    const preDeleteConversationIds = new Set(
+      preDeleteStorages.conversations.getAll().map((c) => c.id),
+    );
+    const actuallyExistingIds = ids.filter((id) => preDeleteConversationIds.has(id));
+
+    // Execute batch delete — updates caches, fires background writes
+    const beforeResult = batchDeleteConversationWorkspace(ids, createWorkspaceStorages());
+
+    // Persist and reload — this is the critical step that must succeed
+    try {
+      await persistAndReload();
+    } catch (persistError) {
+      console.error(
+        "[handleBatchDelete] persistAndReload failed — data may not have been written to IndexedDB.",
+        persistError,
+      );
+      // Do NOT show success report if persistence failed
+      setDeleteResult(null);
+      // Report failure based on actual storage state
+      alert(
+        `批量删除持久化失败。${actuallyExistingIds.length} 个 Conversation 可能未被删除。请刷新页面后重试。`,
+      );
+      return;
+    }
+
+    // Verify deletions AFTER persist + reload: check which IDs are still present
+    const postReloadStorages = createWorkspaceStorages();
+    const remainingIds = new Set(
+      postReloadStorages.conversations.getAll().map((c) => c.id),
+    );
+    const notDeleted = ids.filter((id) => remainingIds.has(id));
+    if (notDeleted.length > 0) {
+      console.error(
+        `[handleBatchDelete] ${notDeleted.length} conversation(s) still present after persistAndReload — delete may not have persisted.`,
+        notDeleted,
+      );
+    }
+
+    // Report based on ACTUAL storage state after reload, not cache-based estimates
+    const actualDeletedCount = ids.length - notDeleted.length;
+    setDeleteResult({
+      ...beforeResult,
+      deletedConversations: actualDeletedCount,
+    });
+
+    if (actualDeletedCount === 0 && ids.length > 0) {
+      console.error(
+        `[handleBatchDelete] CRITICAL: 0 out of ${ids.length} conversations were deleted. Storage layer may be failing.`,
+      );
+    }
+
     setSelectedIds(new Set());
   }
 

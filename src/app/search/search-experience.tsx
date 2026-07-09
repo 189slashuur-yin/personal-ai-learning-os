@@ -9,16 +9,20 @@ import type {
 import type { Workspace } from "@/core/entities/workspace";
 import { SearchIndexService } from "@/core/services/search-index-service";
 import { WorkspaceService } from "@/core/services/workspace-service";
-import { BrowserConversationStorage } from "@/infrastructure/storage/browser-conversation-storage";
-import { BrowserKnowledgeCardStorage } from "@/infrastructure/storage/browser-knowledge-card-storage";
-import { BrowserMessageStorage } from "@/infrastructure/storage/browser-message-storage";
-import { BrowserProposalStorage } from "@/infrastructure/storage/browser-proposal-storage";
-import { BrowserSourceStorage } from "@/infrastructure/storage/browser-source-storage";
 import { BrowserTagStorage } from "@/infrastructure/storage/browser-tag-storage";
 import { BrowserTaskStorage } from "@/infrastructure/storage/browser-task-storage";
 import { BrowserWorkspaceStorage } from "@/infrastructure/storage/browser-workspace-storage";
-import { BrowserRoundStorage } from "@/infrastructure/storage/browser-round-storage";
 import { BrowserAssetStorage } from "@/infrastructure/storage/browser-asset-storage";
+import {
+  createConversationStorage,
+  createMessageStorage,
+  createRoundStorage,
+  createProposalStorage,
+  createKnowledgeCardStorage,
+  createSourceStorage,
+  ensureIndexedDBLoaded,
+  getStorageMode,
+} from "@/infrastructure/storage/storage-factory";
 
 type SearchCatalog = {
   service: SearchIndexService;
@@ -60,8 +64,17 @@ const resultTypeLabels: Record<SearchDocumentEntityType, string> = {
   tag: "Tag",
 };
 
-function loadSearchCatalog(): SearchCatalog {
-  const conversationStorage = new BrowserConversationStorage();
+async function loadSearchCatalog(): Promise<SearchCatalog> {
+  // Preload IndexedDB data into memory for IndexedDB mode;
+  // localStorage mode reads directly from localStorage.
+  if (getStorageMode() === "indexedDB") {
+    await ensureIndexedDBLoaded();
+  }
+
+  // Use canonical storage via factory helpers — respects storage mode.
+  // Tasks, tags, assets, and workspaces remain on Browser*Storage
+  // until IndexedDB versions exist for them.
+  const conversationStorage = createConversationStorage();
   const workspaces = new WorkspaceService(
     new BrowserWorkspaceStorage(),
     conversationStorage,
@@ -69,11 +82,11 @@ function loadSearchCatalog(): SearchCatalog {
   const service = new SearchIndexService({
     workspaces,
     conversations: conversationStorage.getAll(),
-    sources: new BrowserSourceStorage().getAll(),
-    messages: new BrowserMessageStorage().getAll(),
-    rounds: new BrowserRoundStorage().getAll(),
-    proposals: new BrowserProposalStorage().getAll(),
-    knowledgeCards: new BrowserKnowledgeCardStorage().getAll(),
+    sources: createSourceStorage().getAll(),
+    messages: createMessageStorage().getAll(),
+    rounds: createRoundStorage().getAll(),
+    proposals: createProposalStorage().getAll(),
+    knowledgeCards: createKnowledgeCardStorage().getAll(),
     tasks: new BrowserTaskStorage().getAll(),
     tags: new BrowserTagStorage().getAll(),
     assets: new BrowserAssetStorage().getAll(),
@@ -185,7 +198,9 @@ export function SearchExperience({
   const [advancedMode, setAdvancedMode] = useState(initialType === "message");
 
   useEffect(() => {
-    const timer = window.setTimeout(() => setCatalog(loadSearchCatalog()), 0);
+    const timer = window.setTimeout(async () => {
+      setCatalog(await loadSearchCatalog());
+    }, 0);
     return () => window.clearTimeout(timer);
   }, []);
 

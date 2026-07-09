@@ -8,6 +8,7 @@ import {
 } from "@/core/entities/conversation";
 import {
   createConversationStorage,
+  ensureIndexedDBLoaded,
   getStorageMode,
 } from "@/infrastructure/storage/storage-factory";
 import { flushCachesToIndexedDB } from "@/infrastructure/storage/indexeddb/preload";
@@ -31,6 +32,10 @@ export function CreateConversationDialog({
 
     if (!trimmedTitle) {
       return;
+    }
+
+    if (getStorageMode() === "indexedDB") {
+      await ensureIndexedDBLoaded();
     }
 
     const timestamp = new Date().toISOString();

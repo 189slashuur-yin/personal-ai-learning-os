@@ -5,7 +5,7 @@ import type { ImportedSource } from "@/core/entities/imported-source";
 import type { Proposal } from "@/core/entities/proposal";
 import type { KnowledgeCard } from "@/core/entities/knowledge-card";
 import type { ConversationVersion } from "@/core/entities/conversation-version";
-import { readAll, replaceStores, type StoreBatch } from "./database";
+import { drainPendingWrites, readAll, replaceStores, type StoreBatch } from "./database";
 
 // ---- Module-level in-memory caches ----
 // These are populated by preloadAll() and used synchronously by
@@ -164,7 +164,17 @@ export function buildCacheBatch(): StoreBatch {
 }
 
 export async function flushCachesToIndexedDB(): Promise<void> {
-  await replaceStores(buildCacheBatch());
+  try {
+    // Drain all pending background writes (persistInBackground) before the
+    // authoritative replaceStores.  This prevents a late-arriving writeOne
+    // (e.g. from a previous import save()) from re-adding data that
+    // replaceStores has just cleared from IndexedDB stores.
+    await drainPendingWrites();
+    await replaceStores(buildCacheBatch());
+  } catch (err) {
+    console.error("flushCachesToIndexedDB failed:", err);
+    throw err;
+  }
 }
 
 /** Clear all in-memory caches (does NOT touch IndexedDB). */

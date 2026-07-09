@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { Round } from "@/core/entities/round";
-import { BrowserRoundStorage } from "@/infrastructure/storage/browser-round-storage";
+import { createRoundStorage } from "@/infrastructure/storage/storage-factory";
 import { BrowserProposalStorage } from "@/infrastructure/storage/browser-proposal-storage";
 import { BrowserKnowledgeCardStorage } from "@/infrastructure/storage/browser-knowledge-card-storage";
 
@@ -31,7 +31,7 @@ export function RoundNavigator({ conversationId }: RoundNavigatorProps) {
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      const roundList = new BrowserRoundStorage().getByConversationId(
+      const roundList = createRoundStorage().getByConversationId(
         conversationId,
       );
       setRounds(roundList);

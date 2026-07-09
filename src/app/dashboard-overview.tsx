@@ -12,17 +12,21 @@ import { ProviderConfigurationService } from "@/core/services/provider-configura
 import { WorkspaceService } from "@/core/services/workspace-service";
 import { TaskService } from "@/core/services/task-service";
 import { BrowserAIProviderStorage } from "@/infrastructure/storage/browser-ai-provider-storage";
-import { BrowserConversationStorage } from "@/infrastructure/storage/browser-conversation-storage";
-import { BrowserKnowledgeCardStorage } from "@/infrastructure/storage/browser-knowledge-card-storage";
-import { BrowserMessageStorage } from "@/infrastructure/storage/browser-message-storage";
-import { BrowserProposalStorage } from "@/infrastructure/storage/browser-proposal-storage";
 import { BrowserPromptTemplateStorage } from "@/infrastructure/storage/browser-prompt-template-storage";
 import { BrowserProviderConfigurationStorage } from "@/infrastructure/storage/browser-provider-configuration-storage";
-import { BrowserSourceStorage } from "@/infrastructure/storage/browser-source-storage";
 import { BrowserTagStorage } from "@/infrastructure/storage/browser-tag-storage";
 import { BrowserTaskStorage } from "@/infrastructure/storage/browser-task-storage";
 import { BrowserWorkspaceStorage } from "@/infrastructure/storage/browser-workspace-storage";
 import { BrowserAnalyzerRunStorage } from "@/infrastructure/storage/browser-analyzer-run-storage";
+import {
+  createConversationStorage,
+  createMessageStorage,
+  createProposalStorage,
+  createKnowledgeCardStorage,
+  createSourceStorage,
+  ensureIndexedDBLoaded,
+  getStorageMode,
+} from "@/infrastructure/storage/storage-factory";
 
 type DashboardData = {
   conversationCount: number;
@@ -72,17 +76,32 @@ export function DashboardOverview() {
   const [data, setData] = useState<DashboardData | null>(null);
 
   useEffect(() => {
-    const loadTimer = window.setTimeout(() => {
-      const conversations = new BrowserConversationStorage().getAll();
+    const loadTimer = window.setTimeout(async () => {
+      // Preload IndexedDB data into memory for IndexedDB mode;
+      // localStorage mode reads directly from localStorage.
+      if (getStorageMode() === "indexedDB") {
+        await ensureIndexedDBLoaded();
+      }
+
+      // Use canonical storage via factory helpers — respects storage mode.
+      // Other types (tasks, workspaces, tags, analyzer-runs, providers) remain
+      // on Browser*Storage until IndexedDB versions exist for them.
+      const conversationStorage = createConversationStorage();
+      const messageStorage = createMessageStorage();
+      const sourceStorage = createSourceStorage();
+      const proposalStorage = createProposalStorage();
+      const knowledgeCardStorage = createKnowledgeCardStorage();
+
+      const conversations = conversationStorage.getAll();
       const taskService = new TaskService(
         new BrowserTaskStorage(),
         new BrowserWorkspaceStorage(),
       );
       const workspaces = new WorkspaceService(
         new BrowserWorkspaceStorage(),
-        new BrowserConversationStorage(),
+        conversationStorage,
       ).listWorkspaces();
-      const activeKnowledge = new BrowserKnowledgeCardStorage()
+      const activeKnowledge = knowledgeCardStorage
         .getAll()
         .filter((card) => card.status === "Active")
         .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
@@ -91,7 +110,7 @@ export function DashboardOverview() {
           new Date(right.lastOpenedAt).getTime() -
           new Date(left.lastOpenedAt).getTime(),
       );
-      const messages = new BrowserMessageStorage().getAll();
+      const messages = messageStorage.getAll();
       const tags = new BrowserTagStorage()
         .getAll()
         .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
@@ -103,7 +122,6 @@ export function DashboardOverview() {
         },
         {},
       );
-      const sourceStorage = new BrowserSourceStorage();
       const recentImports = [...conversations]
         .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
         .flatMap((conversation) => {
@@ -141,7 +159,7 @@ export function DashboardOverview() {
         knowledgeCount: activeKnowledge.length,
         messageCount: messages.length,
         messageCountsByConversation,
-        proposalCount: new BrowserProposalStorage().getAll().length,
+        proposalCount: proposalStorage.getAll().length,
         tagCount: tags.length,
         taskCount: taskService.listTasks().length,
         todayTaskCount: taskService.listToday().length,

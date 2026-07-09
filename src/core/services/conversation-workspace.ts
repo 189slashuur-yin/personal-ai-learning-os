@@ -90,7 +90,12 @@ export function batchDeleteConversationWorkspace(
     }
   }
 
-  // Count before deletion
+  // Count conversations that actually exist BEFORE deletion (for accurate reporting)
+  const beforeConversationCount = storages.conversations.getAll().filter(
+    (c) => idSet.has(c.id),
+  ).length;
+
+  // Count messages/rounds before deletion
   for (const conversationId of conversationIds) {
     deletedMessages += storages.messages.getByConversationId(conversationId).length;
     deletedRounds += storages.rounds?.getByConversationId(conversationId).length ?? 0;
@@ -124,13 +129,23 @@ export function batchDeleteConversationWorkspace(
     });
   }
 
-  // Delete conversations
-  for (const conversationId of conversationIds) {
-    storages.conversations.remove(conversationId);
+  // Delete conversations — use removeMany for atomic batch operation
+  storages.conversations.removeMany(conversationIds);
+
+  // Verify deletion: count conversations that still exist AFTER deletion
+  const afterConversationCount = storages.conversations.getAll().filter(
+    (c) => idSet.has(c.id),
+  ).length;
+
+  // Log mismatch if any conversations were not removed from cache
+  if (afterConversationCount > 0) {
+    console.error(
+      `[batchDeleteConversationWorkspace] ${afterConversationCount} conversation(s) still in cache after removeMany — IDs may not have been found.`,
+    );
   }
 
   return {
-    deletedConversations: conversationIds.length,
+    deletedConversations: beforeConversationCount - afterConversationCount,
     deletedMessages,
     deletedRounds,
     deletedSources,

@@ -70,4 +70,16 @@ export class BrowserConversationStorage implements ConversationStorage {
       JSON.stringify(conversations),
     );
   }
+
+  removeMany(ids: string[]): void {
+    if (ids.length === 0) return;
+    const idSet = new Set(ids);
+    const conversations = this.getAll().filter(
+      (conversation) => !idSet.has(conversation.id),
+    );
+    window.localStorage.setItem(
+      CONVERSATIONS_KEY,
+      JSON.stringify(conversations),
+    );
+  }
 }

@@ -9,7 +9,7 @@ import { AssetService } from "@/core/services/asset-service";
 import { BrowserAssetStorage } from "@/infrastructure/storage/browser-asset-storage";
 import { BrowserKnowledgeCardStorage } from "@/infrastructure/storage/browser-knowledge-card-storage";
 import { BrowserProposalStorage } from "@/infrastructure/storage/browser-proposal-storage";
-import { BrowserRoundStorage } from "@/infrastructure/storage/browser-round-storage";
+import { createRoundStorage } from "@/infrastructure/storage/storage-factory";
 
 function short(value: string, length = 96) {
   const normalized = value.replace(/\s+/g, " ").trim();
@@ -27,7 +27,7 @@ export function ConversationWorkspaceMode({ conversationId, onAnalyzeRound }: { 
   const [showRoundList, setShowRoundList] = useState(true);
 
   const reload = useCallback(() => {
-    const nextRounds = new BrowserRoundStorage().getByConversationId(conversationId);
+    const nextRounds = createRoundStorage().getByConversationId(conversationId);
     setRounds(nextRounds);
     setDraftNotes(Object.fromEntries(nextRounds.map((round) => [round.id, round.note ?? ""])));
     setDraftSummaries(Object.fromEntries(nextRounds.map((round) => [round.id, round.summary ?? ""])));
@@ -49,13 +49,13 @@ export function ConversationWorkspaceMode({ conversationId, onAnalyzeRound }: { 
 
   function saveNote() {
     if (!selected) return;
-    new RoundService(new BrowserRoundStorage()).updateRound(selected.id, { note: draftNotes[selected.id] ?? "" });
+    new RoundService(createRoundStorage()).updateRound(selected.id, { note: draftNotes[selected.id] ?? "" });
     reload();
   }
 
   function saveSummary() {
     if (!selected) return;
-    new RoundService(new BrowserRoundStorage()).updateRound(selected.id, { summary: draftSummaries[selected.id] ?? "" });
+    new RoundService(createRoundStorage()).updateRound(selected.id, { summary: draftSummaries[selected.id] ?? "" });
     reload();
   }
 

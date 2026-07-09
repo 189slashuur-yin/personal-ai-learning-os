@@ -5,10 +5,12 @@ import { useEffect, useMemo, useState } from "react";
 import type { Conversation } from "@/core/entities/conversation";
 import { DEFAULT_WORKSPACE_ID, type Workspace } from "@/core/entities/workspace";
 import { WorkspaceService } from "@/core/services/workspace-service";
-import { BrowserConversationStorage } from "@/infrastructure/storage/browser-conversation-storage";
-import { BrowserKnowledgeCardStorage } from "@/infrastructure/storage/browser-knowledge-card-storage";
-import { BrowserRoundStorage } from "@/infrastructure/storage/browser-round-storage";
 import { BrowserWorkspaceStorage } from "@/infrastructure/storage/browser-workspace-storage";
+import {
+  createStorageInstances,
+  ensureIndexedDBLoaded,
+  getStorageMode,
+} from "@/infrastructure/storage/storage-factory";
 
 type ExplorerItem = {
   conversation: Conversation;
@@ -42,24 +44,60 @@ export function ConversationExplorer({ compact = false }: { compact?: boolean })
   const [selectedId, setSelectedId] = useState<string>("all");
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<"updated" | "manual">("updated");
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      const conversations = new BrowserConversationStorage().getAll();
-      const rounds = new BrowserRoundStorage().getAll();
-      const knowledge = new BrowserKnowledgeCardStorage().getAll();
-      setWorkspaces(new WorkspaceService(new BrowserWorkspaceStorage(), new BrowserConversationStorage()).listWorkspaces());
-      setItems(conversations.map((conversation) => {
-        const conversationRounds = rounds.filter((round) => round.conversationId === conversation.id);
-        const previewSource = conversationRounds[0]?.question || conversationRounds[0]?.answer || conversation.note || "暂无预览";
-        const normalized = previewSource.replace(/\s+/g, " ").trim();
-        return {
-          conversation,
-          roundCount: conversationRounds.length,
-          knowledgeCount: knowledge.filter((card) => card.sourceConversationId === conversation.id).length,
-          preview: normalized.length > 80 ? `${normalized.slice(0, 80)}…` : normalized,
-        };
-      }));
+      async function load() {
+        setLoading(true);
+        setLoadError(null);
+        try {
+          if (getStorageMode() === "indexedDB") {
+            await ensureIndexedDBLoaded();
+          }
+          const storages = createStorageInstances();
+          const conversations = storages.conversations.getAll();
+          const rounds = storages.rounds.getAll();
+          const knowledge = storages.knowledgeCards.getAll();
+          setWorkspaces(
+            new WorkspaceService(
+              new BrowserWorkspaceStorage(),
+              storages.conversations,
+            ).listWorkspaces(),
+          );
+          setItems(
+            conversations.map((conversation) => {
+              const conversationRounds = rounds.filter(
+                (round) => round.conversationId === conversation.id,
+              );
+              const previewSource =
+                conversationRounds[0]?.question ||
+                conversationRounds[0]?.answer ||
+                conversation.note ||
+                "暂无预览";
+              const normalized = previewSource.replace(/\s+/g, " ").trim();
+              return {
+                conversation,
+                roundCount: conversationRounds.length,
+                knowledgeCount: knowledge.filter(
+                  (card) => card.sourceConversationId === conversation.id,
+                ).length,
+                preview: normalized.length > 80 ? `${normalized.slice(0, 80)}…` : normalized,
+              };
+            }),
+          );
+        } catch (error) {
+          setLoadError(
+            error instanceof Error
+              ? `数据加载失败：${error.message}`
+              : "数据加载失败，请刷新重试。",
+          );
+        } finally {
+          setLoading(false);
+        }
+      }
+      void load();
     }, 0);
     return () => window.clearTimeout(timer);
   }, []);
@@ -83,6 +121,27 @@ export function ConversationExplorer({ compact = false }: { compact?: boolean })
         : (left.conversation.order ?? Number.MAX_SAFE_INTEGER) - (right.conversation.order ?? Number.MAX_SAFE_INTEGER) || left.conversation.title.localeCompare(right.conversation.title));
   }, [items, query, selectedId, sort, workspaces]);
   const recent = [...items].sort((left, right) => right.conversation.lastOpenedAt.localeCompare(left.conversation.lastOpenedAt)).slice(0, 20);
+
+  if (loading) {
+    return (
+      <section className="mt-8 rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
+        <p className="text-sm text-zinc-500" role="status">
+          正在加载 Conversation…
+        </p>
+      </section>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <section className="mt-8 rounded-2xl border border-red-200 bg-red-50 p-5 shadow-sm">
+        <p className="eyebrow text-red-700">加载错误</p>
+        <p className="mt-2 text-sm text-red-600" role="alert">
+          {loadError}
+        </p>
+      </section>
+    );
+  }
 
   return <section className="mt-8 rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
     <div className="flex flex-wrap items-center justify-between gap-3"><div><p className="eyebrow">Conversation Explorer</p><h2 className="mt-2 text-lg font-semibold">对话资源管理器</h2></div><div className="flex gap-2"><input aria-label="搜索当前树下 Conversation" className="rounded-lg border border-zinc-200 px-3 py-2 text-sm" onChange={(event) => setQuery(event.target.value)} placeholder="搜索当前树…" value={query} /><select className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm" onChange={(event) => setSort(event.target.value as "updated" | "manual")} value={sort}><option value="updated">按更新时间</option><option value="manual">手动顺序</option></select></div></div>

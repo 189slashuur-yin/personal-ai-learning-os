@@ -218,6 +218,19 @@ export class ChatGPTExportImportService {
   importConversation(preview: ChatGPTImportPreview, options?: { workspaceId?: string; forceNew?: boolean }) {
     const { workspaceId, forceNew } = options ?? {};
     const timestamp = new Date().toISOString();
+
+    // P0-E: In new mode, skip conversations whose externalConversationId already exists.
+    if (forceNew && preview.existingConversationId) {
+      return {
+        conversationId: preview.existingConversationId,
+        appended: 0,
+        skipped: preview.messages.length,
+        roundsCreated: 0,
+        skippedDuplicateConversation: true,
+        duplicateOfTitle: preview.title,
+      };
+    }
+
     if (forceNew || !preview.existingConversationId) {
       const transcript = preview.messages
         .map((message) => `${message.role === "user" ? "User" : "Assistant"}: ${message.content}`)
@@ -292,18 +305,77 @@ export class ChatGPTExportImportService {
       lastExternalUpdateTime: preview.updateTime,
       updatedAt: newMessages.length ? timestamp : existing.updatedAt,
     });
-    return { conversationId: existing.id, appended: newMessages.length, skipped: preview.messages.length - newMessages.length, roundsCreated: 0 };
+
+    // Generate rounds for appended messages (same pattern as appendToConversation)
+    const appendTranscript = additions
+      .map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`)
+      .join("\n\n");
+    const appendParserPreview = this.pipeline.preview(
+      {
+        name: "conversations.json",
+        channel: "file",
+        content: appendTranscript,
+        mediaType: "application/json",
+      },
+      "chatgpt",
+    );
+    const roundService = new RoundService(this.rounds);
+    let roundsCreated = 0;
+    for (const round of appendParserPreview.rounds) {
+      const mappedIds = round.messageIndexes
+        .map((idx: number) => newMessages[idx]?.id)
+        .filter(Boolean) as string[];
+      if (mappedIds.length > 0) {
+        roundService.createRound({
+          conversationId: existing.id,
+          title: round.title,
+          question: round.question,
+          answer: round.answer,
+          messageIds: mappedIds,
+        });
+        roundsCreated += 1;
+      }
+    }
+    return { conversationId: existing.id, appended: newMessages.length, skipped: preview.messages.length - newMessages.length, roundsCreated };
   }
 
   appendToConversation(
     preview: ChatGPTConversationPreview,
     targetConversationId: string,
-  ): { conversationId: string; appendedMessages: number; appendedRounds: number; skipped: number; unsupported: number } {
+  ): { conversationId: string; appendedMessages: number; appendedRounds: number; skipped: number; unsupported: number; skippedExistingSource?: boolean } {
     const timestamp = new Date().toISOString();
     const target = this.conversations.getById(targetConversationId);
     if (!target) throw new Error("Target conversation not found.");
 
     const existingMessages = this.messages.getByConversationId(targetConversationId);
+
+    // P0-E: Source-level dedup — check if this ChatGPT source has already been
+    // appended to the target by looking for any matching externalMessageId.
+    // When a source was previously appended, ALL of its messages' externalMessageIds
+    // are stored on the target's messages.  If ANY intersect, the entire source is
+    // skipped so we never partially re-append old conversations.
+    const sourceExternalIds = new Set(
+      preview.messages
+        .filter((m) => m.externalMessageId)
+        .map((m) => m.externalMessageId!),
+    );
+    const alreadyAppended =
+      sourceExternalIds.size > 0 &&
+      existingMessages.some(
+        (m) => m.externalMessageId && sourceExternalIds.has(m.externalMessageId),
+      );
+
+    if (alreadyAppended) {
+      return {
+        conversationId: target.id,
+        appendedMessages: 0,
+        appendedRounds: 0,
+        skipped: preview.messages.length,
+        unsupported: preview.unsupportedCount,
+        skippedExistingSource: true,
+      };
+    }
+
     const existingExternalIds = new Set(
       existingMessages.flatMap((m) => (m.externalMessageId ? [m.externalMessageId] : [])),
     );
@@ -343,6 +415,21 @@ export class ChatGPTExportImportService {
     }));
     this.messages.saveMany(newMessages);
 
+    // Verify messages are readable after save
+    const savedMessageIds = new Set(
+      this.messages
+        .getByConversationId(target.id)
+        .map((m) => m.id),
+    );
+    const unreadableMessages = newMessages.filter(
+      (m) => !savedMessageIds.has(m.id),
+    );
+    if (unreadableMessages.length > 0) {
+      throw new Error(
+        `appendToConversation: ${unreadableMessages.length} messages not readable after saveMany for conversation ${target.id}`,
+      );
+    }
+
     const transcript = additions
       .map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`)
       .join("\n\n");
@@ -358,19 +445,36 @@ export class ChatGPTExportImportService {
 
     const roundService = new RoundService(this.rounds);
     let appendedRounds = 0;
+    const createdRoundIds: string[] = [];
     for (const round of parserPreview.rounds) {
       const mappedIds = round.messageIndexes
         .map((idx: number) => newMessages[idx]?.id)
         .filter(Boolean) as string[];
       if (mappedIds.length > 0) {
-        roundService.createRound({
+        const created = roundService.createRound({
           conversationId: target.id,
           title: round.title,
           question: round.question,
           answer: round.answer,
           messageIds: mappedIds,
         });
+        createdRoundIds.push(created.id);
         appendedRounds += 1;
+      }
+    }
+
+    // Verify rounds are readable after creation
+    if (appendedRounds > 0) {
+      const readableRoundIds = new Set(
+        this.rounds.getByConversationId(target.id).map((r) => r.id),
+      );
+      const missingRounds = createdRoundIds.filter(
+        (id) => !readableRoundIds.has(id),
+      );
+      if (missingRounds.length > 0) {
+        throw new Error(
+          `appendToConversation: ${missingRounds.length} rounds not readable after creation for conversation ${target.id}`,
+        );
       }
     }
 

@@ -2,7 +2,7 @@ import type { ConversationStorage } from "@/core/contracts/conversation-storage"
 import type { Conversation } from "@/core/entities/conversation";
 import { DEFAULT_WORKSPACE_ID } from "@/core/entities/workspace";
 import { getConversationCache, setConversationCache } from "./preload";
-import { deleteOne, persistInBackground, writeOne } from "./database";
+import { deleteMany, deleteOne, persistInBackground, writeOne } from "./database";
 
 function normalize(conversation: Conversation): Conversation {
   return {
@@ -62,6 +62,17 @@ export class IndexedDBConversationStorage implements ConversationStorage {
     persistInBackground(
       "remove conversation",
       deleteOne("conversations", id),
+    );
+  }
+
+  removeMany(ids: string[]): void {
+    if (ids.length === 0) return;
+    const idSet = new Set(ids);
+    const cache = getConversationCache();
+    setConversationCache(cache.filter((c) => !idSet.has(c.id)));
+    persistInBackground(
+      "remove many conversations",
+      deleteMany("conversations", ids),
     );
   }
 }

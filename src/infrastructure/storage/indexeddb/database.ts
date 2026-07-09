@@ -89,11 +89,35 @@ export function reportAsyncWriteFailure(
   notifyWriteFailure(operation, error);
 }
 
+// ---- Pending write tracker ----
+// persistInBackground writes are fire-and-forget.  When flushCachesToIndexedDB
+// is about to run replaceStores (the authoritative persistence point), we must
+// drain all pending background writes first so that a late-arriving writeOne
+// (e.g. from a previous import save()) does not re-add data that
+// replaceStores just cleared.
+const _pendingBgWrites = new Set<Promise<void>>();
+
+/** Wait for all pending background writes to settle (success or failure). */
+export function drainPendingWrites(): Promise<void> {
+  if (_pendingBgWrites.size === 0) return Promise.resolve();
+  return Promise.allSettled([..._pendingBgWrites]).then(() => {
+    // After the first batch settles, any new writes queued during the drain
+    // are still pending — recurse once.  A second pass catches stragglers.
+    if (_pendingBgWrites.size === 0) return;
+    return Promise.allSettled([..._pendingBgWrites]).then(() => {});
+  });
+}
+
 export function persistInBackground(
   operation: string,
   promise: Promise<void>,
 ): void {
-  promise.catch((error) => notifyWriteFailure(operation, error));
+  _pendingBgWrites.add(promise);
+  promise
+    .catch((error) => notifyWriteFailure(operation, error))
+    .finally(() => {
+      _pendingBgWrites.delete(promise);
+    });
 }
 
 /** Read all records from an object store. */

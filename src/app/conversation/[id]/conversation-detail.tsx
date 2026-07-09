@@ -31,20 +31,24 @@ import { deriveQAPairs } from "@/core/services/qa-pair-service";
 import { countWords } from "@/core/services/text-statistics";
 import { TaskService } from "@/core/services/task-service";
 import { WorkspaceService } from "@/core/services/workspace-service";
-import { BrowserConversationStorage } from "@/infrastructure/storage/browser-conversation-storage";
-import { BrowserConversationVersionStorage } from "@/infrastructure/storage/browser-conversation-version-storage";
 import { BrowserAIProviderStorage } from "@/infrastructure/storage/browser-ai-provider-storage";
 import { BrowserAnalyzerRunStorage } from "@/infrastructure/storage/browser-analyzer-run-storage";
-import { BrowserKnowledgeCardStorage } from "@/infrastructure/storage/browser-knowledge-card-storage";
-import { BrowserMessageStorage } from "@/infrastructure/storage/browser-message-storage";
-import { BrowserProposalStorage } from "@/infrastructure/storage/browser-proposal-storage";
 import { BrowserPromptTemplateStorage } from "@/infrastructure/storage/browser-prompt-template-storage";
 import { BrowserProviderConfigurationStorage } from "@/infrastructure/storage/browser-provider-configuration-storage";
-import { BrowserRoundStorage } from "@/infrastructure/storage/browser-round-storage";
-import { BrowserSourceStorage } from "@/infrastructure/storage/browser-source-storage";
 import { BrowserTaskStorage } from "@/infrastructure/storage/browser-task-storage";
 import { BrowserWorkspaceStorage } from "@/infrastructure/storage/browser-workspace-storage";
 import { BrowserAppEventLogStorage } from "@/infrastructure/storage/browser-feedback-storage";
+import {
+  createConversationStorage,
+  createConversationVersionStorage,
+  createKnowledgeCardStorage,
+  createMessageStorage,
+  createProposalStorage,
+  createRoundStorage,
+  createSourceStorage,
+  ensureIndexedDBLoaded,
+  getStorageMode,
+} from "@/infrastructure/storage/storage-factory";
 import { ProposalWorkspace } from "./proposal-workspace";
 import { ConversationAssets } from "./conversation-assets";
 import { RoundWorkspace } from "./round-workspace";
@@ -59,6 +63,7 @@ type ConversationDetailProps = {
 
 type DetailState =
   | { status: "loading" }
+  | { status: "error"; message: string }
   | { status: "missing" }
   | {
       status: "ready";
@@ -297,9 +302,22 @@ export function ConversationDetail({
 
   useEffect(() => {
     const loadTimer = window.setTimeout(() => {
-      const conversation = new BrowserConversationStorage().getById(
-        conversationId,
-      );
+      async function load() {
+        try {
+          if (getStorageMode() === "indexedDB") {
+            await ensureIndexedDBLoaded();
+          }
+        } catch {
+          setState({
+            status: "error",
+            message: "IndexedDB 数据加载失败。请刷新页面重试，或前往 Settings 切换回 LocalStorage 模式。",
+          });
+          return;
+        }
+
+        const conversation = createConversationStorage().getById(
+          conversationId,
+        );
       if (new URLSearchParams(window.location.search).get("mode") === "workspace") {
         setDetailMode("workspace");
       }
@@ -313,16 +331,16 @@ export function ConversationDetail({
         ...conversation,
         lastOpenedAt: new Date().toISOString(),
       };
-      new BrowserConversationStorage().save(openedConversation);
+      createConversationStorage().save(openedConversation);
       setWorkspaces(
         new WorkspaceService(
           new BrowserWorkspaceStorage(),
-          new BrowserConversationStorage(),
+          createConversationStorage(),
         ).listWorkspaces(),
       );
 
-      const source = new BrowserSourceStorage().getByConversationId(conversationId);
-      const proposalStorage = new BrowserProposalStorage();
+      const source = createSourceStorage().getByConversationId(conversationId);
+      const proposalStorage = createProposalStorage();
       const conversationProposals = proposalStorage.getByConversationId(
         conversationId,
       );
@@ -337,7 +355,7 @@ export function ConversationDetail({
           ? [sourceProposal, ...conversationProposals]
           : conversationProposals
       ).sort((left, right) => right.createdAt.localeCompare(left.createdAt));
-      const knowledgeCardStorage = new BrowserKnowledgeCardStorage();
+      const knowledgeCardStorage = createKnowledgeCardStorage();
       const knowledgeCard = proposals
         .map((proposal) => knowledgeCardStorage.getByProposalId(proposal.id))
         .find((card) => card !== null) ?? null;
@@ -345,11 +363,11 @@ export function ConversationDetail({
       const knowledgeCount = knowledgeCardStorage
         .getAll()
         .filter((card) => proposalIds.has(card.proposalId)).length;
-      const messages = new BrowserMessageStorage().getByConversationId(
+      const messages = createMessageStorage().getByConversationId(
         conversationId,
       );
       const versions =
-        new BrowserConversationVersionStorage().getByConversationId(
+        createConversationVersionStorage().getByConversationId(
           conversationId,
         );
       setLatestAnalyzerRun(
@@ -378,6 +396,8 @@ export function ConversationDetail({
         knowledgeCount,
         versions,
       });
+      }
+      void load();
     }, 0);
 
     return () => window.clearTimeout(loadTimer);
@@ -434,8 +454,8 @@ export function ConversationDetail({
         updatedAt: timestamp,
       };
 
-      new BrowserSourceStorage().save(nextSource);
-      new BrowserConversationStorage().save(nextConversation);
+      createSourceStorage().save(nextSource);
+      createConversationStorage().save(nextConversation);
       lastSavedContent.current = draft;
       setLastSavedAt(timestamp);
       setSaveStatus("saved");
@@ -458,6 +478,24 @@ export function ConversationDetail({
       <p className="workspace-shell text-sm text-zinc-500" role="status">
         正在打开 Conversation…
       </p>
+    );
+  }
+
+  if (state.status === "error") {
+    return (
+      <main className="workspace-shell">
+        <p className="eyebrow text-red-700">加载错误</p>
+        <h1 className="workspace-title">数据加载失败</h1>
+        <p className="mt-4 text-sm leading-6 text-red-600" role="alert">
+          {state.message}
+        </p>
+        <Link
+          className="mt-6 inline-block rounded-lg bg-zinc-950 px-4 py-2.5 text-sm font-medium text-white"
+          href="/conversation"
+        >
+          返回 Conversation
+        </Link>
+      </main>
     );
   }
 
@@ -571,7 +609,7 @@ export function ConversationDetail({
       ...result.proposal,
       sourceType: "conversation",
     };
-    new BrowserProposalStorage().saveCurrent(conversationProposal);
+    createProposalStorage().saveCurrent(conversationProposal);
     setAnalyzerError(null);
     setAnalyzerSuccess(`已从 Source 生成整理建议「${conversationProposal.title}」。请在 Review 页面审核后确认加入 Knowledge。`);
     setState({
@@ -592,7 +630,7 @@ export function ConversationDetail({
       setAnalyzerError(result.run.error?.message ?? "Round Analyzer 运行失败。");
       return;
     }
-    const proposalStorage = new BrowserProposalStorage();
+    const proposalStorage = createProposalStorage();
     proposalStorage.save(result.proposal);
     proposalStorage.saveCurrent(result.proposal);
     setAnalyzerError(null);
@@ -604,7 +642,7 @@ export function ConversationDetail({
     if (state.status !== "ready") return;
     setAnalyzerSuccess(null);
     setLatestAnalyzerRun({ id: "pending", conversationId: state.conversation.id, providerId: providerDetails.id, providerName: providerDetails.name, status: "running", startedAt: new Date().toISOString() });
-    const rounds = new BrowserRoundStorage().getByConversationId(state.conversation.id);
+    const rounds = createRoundStorage().getByConversationId(state.conversation.id);
     const timestamp = new Date().toISOString();
     const summaryMessages: Message[] = rounds.flatMap((round, index) => [
       ...(round.question ? [{ id: `summary-q-${round.id}`, conversationId: state.conversation.id, role: "user" as const, content: round.question, order: index * 2 + 1, createdAt: timestamp, updatedAt: timestamp }] : []),
@@ -617,7 +655,7 @@ export function ConversationDetail({
       return;
     }
     const proposal: Proposal = { ...result.proposal, sourceType: "conversation", sourceMessageIds: rounds.flatMap((round) => round.messageIds), title: `Conversation Summary Draft · ${state.conversation.title}` };
-    const storage = new BrowserProposalStorage();
+    const storage = createProposalStorage();
     storage.save(proposal);
     storage.saveCurrent(proposal);
     setAnalyzerError(null);
@@ -722,7 +760,7 @@ export function ConversationDetail({
       return;
     }
 
-    const proposalStorage = new BrowserProposalStorage();
+    const proposalStorage = createProposalStorage();
     proposalStorage.saveFromMessages(result.proposal);
     proposalStorage.saveCurrent(result.proposal);
     setAnalyzerError(null);
@@ -743,7 +781,7 @@ export function ConversationDetail({
     }
 
     if (latestAnalyzerRun.sourceId) {
-      const retrySource = new BrowserSourceStorage()
+      const retrySource = createSourceStorage()
         .getAll()
         .find((item) => item.id === latestAnalyzerRun.sourceId);
 
@@ -760,7 +798,7 @@ export function ConversationDetail({
         return;
       }
 
-      new BrowserProposalStorage().saveCurrent(result.proposal);
+      createProposalStorage().saveCurrent(result.proposal);
       setAnalyzerError(null);
       setState({
         ...state,
@@ -791,7 +829,7 @@ export function ConversationDetail({
       return;
     }
 
-    const proposalStorage = new BrowserProposalStorage();
+    const proposalStorage = createProposalStorage();
     proposalStorage.saveFromMessages(result.proposal);
     proposalStorage.saveCurrent(result.proposal);
     setAnalyzerError(null);
@@ -823,7 +861,7 @@ export function ConversationDetail({
       return;
     }
 
-    new BrowserProposalStorage().remove(proposal.id);
+    createProposalStorage().remove(proposal.id);
     setState({
       ...state,
       proposals: state.proposals.filter((item) => item.id !== proposal.id),
@@ -854,7 +892,7 @@ export function ConversationDetail({
     const messages = profile
       ? importProfileService.parse(draft, state.conversation.id, profile)
       : parseMessagesFromRawText(draft, state.conversation.id);
-    new BrowserMessageStorage().replaceByConversationId(
+    createMessageStorage().replaceByConversationId(
       state.conversation.id,
       messages,
     );
@@ -971,8 +1009,8 @@ export function ConversationDetail({
     }
 
     const result = editMessage(messageId, messageDraft, {
-      conversations: new BrowserConversationStorage(),
-      messages: new BrowserMessageStorage(),
+      conversations: createConversationStorage(),
+      messages: createMessageStorage(),
     });
 
     if (!result) {
@@ -996,10 +1034,10 @@ export function ConversationDetail({
       return;
     }
 
-    const versionStorage = new BrowserConversationVersionStorage();
+    const versionStorage = createConversationVersionStorage();
     const version = new ConversationVersionService({
-      conversations: new BrowserConversationStorage(),
-      messages: new BrowserMessageStorage(),
+      conversations: createConversationStorage(),
+      messages: createMessageStorage(),
       versions: versionStorage,
     }).createSnapshot(
       state.conversation.id,
@@ -1033,9 +1071,9 @@ export function ConversationDetail({
     }
 
     const result = new ConversationVersionService({
-      conversations: new BrowserConversationStorage(),
-      messages: new BrowserMessageStorage(),
-      versions: new BrowserConversationVersionStorage(),
+      conversations: createConversationStorage(),
+      messages: createMessageStorage(),
+      versions: createConversationVersionStorage(),
     }).restoreSnapshot(state.conversation.id, version.id);
 
     if (!result) {
@@ -1082,7 +1120,7 @@ export function ConversationDetail({
       title: nextTitle,
       updatedAt: new Date().toISOString(),
     };
-    new BrowserConversationStorage().save(nextConversation);
+    createConversationStorage().save(nextConversation);
     setState({ ...state, conversation: nextConversation });
     setIsRenaming(false);
   }
@@ -1098,7 +1136,7 @@ export function ConversationDetail({
       workspaceId,
       updatedAt: timestamp,
     };
-    new BrowserConversationStorage().save(nextConversation);
+    createConversationStorage().save(nextConversation);
     setState({ ...state, conversation: nextConversation });
   }
 
@@ -1121,7 +1159,7 @@ export function ConversationDetail({
       note: normalizedNote || undefined,
       updatedAt: new Date().toISOString(),
     };
-    new BrowserConversationStorage().save(nextConversation);
+    createConversationStorage().save(nextConversation);
     setState({ ...state, conversation: nextConversation });
     setNoteDraft(nextConversation.note ?? "");
     setIsEditingNote(false);
@@ -1145,13 +1183,13 @@ export function ConversationDetail({
       pendingQuestions: pendingQuestionsDraft.trim() || undefined,
       updatedAt: new Date().toISOString(),
     };
-    new BrowserConversationStorage().save(nextConversation);
+    createConversationStorage().save(nextConversation);
     setState({ ...state, conversation: nextConversation });
   }
 
   function exportConversation(format: "json" | "markdown") {
     if (state.status !== "ready") return;
-    const rounds = new BrowserRoundStorage().getByConversationId(state.conversation.id);
+    const rounds = createRoundStorage().getByConversationId(state.conversation.id);
     const content = format === "json" ? JSON.stringify({ conversation: state.conversation, rounds, messages: state.messages }, null, 2) : `# ${state.conversation.title}\n\n${rounds.map((round) => `## Round ${round.order}: ${round.title}\n\n**Q:** ${round.question}\n\n**A:** ${round.answer}\n\n${round.summary ? `Summary: ${round.summary}\n` : ""}`).join("\n")}`;
     const blob = new Blob([content], { type: format === "json" ? "application/json" : "text/markdown" });
     const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = `${state.conversation.title}.${format === "json" ? "json" : "md"}`; link.click(); URL.revokeObjectURL(link.href);
