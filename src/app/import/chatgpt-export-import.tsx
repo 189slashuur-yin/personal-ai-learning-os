@@ -306,6 +306,25 @@ export function ChatGPTExportImport({
     );
   }, [mode, conversations, selectedIds, targetConversationId]);
 
+  /** Aggregate duplicate prediction across selected conversations (new mode). */
+  const newModeDuplicatePreview = useMemo(() => {
+    if (mode !== "new") return null;
+    const selected = conversations.filter((c) =>
+      selectedIds.has(c.externalConversationId),
+    );
+    if (selected.length === 0) return null;
+    let totalDuplicateConversations = 0;
+    let totalDuplicateMessages = 0;
+    for (const conv of selected) {
+      const preview = service().previewImport(conv);
+      if (preview.existingConversationId) {
+        totalDuplicateConversations += 1;
+      }
+      totalDuplicateMessages += preview.skippedDuplicates;
+    }
+    return { duplicateConversations: totalDuplicateConversations, duplicateMessages: totalDuplicateMessages };
+  }, [mode, conversations, selectedIds]);
+
   const thresholds = useMemo(() => getQuotaThresholds(), []);
   const { maxMessages: MAX_SELECTED_MESSAGES, maxChars: MAX_TOTAL_CHARS } =
     thresholds;
@@ -476,9 +495,11 @@ export function ChatGPTExportImport({
     setStatus(
       stoppedByQuota
         ? `⚠️ 存储配额已满，导入已停止。已成功 ${totalSuccess} 个，剩余内容未导入。`
-        : totalFailed === 0
-          ? `✅ 全部导入成功：${totalSuccess} 个 Conversation`
-          : `⚠️ 部分成功：${totalSuccess} 成功 · ${totalFailed} 失败`,
+        : totalSuccess === 0 && totalSkipped > 0
+          ? `ℹ️ 全部已存在：${totalSkipped} Messages 已跳过，未创建新 Conversation。`
+          : totalFailed === 0
+            ? `✅ 全部导入成功：${totalSuccess} 个 Conversation`
+            : `⚠️ 部分成功：${totalSuccess} 成功 · ${totalFailed} 失败`,
     );
     setImporting(false);
     // P0: Notify parent to refresh existingConversations so "import to existing" unlocks
@@ -638,9 +659,11 @@ export function ChatGPTExportImport({
     setStatus(
       stoppedByQuota
         ? `⚠️ 存储配额已满，追加已停止。已成功 ${totalSuccess} 个源，剩余内容未追加。`
-        : totalFailed === 0
-          ? `✅ 已追加到「${targetConv?.title ?? "—"}」：${totalMessages} Messages · ${totalRounds} Rounds（来自 ${totalSuccess} 个源，未创建新 Conversation）`
-          : `⚠️ 部分成功：${totalSuccess} 成功 · ${totalFailed} 失败`,
+        : totalSuccess === 0 && totalSkipped > 0
+          ? `ℹ️ 全部已存在：${totalSkipped} Messages 已跳过，未追加新内容到「${targetConv?.title ?? "—"}」。`
+          : totalFailed === 0
+            ? `✅ 已追加到「${targetConv?.title ?? "—"}」：${totalMessages} Messages · ${totalRounds} Rounds（来自 ${totalSuccess} 个源，未创建新 Conversation）`
+            : `⚠️ 部分成功：${totalSuccess} 成功 · ${totalFailed} 失败`,
     );
     setImporting(false);
     // P0: Notify parent to refresh existingConversations after successful append
@@ -928,6 +951,19 @@ export function ChatGPTExportImport({
                       {sumUnsupported(conversations, selectedIds)}（跳过）
                     </dd>
                   </div>
+                  {mode === "new" && newModeDuplicatePreview && newModeDuplicatePreview.duplicateMessages > 0 ? (
+                    <div>
+                      <dt className="text-amber-700">重复预测（已存在）</dt>
+                      <dd className="text-amber-700">
+                        {newModeDuplicatePreview.duplicateConversations > 0
+                          ? `${newModeDuplicatePreview.duplicateConversations} 个 Conversation 已存在`
+                          : ""}
+                        {newModeDuplicatePreview.duplicateMessages > 0
+                          ? ` · ${newModeDuplicatePreview.duplicateMessages} Messages 将跳过`
+                          : ""}
+                      </dd>
+                    </div>
+                  ) : null}
                   {firstSelected.createTime ? (
                     <div>
                       <dt className="text-zinc-500">Create time</dt>
@@ -1164,6 +1200,18 @@ export function ChatGPTExportImport({
             </div>
           </dl>
 
+          {/* All-skipped non-error message */}
+          {batchReport.totalSuccess === 0 && batchReport.totalFailed === 0 && batchReport.totalSkipped > 0 ? (
+            <div className="mt-3 rounded-lg border border-sky-200 bg-sky-50 p-3">
+              <p className="text-sm font-semibold text-sky-900">
+                ℹ️ 全部已存在，本次没有新写入。
+              </p>
+              <p className="mt-1 text-xs text-sky-800">
+                所有选中的内容已存在于目标位置，未创建新的 Conversation 或追加新的 Message。
+              </p>
+            </div>
+          ) : null}
+
           {batchReport.totalSkipped > 0 ? (
             <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3">
               <p className="text-sm font-semibold text-amber-900">
@@ -1201,9 +1249,19 @@ export function ChatGPTExportImport({
                         {item.status === "success" ? "✅" : item.status === "skipped-duplicate" ? "⏭️" : "❌"}
                       </span>
                       {item.title}
+                      {item.status === "success" ? (
+                        <span className="ml-1 rounded bg-emerald-100 px-1.5 py-0.5 text-xs font-normal text-emerald-700">
+                          {mode === "new" ? "Created" : "Appended"}
+                        </span>
+                      ) : null}
                       {item.status === "skipped-duplicate" ? (
                         <span className="ml-1 rounded bg-amber-100 px-1.5 py-0.5 text-xs font-normal text-amber-700">
                           已跳过（重复）
+                        </span>
+                      ) : null}
+                      {item.status === "failed" ? (
+                        <span className="ml-1 rounded bg-red-100 px-1.5 py-0.5 text-xs font-normal text-red-700">
+                          Failed
                         </span>
                       ) : null}
                     </p>
