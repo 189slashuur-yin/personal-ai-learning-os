@@ -97,17 +97,17 @@ export function DataHealthReport() {
   return (
     <>
       {/* P0-9: Storage strategy overview */}
-      <div className="mt-6 rounded-xl border border-amber-200 bg-amber-50 p-5">
-        <h2 className="font-semibold text-amber-950">💾 存储策略 — LocalStorage</h2>
-        <div className="mt-3 space-y-2 text-sm leading-7 text-amber-900">
+      <div className="mt-6 rounded-xl border border-emerald-200 bg-emerald-50 p-5">
+        <h2 className="font-semibold text-emerald-950">💾 存储策略 — IndexedDB（默认）</h2>
+        <div className="mt-3 space-y-2 text-sm leading-7 text-emerald-900">
           <p>
-            当前版本使用<strong>浏览器 LocalStorage</strong> 存储所有数据。
-            LocalStorage 适合小批量/个人试用场景，<strong>不适合一次性导入几十 MB 的大文件</strong>。
+            当前版本默认使用<strong>浏览器 IndexedDB</strong> 存储所有业务数据（Conversation、Message、Round、Source、Proposal、KnowledgeCard、ConversationVersion）。
+            IndexedDB 支持大规模本地存储，适合批量导入 Chat History。
           </p>
           {storageUsage ? (
             <div className="mt-3 rounded-lg bg-white p-3">
               <p className="text-sm font-semibold text-zinc-800">
-                当前 LocalStorage 用量估算
+                当前 LocalStorage 用量估算（仅轻量配置 + 旧数据兼容）
               </p>
               <div className="mt-2 flex flex-wrap gap-4 text-xs text-zinc-600">
                 <span>
@@ -121,19 +121,19 @@ export function DataHealthReport() {
                 </span>
               </div>
               <p className="mt-2 text-xs text-zinc-400">
-                注：LocalStorage 通常限制为 5–10 MB，不同浏览器策略不同。以上按 UTF-16 编码估算，实际序列化后可能略有差异。
+                注：LocalStorage 通常限制为 5–10 MB，仅用于轻量配置、UI 偏好和旧数据兼容。业务数据已默认写入 IndexedDB，不受此限制。
               </p>
             </div>
           ) : null}
           <p className="font-semibold mt-3">推荐策略：</p>
           <ul className="list-inside list-disc space-y-1">
-            <li>每次导入少量重要对话（建议单次不超过 3000 条 Message 或 200 万字符）</li>
+            <li>IndexedDB 模式支持单次导入大量对话（建议不超过 30000 条 Message 或 2000 万字符）</li>
             <li>先清理 0 Message / 0 Round 的失败对话（当前检测到 {emptyCount} 个）</li>
             <li>在 Conversation 页面使用 Empty 筛选，一键选择并批量删除</li>
             <li>如导入被中断，减少选择数量后分批导入</li>
           </ul>
-          <p className="mt-2 text-xs text-amber-700">
-            后续版本计划迁移到 <strong>IndexedDB</strong>，届时将支持更大规模的本地数据存储。本轮不实现 IndexedDB、服务器存储或本地目录长期读取。
+          <p className="mt-2 text-xs text-emerald-700">
+            IndexedDB 已是默认存储引擎。可在 Settings → Data Management 切换回 LocalStorage legacy/debug 模式（仅用于兼容和调试）。不涉及服务器存储或本地目录长期读取。
           </p>
         </div>
       </div>

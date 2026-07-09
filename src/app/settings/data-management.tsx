@@ -168,12 +168,12 @@ export function DataManagement() {
   async function clearBusinessData() {
     if (
       !window.confirm(
-        "将清空 IndexedDB 与 LocalStorage 中的全部 PALOS 业务数据：Conversation、Message、Round、Source、Proposal、KnowledgeCard、ConversationVersion，以及 LocalStorage 中的导入记录、搜索数据等。轻量配置（如主题）保留。继续？",
+        "将清空 IndexedDB 与 LocalStorage 中的全部 PALOS 业务数据：Conversation、Message、Round、Source、Proposal、KnowledgeCard、ConversationVersion，以及 LocalStorage 中的导入记录、搜索数据等。\n\n保留：palos.storage-mode（IndexedDB / LocalStorage 模式选择）、主题、Provider 配置等轻量设置不会被清除。继续？",
       )
     ) return;
     if (
       !window.confirm(
-        "二次确认：清空后刷新页面也不会恢复。请确认已完成 App Data Export。",
+        "二次确认：清空后刷新页面也不会恢复，但 palos.storage-mode 会保留，页面仍使用当前存储引擎。请确认已完成 App Data Export。",
       )
     ) return;
 
@@ -346,6 +346,11 @@ export function DataManagement() {
 
       <div className="mt-6 border-t border-zinc-100 pt-5">
         <h3 className="font-semibold">Export / Import App Data</h3>
+        <p className="mt-1 text-xs text-zinc-500">
+          导出/导入 PALOS 自身的全部业务数据（IndexedDB + LocalStorage 配置），用于备份恢复或跨浏览器迁移。
+          与 ChatGPT Export Import（在 Import 页面导入 conversations.json）是不同功能：
+          App Data 导入会替换现有数据，ChatGPT Import 会创建或追加 Conversation。
+        </p>
         <div className="mt-3 flex flex-wrap gap-3">
           <button className="rounded-lg bg-zinc-950 px-4 py-2.5 text-sm font-semibold text-white" onClick={downloadBundle} type="button">Export App Data</button>
           <label className="rounded-lg border border-zinc-300 px-4 py-2.5 text-sm font-semibold">选择 Import App Data<input accept="application/json,.json" className="sr-only" onChange={chooseBundle} type="file" /></label>
@@ -393,7 +398,7 @@ export function DataManagement() {
         <div className="mt-5 rounded-lg border border-red-200 bg-red-50 p-4">
           <p className="text-sm font-semibold text-red-900">Clear All App Data</p>
           <p className="mt-1 text-xs leading-5 text-red-700">
-            清空 IndexedDB 全部业务表 + LocalStorage PALOS 业务键。轻量配置（如主题、storage-mode）保留。
+            清空 IndexedDB 全部业务表 + LocalStorage PALOS 业务键。<strong>palos.storage-mode（存储引擎选择）保留</strong>，轻量配置（如主题、Provider 配置）也保留。清空后刷新页面，应用将以当前存储模式启动，数据为空。
           </p>
           <button
             className="mt-3 rounded-lg bg-red-700 px-4 py-2 text-sm font-semibold text-white"

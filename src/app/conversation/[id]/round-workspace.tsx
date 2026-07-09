@@ -443,6 +443,7 @@ export function RoundWorkspace({ conversationId, onAnalyzeRound }: RoundWorkspac
                   <div className="mt-4 grid gap-4 md:grid-cols-2">
                     <div className="rounded-lg bg-sky-50 p-4"><p className="text-xs font-semibold text-sky-800">Question</p><p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-sky-950">{round.question || "（无问题）"}</p></div>
                     <div className="rounded-lg bg-violet-50 p-4"><p className="text-xs font-semibold text-violet-800">Answer</p><p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-violet-950">{round.answer || "（无回答）"}</p></div>
+                    <div className="rounded-lg bg-emerald-50 p-4 md:col-span-2"><p className="text-xs font-semibold text-emerald-800">本轮摘要 · Summary</p><p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-emerald-950">{round.summary || "暂无摘要。点击 Inspect 或 Edit 添加。"}</p></div>
                     {round.note ? <div className="rounded-lg bg-amber-50 p-4 md:col-span-2"><p className="text-xs font-semibold text-amber-800">我的备注</p><p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-amber-950">{round.note}</p></div> : <div className="rounded-lg bg-amber-50/50 p-4 md:col-span-2"><p className="text-xs font-semibold text-amber-800">我的备注</p><p className="mt-2 text-sm leading-6 text-amber-700">暂无备注。</p></div>}
                   </div>
                 )}

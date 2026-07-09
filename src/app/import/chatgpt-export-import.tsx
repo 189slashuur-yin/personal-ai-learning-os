@@ -1125,9 +1125,9 @@ export function ChatGPTExportImport({
           ) : null}
 
           {/* Summary stats */}
-          <dl className="mt-3 grid gap-3 text-sm sm:grid-cols-5">
+          <dl className="mt-3 grid gap-3 text-sm sm:grid-cols-3 lg:grid-cols-6">
             <div>
-              <dt className="text-emerald-700">{mode === "new" ? "Success" : "已追加源"}</dt>
+              <dt className="text-emerald-700">{mode === "new" ? "Created" : "已追加源"}</dt>
               <dd className="mt-1 text-2xl font-bold text-emerald-900">
                 {batchReport.totalSuccess}
               </dd>
@@ -1148,6 +1148,12 @@ export function ChatGPTExportImport({
               <dt className="text-emerald-700">Total Rounds</dt>
               <dd className="mt-1 text-2xl font-bold text-emerald-900">
                 {batchReport.totalRounds}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-amber-700">Skipped (重复)</dt>
+              <dd className="mt-1 text-2xl font-bold text-amber-600">
+                {batchReport.totalSkipped}
               </dd>
             </div>
             <div>
