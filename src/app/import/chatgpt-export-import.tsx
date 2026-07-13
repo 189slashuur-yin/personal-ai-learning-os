@@ -19,11 +19,18 @@ import {
 import {
   clearCaches,
   flushCachesToIndexedDB,
+  getCachedCounts,
   preloadAll,
 } from "@/infrastructure/storage/indexeddb/preload";
 import { readAll } from "@/infrastructure/storage/indexeddb/database";
 import type { Message } from "@/core/entities/message";
 import type { Round } from "@/core/entities/round";
+import { BulkDiagnosticsCopyButton } from "@/app/bulk-diagnostics-copy-button";
+import {
+  getLastDestructiveDiagnosticOperation,
+  recordBulkDiagnostic,
+  startBulkDiagnosticOperation,
+} from "@/infrastructure/diagnostics/bulk-data-diagnostics";
 
 const FILE_PATTERN = /^conversations(?:-[^.]+)?\.json$/;
 const LARGE_FILE_THRESHOLD = 20 * 1024 * 1024;
@@ -412,9 +419,43 @@ export function ChatGPTExportImport({
     let totalSkipped = 0;
     let totalUnsupported = 0;
     let stoppedByQuota = false;
+    let lastCompletedAwaitedPhase = "user confirmation";
+    const operation = startBulkDiagnosticOperation("bulk-chatgpt-import", {
+      importMode: "new",
+      storageMode: getStorageMode(),
+      selectedConversationCount: selectedConversations.length,
+      selectedMessageCount: sizeEstimate.totalMessages,
+      estimatedRoundCount: sumEstimatedRounds(conversations, selectedIds),
+      cacheCounts: getCachedCounts(),
+      lastCompletedAwaitedPhase,
+      startedAfter: getLastDestructiveDiagnosticOperation(),
+    });
+
+    function recordProgress(processedConversationCount: number) {
+      if (
+        processedConversationCount % 10 !== 0 &&
+        processedConversationCount !== selectedConversations.length
+      ) {
+        return;
+      }
+      recordBulkDiagnostic(operation, "in-memory mutation progress", {
+        processedConversationCount,
+        selectedConversationCount: selectedConversations.length,
+        accumulatedMessageCount: totalMessages,
+        accumulatedRoundCount: totalRounds,
+        accumulatedSkippedCount: totalSkipped,
+        cacheCounts: getCachedCounts(),
+        lastCompletedAwaitedPhase,
+      });
+    }
 
     try {
-      for (const conv of selectedConversations) {
+      // Known v1.6.1 performance debt: ChatGPT import still uses synchronous
+      // adapters that enqueue roughly six background IndexedDB writes per
+      // Conversation. Its final flush is durable; reducing import fan-out is
+      // intentionally deferred from the atomic batch-delete fix.
+      for (let index = 0; index < selectedConversations.length; index += 1) {
+        const conv = selectedConversations[index];
         const preview = service().previewImport(conv);
         const result = service().importConversation(preview, {
           workspaceId,
@@ -436,6 +477,7 @@ export function ChatGPTExportImport({
             skipped: result.skipped,
             unsupported: conv.unsupportedCount,
           });
+          recordProgress(index + 1);
           continue;
         }
 
@@ -458,19 +500,61 @@ export function ChatGPTExportImport({
           skipped: result.skipped,
           unsupported: conv.unsupportedCount,
         });
+        recordProgress(index + 1);
       }
+      recordBulkDiagnostic(operation, "after in-memory mutation", {
+        processedConversationCount: selectedConversations.length,
+        accumulatedMessageCount: totalMessages,
+        accumulatedRoundCount: totalRounds,
+        accumulatedSkippedCount: totalSkipped,
+        cacheCounts: getCachedCounts(),
+        lastCompletedAwaitedPhase,
+      });
+      recordBulkDiagnostic(operation, "before flush", {
+        cacheCounts: getCachedCounts(),
+        lastCompletedAwaitedPhase,
+      });
       await persistIndexedDBImportIfNeeded();
+      lastCompletedAwaitedPhase = "flush";
+      recordBulkDiagnostic(operation, "after flush", {
+        cacheCounts: getCachedCounts(),
+        lastCompletedAwaitedPhase,
+      });
     } catch (error) {
+      recordBulkDiagnostic(operation, "operation error", {
+        errorName: error instanceof Error ? error.name : "unknown",
+        errorMessage: error instanceof Error ? error.message : String(error),
+        cacheCounts: getCachedCounts(),
+        lastCompletedAwaitedPhase,
+      });
       if (isQuotaExceededError(error)) {
         stoppedByQuota = true;
       } else {
-        await restoreIndexedDBCachesAfterFailure();
+        try {
+          await restoreIndexedDBCachesAfterFailure();
+          if (getStorageMode() === "indexedDB") {
+            lastCompletedAwaitedPhase = "failure preload/reload";
+          }
+        } catch (reloadError) {
+          recordBulkDiagnostic(operation, "cache recovery error", {
+            errorMessage:
+              reloadError instanceof Error
+                ? reloadError.message
+                : String(reloadError),
+            lastCompletedAwaitedPhase,
+          });
+        }
         setBatchReport(null);
         setStatus(
           error instanceof Error
             ? `❌ IndexedDB 写入失败：${error.message}`
             : "❌ IndexedDB 写入失败，没有报告成功。",
         );
+        recordBulkDiagnostic(operation, "final state", {
+          success: false,
+          cacheCounts: getCachedCounts(),
+          lastCompletedAwaitedPhase,
+        });
         setImporting(false);
         return;
       }
@@ -501,6 +585,17 @@ export function ChatGPTExportImport({
             ? `✅ 全部导入成功：${totalSuccess} 个 Conversation`
             : `⚠️ 部分成功：${totalSuccess} 成功 · ${totalFailed} 失败`,
     );
+    recordBulkDiagnostic(operation, "final state", {
+      success: !stoppedByQuota,
+      stoppedByQuota,
+      successfulConversationCount: totalSuccess,
+      failedConversationCount: totalFailed,
+      importedMessageCount: totalMessages,
+      importedRoundCount: totalRounds,
+      skippedMessageCount: totalSkipped,
+      cacheCounts: getCachedCounts(),
+      lastCompletedAwaitedPhase,
+    });
     setImporting(false);
     // P0: Notify parent to refresh existingConversations so "import to existing" unlocks
     const newIds = items
@@ -542,9 +637,40 @@ export function ChatGPTExportImport({
     let totalSkipped = 0;
     let totalUnsupported = 0;
     let stoppedByQuota = false;
+    let lastCompletedAwaitedPhase = "user confirmation";
+    const operation = startBulkDiagnosticOperation("bulk-chatgpt-import", {
+      importMode: "append-existing",
+      storageMode: getStorageMode(),
+      targetConversationId,
+      selectedConversationCount: selectedConversations.length,
+      selectedMessageCount: sizeEstimate.totalMessages,
+      estimatedRoundCount: sumEstimatedRounds(conversations, selectedIds),
+      cacheCounts: getCachedCounts(),
+      lastCompletedAwaitedPhase,
+      startedAfter: getLastDestructiveDiagnosticOperation(),
+    });
+
+    function recordProgress(processedConversationCount: number) {
+      if (
+        processedConversationCount % 10 !== 0 &&
+        processedConversationCount !== selectedConversations.length
+      ) {
+        return;
+      }
+      recordBulkDiagnostic(operation, "in-memory mutation progress", {
+        processedConversationCount,
+        selectedConversationCount: selectedConversations.length,
+        accumulatedMessageCount: totalMessages,
+        accumulatedRoundCount: totalRounds,
+        accumulatedSkippedCount: totalSkipped,
+        cacheCounts: getCachedCounts(),
+        lastCompletedAwaitedPhase,
+      });
+    }
 
     try {
-      for (const conv of selectedConversations) {
+      for (let index = 0; index < selectedConversations.length; index += 1) {
+        const conv = selectedConversations[index];
         const result = service().appendToConversation(
           conv,
           targetConversationId,
@@ -566,6 +692,7 @@ export function ChatGPTExportImport({
             skipped: result.skipped,
             unsupported: result.unsupported,
           });
+          recordProgress(index + 1);
           continue;
         }
 
@@ -588,8 +715,26 @@ export function ChatGPTExportImport({
           skipped: result.skipped,
           unsupported: result.unsupported,
         });
+        recordProgress(index + 1);
       }
+      recordBulkDiagnostic(operation, "after in-memory mutation", {
+        processedConversationCount: selectedConversations.length,
+        accumulatedMessageCount: totalMessages,
+        accumulatedRoundCount: totalRounds,
+        accumulatedSkippedCount: totalSkipped,
+        cacheCounts: getCachedCounts(),
+        lastCompletedAwaitedPhase,
+      });
+      recordBulkDiagnostic(operation, "before flush", {
+        cacheCounts: getCachedCounts(),
+        lastCompletedAwaitedPhase,
+      });
       await persistIndexedDBImportIfNeeded();
+      lastCompletedAwaitedPhase = "flush";
+      recordBulkDiagnostic(operation, "after flush", {
+        cacheCounts: getCachedCounts(),
+        lastCompletedAwaitedPhase,
+      });
 
       // [v1.4.6] Post-persist verification: ensure appended data survived the flush
       // by reading directly from IndexedDB (not cache).  If messages/rounds
@@ -602,10 +747,17 @@ export function ChatGPTExportImport({
         );
         if (targetMessagesInIDB.length === 0) {
           await restoreIndexedDBCachesAfterFailure();
+          lastCompletedAwaitedPhase = "verification failure preload/reload";
           setBatchReport(null);
           setStatus(
             "❌ 持久化验证失败：IndexedDB 中未找到目标 Conversation 的 Messages。追加可能未写入，没有报告成功。",
           );
+          recordBulkDiagnostic(operation, "final state", {
+            success: false,
+            verificationFailure: "target messages missing",
+            cacheCounts: getCachedCounts(),
+            lastCompletedAwaitedPhase,
+          });
           setImporting(false);
           return;
         }
@@ -624,16 +776,40 @@ export function ChatGPTExportImport({
         }
       }
     } catch (error) {
+      recordBulkDiagnostic(operation, "operation error", {
+        errorName: error instanceof Error ? error.name : "unknown",
+        errorMessage: error instanceof Error ? error.message : String(error),
+        cacheCounts: getCachedCounts(),
+        lastCompletedAwaitedPhase,
+      });
       if (isQuotaExceededError(error)) {
         stoppedByQuota = true;
       } else {
-        await restoreIndexedDBCachesAfterFailure();
+        try {
+          await restoreIndexedDBCachesAfterFailure();
+          if (getStorageMode() === "indexedDB") {
+            lastCompletedAwaitedPhase = "failure preload/reload";
+          }
+        } catch (reloadError) {
+          recordBulkDiagnostic(operation, "cache recovery error", {
+            errorMessage:
+              reloadError instanceof Error
+                ? reloadError.message
+                : String(reloadError),
+            lastCompletedAwaitedPhase,
+          });
+        }
         setBatchReport(null);
         setStatus(
           error instanceof Error
             ? `❌ IndexedDB 写入失败：${error.message}`
             : "❌ IndexedDB 写入失败，没有报告成功。",
         );
+        recordBulkDiagnostic(operation, "final state", {
+          success: false,
+          cacheCounts: getCachedCounts(),
+          lastCompletedAwaitedPhase,
+        });
         setImporting(false);
         return;
       }
@@ -665,6 +841,18 @@ export function ChatGPTExportImport({
             ? `✅ 已追加到「${targetConv?.title ?? "—"}」：${totalMessages} Messages · ${totalRounds} Rounds（来自 ${totalSuccess} 个源，未创建新 Conversation）`
             : `⚠️ 部分成功：${totalSuccess} 成功 · ${totalFailed} 失败`,
     );
+    recordBulkDiagnostic(operation, "final state", {
+      success: !stoppedByQuota,
+      stoppedByQuota,
+      targetConversationId,
+      successfulSourceCount: totalSuccess,
+      failedSourceCount: totalFailed,
+      appendedMessageCount: totalMessages,
+      appendedRoundCount: totalRounds,
+      skippedMessageCount: totalSkipped,
+      cacheCounts: getCachedCounts(),
+      lastCompletedAwaitedPhase,
+    });
     setImporting(false);
     // P0: Notify parent to refresh existingConversations after successful append
     if (totalSuccess > 0) {
@@ -695,9 +883,12 @@ export function ChatGPTExportImport({
   return (
     <section className="rounded-xl border border-zinc-200 bg-white p-6">
       <p className="eyebrow">ChatGPT Official Export</p>
-      <h2 className="mt-2 text-lg font-semibold">
-        {mode === "new" ? "导入为新 Conversation" : "追加到已有 Conversation"}
-      </h2>
+      <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
+        <h2 className="text-lg font-semibold">
+          {mode === "new" ? "导入为新 Conversation" : "追加到已有 Conversation"}
+        </h2>
+        <BulkDiagnosticsCopyButton />
+      </div>
       <p className="mt-2 text-sm leading-6 text-zinc-600">
         先在 ChatGPT 导出 zip 中解压文件，再选择 conversations.json 或
         conversations-*.json。 当前不解析 zip、附件、图片、tool call、canvas、voice

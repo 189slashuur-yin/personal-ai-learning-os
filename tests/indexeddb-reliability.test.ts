@@ -14,6 +14,7 @@ import {
 import {
   closePalosDB,
   deleteWhere,
+  getPendingWriteCount,
   readAll,
   replaceStores,
   replaceWhere,
@@ -25,6 +26,10 @@ import {
   getCachedCounts,
   preloadAll,
 } from "@/infrastructure/storage/indexeddb/preload";
+import {
+  bulkDeleteCanonicalConversations,
+  clearCanonicalBusinessData,
+} from "@/infrastructure/storage/indexeddb/canonical-operations";
 import { IndexedDBConversationStorage } from "@/infrastructure/storage/indexeddb/idb-conversation-storage";
 import { IndexedDBMessageStorage } from "@/infrastructure/storage/indexeddb/idb-message-storage";
 import { IndexedDBRoundStorage } from "@/infrastructure/storage/indexeddb/idb-round-storage";
@@ -94,7 +99,9 @@ class FakeObjectStore {
     this.transaction.operation();
     const request = new FakeRequest();
     queueMicrotask(() => {
-      this.data.set(record.id, record);
+      if (!this.transaction.willAbort()) {
+        this.data.set(record.id, record);
+      }
       request.onsuccess?.();
       this.transaction.operationDone();
     });
@@ -105,7 +112,9 @@ class FakeObjectStore {
     this.transaction.operation();
     const request = new FakeRequest();
     queueMicrotask(() => {
-      this.data.delete(id);
+      if (!this.transaction.willAbort()) {
+        this.data.delete(id);
+      }
       request.onsuccess?.();
       this.transaction.operationDone();
     });
@@ -116,7 +125,9 @@ class FakeObjectStore {
     this.transaction.operation();
     const request = new FakeRequest();
     queueMicrotask(() => {
-      this.data.clear();
+      if (!this.transaction.willAbort()) {
+        this.data.clear();
+      }
       request.onsuccess?.();
       this.transaction.operationDone();
     });
@@ -173,6 +184,10 @@ class FakeTransaction {
       this.stores.set(name, store);
     }
     return new FakeObjectStore(store, this);
+  }
+
+  willAbort() {
+    return this.fail;
   }
 
   operation() {
@@ -2924,5 +2939,269 @@ describe("PALOS v1.4.10 — DataHealth uses canonical storage", () => {
     });
     expect(emptyConversations).toHaveLength(1);
     expect(emptyConversations[0].id).toBe("dh-empty");
+  });
+});
+
+// ============================================================================
+// PALOS v1.6.1 — Atomic canonical bulk operations
+// ============================================================================
+
+function sourceRecord(id: string, conversationId: string) {
+  return {
+    id,
+    conversationId,
+    kind: "text" as const,
+    name: id,
+    content: id,
+    importedAt: now,
+    updatedAt: now,
+  };
+}
+
+function proposalRecord(id: string, conversationId: string, sourceId: string) {
+  return {
+    id,
+    conversationId,
+    sourceId,
+    title: id,
+    summary: id,
+    sourceEvidence: { sourceName: sourceId, excerpt: id },
+    generatedBy: "Demo Analyzer Generated" as const,
+    status: "Pending" as const,
+    createdAt: now,
+  };
+}
+
+function knowledgeRecord(id: string, proposalId: string) {
+  return {
+    id,
+    proposalId,
+    title: id,
+    content: id,
+    summary: id,
+    sourceFile: id,
+    tagIds: [],
+    createdAt: now,
+    updatedAt: now,
+    status: "Active" as const,
+  };
+}
+
+function versionRecord(id: string, conversationId: string) {
+  const storedConversation = conversation(conversationId);
+  return {
+    id,
+    conversationId,
+    name: id,
+    description: id,
+    createdAt: now,
+    sourceVersion: 1,
+    messageCount: 0,
+    snapshotData: { conversation: storedConversation, messages: [] },
+  };
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error(`Operation exceeded ${timeoutMs}ms timeout.`)),
+      timeoutMs,
+    );
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
+async function importSmallChatGPTConversation() {
+  const storages = createStorageInstances("indexedDB");
+  const service = new ChatGPTExportImportService(
+    storages.conversations,
+    storages.sources,
+    storages.messages,
+    storages.rounds,
+  );
+  const result = service.importConversation(
+    service.previewImport({
+      externalConversationId: "post-destructive-import",
+      title: "Post destructive import",
+      messages: [
+        {
+          externalMessageId: "post-user",
+          role: "user",
+          content: "Can the import proceed?",
+          contentHash: "post-user-hash",
+        },
+        {
+          externalMessageId: "post-assistant",
+          role: "assistant",
+          content: "Yes.",
+          contentHash: "post-assistant-hash",
+        },
+      ],
+      unsupportedCount: 0,
+      isLarge: false,
+    }),
+    { forceNew: true },
+  );
+  await flushCachesToIndexedDB();
+  clearCaches();
+  await preloadAll();
+  return result;
+}
+
+describe("PALOS v1.6.1 — atomic batch delete and Clear write barrier", () => {
+  it("deletes 100 conversations and thousands of dependents through one canonical transaction", async () => {
+    const ids = Array.from({ length: 100 }, (_, index) => `stress-${index}`);
+    const batch: StoreBatch = {
+      conversations: [], messages: [], rounds: [], sources: [], proposals: [],
+      "knowledge-cards": [], "conversation-versions": [],
+    };
+    for (const id of ids) {
+      batch.conversations!.push(conversation(id));
+      batch.sources!.push(sourceRecord(`source-${id}`, id));
+      batch.proposals!.push(proposalRecord(`proposal-${id}`, id, `source-${id}`));
+      batch["knowledge-cards"]!.push(knowledgeRecord(`knowledge-${id}`, `proposal-${id}`));
+      batch["conversation-versions"]!.push(versionRecord(`version-${id}`, id));
+      for (let messageIndex = 0; messageIndex < 50; messageIndex += 1) {
+        batch.messages!.push(message(`message-${id}-${messageIndex}`, id, messageIndex));
+      }
+      for (let roundIndex = 0; roundIndex < 20; roundIndex += 1) {
+        batch.rounds!.push(round(`round-${id}-${roundIndex}`, id, roundIndex));
+      }
+    }
+    await replaceStores(batch);
+    clearCaches();
+    await preloadAll();
+
+    const result = await withTimeout(bulkDeleteCanonicalConversations(ids), 5_000);
+
+    expect(result.deletion).toMatchObject({
+      deletedConversations: 100,
+      deletedMessages: 5_000,
+      deletedRounds: 2_000,
+      deletedSources: 100,
+      deletedProposals: 100,
+      orphanedKnowledgeCount: 100,
+    });
+    expect(result.verification.pendingWriteCount).toBe(0);
+    expect(result.verification.remainingRequestedIds).toEqual([]);
+    expect(result.verification.cacheMatchesIndexedDB).toBe(true);
+    expect(result.verification.orphanDependentCounts).toEqual({ messages: 0, rounds: 0, sources: 0, proposals: 0, conversationVersions: 0 });
+    expect(await readAll("conversations")).toHaveLength(0);
+    expect(await readAll("messages")).toHaveLength(0);
+    expect(await readAll("rounds")).toHaveLength(0);
+    expect(await readAll("sources")).toHaveLength(0);
+    expect(await readAll("proposals")).toHaveLength(0);
+    expect(await readAll("conversation-versions")).toHaveLength(0);
+    expect(await readAll("knowledge-cards")).toHaveLength(100);
+
+    await flushCachesToIndexedDB();
+    clearCaches();
+    await preloadAll();
+    expect(getCachedCounts()).toMatchObject({ conversations: 0, messages: 0, rounds: 0, sources: 0, proposals: 0, conversationVersions: 0, knowledgeCards: 100 });
+  });
+
+  it("aborted canonical replacement exposes no partial cross-store deletion", async () => {
+    await replaceStores({
+      conversations: [conversation("atomic-keep"), conversation("atomic-delete")],
+      messages: [message("atomic-message", "atomic-delete")],
+      rounds: [round("atomic-round", "atomic-delete")],
+      sources: [sourceRecord("atomic-source", "atomic-delete")],
+      proposals: [proposalRecord("atomic-proposal", "atomic-delete", "atomic-source")],
+      "knowledge-cards": [knowledgeRecord("atomic-knowledge", "atomic-proposal")],
+      "conversation-versions": [versionRecord("atomic-version", "atomic-delete")],
+    });
+    clearCaches();
+    await preloadAll();
+
+    fakeIndexedDB.failTransactions = 1;
+    await expect(bulkDeleteCanonicalConversations(["atomic-delete"])).rejects.toThrow("forced failure");
+
+    expect(getPendingWriteCount()).toBe(0);
+    expect(await readAll("conversations")).toHaveLength(2);
+    expect(await readAll("messages")).toHaveLength(1);
+    expect(await readAll("rounds")).toHaveLength(1);
+    expect(await readAll("sources")).toHaveLength(1);
+    expect(await readAll("proposals")).toHaveLength(1);
+    expect(await readAll("conversation-versions")).toHaveLength(1);
+    expect(getCachedCounts()).toMatchObject({ conversations: 2, messages: 1, rounds: 1, sources: 1, proposals: 1, conversationVersions: 1 });
+  });
+
+  it("Clear waits for tracked writes, stays empty, and permits a subsequent import", async () => {
+    const conversations = new IndexedDBConversationStorage();
+    const messages = new IndexedDBMessageStorage();
+    conversations.save(conversation("pending-clear"));
+    messages.save(message("pending-clear-message", "pending-clear"));
+    expect(getPendingWriteCount()).toBeGreaterThan(0);
+
+    const verification = await clearCanonicalBusinessData();
+    expect(verification.pendingWriteCount).toBe(0);
+    expect(Object.values(verification.indexedDBCounts).every((count) => count === 0)).toBe(true);
+    await settle();
+    expect(await readAll("conversations")).toHaveLength(0);
+    expect(await readAll("messages")).toHaveLength(0);
+
+    const imported = await importSmallChatGPTConversation();
+    expect(new IndexedDBConversationStorage().getById(imported.conversationId)).not.toBeNull();
+    expect(new IndexedDBMessageStorage().getByConversationId(imported.conversationId).length).toBeGreaterThan(0);
+  });
+
+  it("retains the existing synchronous LocalStorage batch-delete behavior", () => {
+    const storages = createStorageInstances("localStorage");
+    storages.conversations.save(conversation("local-delete"));
+    storages.messages.save(message("local-message", "local-delete"));
+    storages.rounds.save(round("local-round", "local-delete"));
+    storages.sources.save(sourceRecord("local-source", "local-delete"));
+    storages.proposals.save(proposalRecord("local-proposal", "local-delete", "local-source"));
+    storages.knowledgeCards.save(knowledgeRecord("local-knowledge", "local-proposal"));
+    storages.conversationVersions.save(versionRecord("local-version", "local-delete"));
+
+    const result = batchDeleteConversationWorkspace(["local-delete"], { ...storages, versions: storages.conversationVersions, rounds: storages.rounds });
+
+    expect(result.deletedConversations).toBe(1);
+    expect(storages.conversations.getAll()).toHaveLength(0);
+    expect(storages.messages.getAll()).toHaveLength(0);
+    expect(storages.rounds.getAll()).toHaveLength(0);
+    expect(storages.sources.getAll()).toHaveLength(0);
+    expect(storages.proposals.getAll()).toHaveLength(0);
+    expect(storages.conversationVersions.getAll()).toHaveLength(0);
+    expect(storages.knowledgeCards.getAll()).toHaveLength(1);
+  });
+
+  it("preserves single-delete semantics and supports import after canonical batch delete", async () => {
+    await replaceStores({
+      conversations: [conversation("single-delete"), conversation("batch-delete")],
+      messages: [message("single-message", "single-delete"), message("batch-message", "batch-delete")],
+      rounds: [round("single-round", "single-delete"), round("batch-round", "batch-delete")],
+      sources: [sourceRecord("single-source", "single-delete"), sourceRecord("batch-source", "batch-delete")],
+      proposals: [proposalRecord("single-proposal", "single-delete", "single-source"), proposalRecord("batch-proposal", "batch-delete", "batch-source")],
+      "knowledge-cards": [knowledgeRecord("single-knowledge", "single-proposal"), knowledgeRecord("batch-knowledge", "batch-proposal")],
+      "conversation-versions": [versionRecord("single-version", "single-delete"), versionRecord("batch-version", "batch-delete")],
+    });
+    clearCaches();
+    await preloadAll();
+
+    const storages = createStorageInstances("indexedDB");
+    deleteConversationWorkspace("single-delete", { ...storages, versions: storages.conversationVersions, rounds: storages.rounds });
+    await flushCachesToIndexedDB();
+    clearCaches();
+    await preloadAll();
+    expect(new IndexedDBKnowledgeCardStorage().getAll().map((card) => card.id)).not.toContain("single-knowledge");
+
+    const batchResult = await bulkDeleteCanonicalConversations(["batch-delete"]);
+    expect(batchResult.verification.remainingRequestedIds).toEqual([]);
+    expect(new IndexedDBKnowledgeCardStorage().getAll().map((card) => card.id)).toContain("batch-knowledge");
+
+    const imported = await importSmallChatGPTConversation();
+    expect(new IndexedDBConversationStorage().getById(imported.conversationId)).not.toBeNull();
+    expect(getPendingWriteCount()).toBe(0);
   });
 });

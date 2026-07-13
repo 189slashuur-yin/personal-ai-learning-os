@@ -7,6 +7,7 @@ import { DEFAULT_WORKSPACE_ID, type Workspace } from "@/core/entities/workspace"
 import {
   batchDeleteConversationWorkspace,
   type BatchDeleteResult,
+  deleteConversationSidecarMetadata,
   deleteConversationWorkspace,
   duplicateConversationWorkspace,
   type ConversationWorkspaceStorages,
@@ -20,8 +21,19 @@ import {
   ensureIndexedDBLoaded,
   getStorageMode,
 } from "@/infrastructure/storage/storage-factory";
-import { clearCaches, flushCachesToIndexedDB } from "@/infrastructure/storage/indexeddb/preload";
+import {
+  clearCaches,
+  flushCachesToIndexedDB,
+  getCachedCounts,
+} from "@/infrastructure/storage/indexeddb/preload";
+import { bulkDeleteCanonicalConversations } from "@/infrastructure/storage/indexeddb/canonical-operations";
+import {
+  completeDestructiveDiagnosticOperation,
+  recordBulkDiagnostic,
+  startBulkDiagnosticOperation,
+} from "@/infrastructure/diagnostics/bulk-data-diagnostics";
 import { WorkspaceService } from "@/core/services/workspace-service";
+import { BulkDiagnosticsCopyButton } from "@/app/bulk-diagnostics-copy-button";
 import { ConversationCard } from "./conversation-card";
 import { CreateConversationDialog } from "./create-conversation-dialog";
 
@@ -89,6 +101,52 @@ function loadConversationData(): { items: ConversationItem[]; workspaces: Worksp
         .filter((card) => proposalIds.has(card.proposalId)).length,
     };
   }), workspaces };
+}
+
+function getOrphanDependentCounts(
+  storages: ConversationWorkspaceStorages,
+): Record<string, number> {
+  const conversationIds = new Set(
+    storages.conversations.getAll().map((conversation) => conversation.id),
+  );
+  const sources = storages.sources.getAll();
+  const sourceIds = new Set(sources.map((source) => source.id));
+  const proposals = storages.proposals.getAll();
+  const proposalIds = new Set(proposals.map((proposal) => proposal.id));
+
+  return {
+    messages: storages.messages
+      .getAll()
+      .filter((message) => !conversationIds.has(message.conversationId)).length,
+    rounds:
+      storages.rounds
+        ?.getAll()
+        .filter((round) => !conversationIds.has(round.conversationId)).length ?? 0,
+    sources: sources.filter(
+      (source) =>
+        Boolean(
+          source.conversationId &&
+            !conversationIds.has(source.conversationId),
+        ),
+    ).length,
+    proposals: proposals.filter(
+      (proposal) =>
+        Boolean(
+          (proposal.conversationId &&
+            !conversationIds.has(proposal.conversationId)) ||
+            (proposal.sourceId && !sourceIds.has(proposal.sourceId)),
+        ),
+    ).length,
+    knowledgeCards: storages.knowledgeCards
+      .getAll()
+      .filter((card) => !proposalIds.has(card.proposalId)).length,
+    conversationVersions:
+      storages.versions
+        ?.getAll()
+        .filter(
+          (version) => !conversationIds.has(version.conversationId),
+        ).length ?? 0,
+  };
 }
 
 export function ConversationList() {
@@ -263,18 +321,129 @@ export function ConversationList() {
       preDeleteStorages.conversations.getAll().map((c) => c.id),
     );
     const actuallyExistingIds = ids.filter((id) => preDeleteConversationIds.has(id));
+    const operation = startBulkDiagnosticOperation("batch-delete", {
+      storageMode: getStorageMode(),
+      requestedIds: ids,
+      actualExistingIds: actuallyExistingIds,
+      requestedConversationCount: ids.length,
+      actualExistingConversationCount: actuallyExistingIds.length,
+      cacheCounts: getCachedCounts(),
+      orphanDependentCounts: getOrphanDependentCounts(preDeleteStorages),
+    });
 
-    // Execute batch delete — updates caches, fires background writes
-    const beforeResult = batchDeleteConversationWorkspace(ids, createWorkspaceStorages());
-
-    // Persist and reload — this is the critical step that must succeed
+    let beforeResult: BatchDeleteResult;
+    let notDeleted: string[];
+    let orphanDependentCounts: Record<string, number>;
+    let finalEntityCounts: Record<string, number>;
     try {
-      await persistAndReload();
+      if (getStorageMode() === "indexedDB") {
+        const canonicalResult = await bulkDeleteCanonicalConversations(
+          ids,
+          (phase, data) => {
+            if (phase === "after-write-barrier") {
+              recordBulkDiagnostic(operation, "write barrier complete", data);
+            } else if (phase === "after-in-memory-snapshot") {
+              recordBulkDiagnostic(operation, "after in-memory mutation", {
+                ...data,
+                strategy: "canonical snapshot; caches unchanged before commit",
+                requestedIds: ids,
+                actualExistingIds: actuallyExistingIds,
+                remainingRequestedIds: [],
+                cacheCounts: getCachedCounts(),
+              });
+            } else if (phase === "before-replace") {
+              recordBulkDiagnostic(operation, "before flush", data);
+            } else if (phase === "after-replace") {
+              recordBulkDiagnostic(operation, "after flush", data);
+            } else if (phase === "after-clear-caches") {
+              recordBulkDiagnostic(operation, "after clearCaches", data);
+            } else if (phase === "after-preload") {
+              recordBulkDiagnostic(operation, "after preload/reload", data);
+            }
+          },
+        );
+        beforeResult = canonicalResult.deletion;
+        notDeleted = canonicalResult.verification.remainingRequestedIds;
+        orphanDependentCounts = {
+          ...canonicalResult.verification.orphanDependentCounts,
+          knowledgeCards: canonicalResult.deletion.orphanedKnowledgeCount,
+        };
+        finalEntityCounts = Object.fromEntries(
+          Object.entries(canonicalResult.verification.indexedDBCounts),
+        );
+
+        // Preserve the existing LocalStorage sidecar semantics without
+        // involving canonical IndexedDB adapters in the bulk transaction.
+        deleteConversationSidecarMetadata(ids, {
+          analyzerRuns: new BrowserAnalyzerRunStorage(),
+          assets: new BrowserAssetStorage(),
+        });
+      } else {
+        beforeResult = batchDeleteConversationWorkspace(
+          ids,
+          createWorkspaceStorages(),
+        );
+        const afterMutationStorages = createWorkspaceStorages();
+        const afterMutationIds = new Set(
+          afterMutationStorages.conversations.getAll().map((item) => item.id),
+        );
+        notDeleted = ids.filter((id) => afterMutationIds.has(id));
+        orphanDependentCounts = getOrphanDependentCounts(
+          afterMutationStorages,
+        );
+        finalEntityCounts = {
+          conversations: afterMutationStorages.conversations.getAll().length,
+          messages: afterMutationStorages.messages.getAll().length,
+          rounds: afterMutationStorages.rounds?.getAll().length ?? 0,
+          sources: afterMutationStorages.sources.getAll().length,
+          proposals: afterMutationStorages.proposals.getAll().length,
+          knowledgeCards: afterMutationStorages.knowledgeCards.getAll().length,
+          conversationVersions:
+            afterMutationStorages.versions?.getAll().length ?? 0,
+        };
+        recordBulkDiagnostic(operation, "after in-memory mutation", {
+          strategy: "LocalStorage synchronous adapters",
+          requestedIds: ids,
+          actualExistingIds: actuallyExistingIds,
+          remainingRequestedIds: notDeleted,
+          deletionEstimate: beforeResult,
+          orphanDependentCounts,
+        });
+        recordBulkDiagnostic(operation, "before flush", {
+          skipped: true,
+          reason: "LocalStorage mode",
+        });
+        recordBulkDiagnostic(operation, "after flush", {
+          skipped: true,
+          reason: "LocalStorage mode",
+        });
+        recordBulkDiagnostic(operation, "after clearCaches", {
+          skipped: true,
+          reason: "LocalStorage mode",
+        });
+        recordBulkDiagnostic(operation, "after preload/reload", {
+          skipped: true,
+          reason: "LocalStorage mode",
+        });
+      }
     } catch (persistError) {
       console.error(
-        "[handleBatchDelete] persistAndReload failed — data may not have been written to IndexedDB.",
+        "[handleBatchDelete] canonical persistence failed — no success report will be shown.",
         persistError,
       );
+      recordBulkDiagnostic(operation, "final state", {
+        success: false,
+        requestedIds: ids,
+        actualExistingIds: actuallyExistingIds,
+        errorName:
+          persistError instanceof Error ? persistError.name : "unknown",
+        errorMessage:
+          persistError instanceof Error
+            ? persistError.message
+            : String(persistError),
+        cacheCounts: getCachedCounts(),
+      });
+      completeDestructiveDiagnosticOperation(operation);
       // Do NOT show success report if persistence failed
       setDeleteResult(null);
       // Report failure based on actual storage state
@@ -284,25 +453,38 @@ export function ConversationList() {
       return;
     }
 
-    // Verify deletions AFTER persist + reload: check which IDs are still present
-    const postReloadStorages = createWorkspaceStorages();
-    const remainingIds = new Set(
-      postReloadStorages.conversations.getAll().map((c) => c.id),
-    );
-    const notDeleted = ids.filter((id) => remainingIds.has(id));
     if (notDeleted.length > 0) {
       console.error(
-        `[handleBatchDelete] ${notDeleted.length} conversation(s) still present after persistAndReload — delete may not have persisted.`,
+        `[handleBatchDelete] ${notDeleted.length} conversation(s) still present after canonical verification.`,
         notDeleted,
       );
     }
 
-    // Report based on ACTUAL storage state after reload, not cache-based estimates
-    const actualDeletedCount = ids.length - notDeleted.length;
+    const actualDeletedCount = actuallyExistingIds.length - notDeleted.length;
+    recordBulkDiagnostic(operation, "final state", {
+      success: notDeleted.length === 0,
+      requestedIds: ids,
+      actualExistingIds: actuallyExistingIds,
+      remainingRequestedIds: notDeleted,
+      actualDeletedConversationCount: actualDeletedCount,
+      orphanDependentCounts,
+      firstResidualPhase: notDeleted.length > 0 ? "final verification" : null,
+      finalEntityCounts,
+      cacheCounts: getCachedCounts(),
+      lastCompletedAwaitedPhase:
+        getStorageMode() === "indexedDB"
+          ? "canonical replace + preload verification"
+          : "LocalStorage synchronous delete",
+    });
+    completeDestructiveDiagnosticOperation(operation, finalEntityCounts);
     setDeleteResult({
       ...beforeResult,
       deletedConversations: actualDeletedCount,
     });
+
+    const data = loadConversationData();
+    setItems(data.items);
+    setWorkspaces(data.workspaces);
 
     if (actualDeletedCount === 0 && ids.length > 0) {
       console.error(
@@ -420,6 +602,8 @@ export function ConversationList() {
             </>
           ) : null}
         </div>
+
+        <BulkDiagnosticsCopyButton />
 
         <div className="ml-auto flex flex-wrap items-center gap-2" aria-label="快捷筛选">
           <span className="text-xs text-zinc-400">筛选：</span>

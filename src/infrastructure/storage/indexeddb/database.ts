@@ -97,6 +97,11 @@ export function reportAsyncWriteFailure(
 // replaceStores just cleared.
 const _pendingBgWrites = new Set<Promise<void>>();
 
+/** Diagnostic-only visibility into tracked fire-and-forget writes. */
+export function getPendingWriteCount(): number {
+  return _pendingBgWrites.size;
+}
+
 /** Wait for all pending background writes to settle (success or failure). */
 export function drainPendingWrites(): Promise<void> {
   if (_pendingBgWrites.size === 0) return Promise.resolve();

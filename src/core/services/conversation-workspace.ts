@@ -47,6 +47,18 @@ export type BatchDeleteResult = {
   orphanedKnowledgeIds: string[];
 };
 
+export function deleteConversationSidecarMetadata(
+  conversationIds: string[],
+  storages: Pick<ConversationWorkspaceStorages, "analyzerRuns" | "assets">,
+): void {
+  for (const conversationId of conversationIds) {
+    storages.analyzerRuns?.removeByConversationId(conversationId);
+    runAssetLifecycle(storages.assets, (service) => {
+      service.removeForEntity("conversation", conversationId);
+    });
+  }
+}
+
 export function batchDeleteConversationWorkspace(
   conversationIds: string[],
   storages: ConversationWorkspaceStorages,
@@ -120,14 +132,13 @@ export function batchDeleteConversationWorkspace(
     storages.rounds?.removeByConversationId(conversationId);
   }
 
-  // Delete analyzer runs, versions, assets
+  // Delete canonical versions. Analyzer runs and Asset metadata remain
+  // sidecar storage and are handled separately so IndexedDB bulk deletion can
+  // commit the seven canonical stores atomically first.
   for (const conversationId of conversationIds) {
-    storages.analyzerRuns?.removeByConversationId(conversationId);
     storages.versions?.removeByConversationId(conversationId);
-    runAssetLifecycle(storages.assets, (service) => {
-      service.removeForEntity("conversation", conversationId);
-    });
   }
+  deleteConversationSidecarMetadata(conversationIds, storages);
 
   // Delete conversations — use removeMany for atomic batch operation
   storages.conversations.removeMany(conversationIds);

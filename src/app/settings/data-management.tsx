@@ -10,13 +10,16 @@ import {
 } from "@/infrastructure/storage/storage-factory";
 import {
   countStore,
+  getPendingWriteCount,
   replaceStores,
   type StoreName,
 } from "@/infrastructure/storage/indexeddb/database";
 import {
   clearCaches,
+  getCachedCounts,
   preloadAll,
 } from "@/infrastructure/storage/indexeddb/preload";
+import { clearCanonicalBusinessData } from "@/infrastructure/storage/indexeddb/canonical-operations";
 import { BrowserConversationStorage } from "@/infrastructure/storage/browser-conversation-storage";
 import { BrowserMessageStorage } from "@/infrastructure/storage/browser-message-storage";
 import { BrowserRoundStorage } from "@/infrastructure/storage/browser-round-storage";
@@ -24,6 +27,13 @@ import { BrowserSourceStorage } from "@/infrastructure/storage/browser-source-st
 import { BrowserProposalStorage } from "@/infrastructure/storage/browser-proposal-storage";
 import { BrowserKnowledgeCardStorage } from "@/infrastructure/storage/browser-knowledge-card-storage";
 import { BrowserConversationVersionStorage } from "@/infrastructure/storage/browser-conversation-version-storage";
+import { BulkDiagnosticsCopyButton } from "@/app/bulk-diagnostics-copy-button";
+import {
+  completeDestructiveDiagnosticOperation,
+  recordBulkDiagnostic,
+  startBulkDiagnosticOperation,
+  type BulkDiagnosticOperation,
+} from "@/infrastructure/diagnostics/bulk-data-diagnostics";
 
 const backupCommand = "node scripts/backup-local-data.mjs";
 const importGroups = [
@@ -165,6 +175,26 @@ export function DataManagement() {
     "ai-learning-os.current-provider",
   ];
 
+  function getLocalStorageBusinessCounts(): {
+    populatedKeyCount: number;
+    aggregateRecordCount: number;
+  } {
+    let populatedKeyCount = 0;
+    let aggregateRecordCount = 0;
+    for (const key of PALOS_LOCALSTORAGE_KEYS) {
+      const raw = window.localStorage.getItem(key);
+      if (raw === null) continue;
+      populatedKeyCount += 1;
+      try {
+        const value: unknown = JSON.parse(raw);
+        aggregateRecordCount += Array.isArray(value) ? value.length : 1;
+      } catch {
+        aggregateRecordCount += 1;
+      }
+    }
+    return { populatedKeyCount, aggregateRecordCount };
+  }
+
   async function clearBusinessData() {
     if (
       !window.confirm(
@@ -177,23 +207,34 @@ export function DataManagement() {
       )
     ) return;
 
+    let operation: BulkDiagnosticOperation | null = null;
     try {
-      // 1. Clear IndexedDB business stores
-      await replaceStores({
-        conversations: [],
-        messages: [],
-        rounds: [],
-        sources: [],
-        proposals: [],
-        "knowledge-cards": [],
-        "conversation-versions": [],
+      operation = startBulkDiagnosticOperation("clear-app-data", {
+        storageMode: getStorageMode(),
+        pendingWritesBeforeClear: getPendingWriteCount(),
+        cacheCounts: getCachedCounts(),
+        localStorageCounts: getLocalStorageBusinessCounts(),
+      });
+      recordBulkDiagnostic(operation, "after in-memory mutation", {
+        notApplicable: true,
+        reason: "Clear App Data uses a canonical write barrier before its atomic clear.",
+        cacheCounts: getCachedCounts(),
+      });
+      const verification = await clearCanonicalBusinessData((phase, data) => {
+        if (phase === "after-write-barrier") {
+          recordBulkDiagnostic(operation!, "write barrier complete", data);
+        } else if (phase === "before-replace") {
+          recordBulkDiagnostic(operation!, "before flush", data);
+        } else if (phase === "after-replace") {
+          recordBulkDiagnostic(operation!, "after flush", data);
+        } else if (phase === "after-clear-caches") {
+          recordBulkDiagnostic(operation!, "after clearCaches", data);
+        } else if (phase === "after-preload") {
+          recordBulkDiagnostic(operation!, "after preload/reload", data);
+        }
       });
 
-      // 2. Clear in-memory caches
-      clearCaches();
-      await preloadAll();
-
-      // 3. Clear all PALOS localStorage business keys
+      // Existing LocalStorage clear behavior remains per-key and best-effort.
       for (const key of PALOS_LOCALSTORAGE_KEYS) {
         try {
           window.localStorage.removeItem(key);
@@ -202,8 +243,31 @@ export function DataManagement() {
         }
       }
 
+      recordBulkDiagnostic(operation, "final state", {
+        success: true,
+        indexedDBCounts: verification.indexedDBCounts,
+        cacheCounts: verification.cacheCounts,
+        cacheMatchesIndexedDB: verification.cacheMatchesIndexedDB,
+        pendingWriteCount: verification.pendingWriteCount,
+        localStorageCounts: getLocalStorageBusinessCounts(),
+        lastCompletedAwaitedPhase: "canonical clear verification",
+      });
+      completeDestructiveDiagnosticOperation(
+        operation,
+        Object.fromEntries(Object.entries(verification.indexedDBCounts)),
+      );
+
       setCopyStatus("PALOS 业务数据已全部清空（IndexedDB + LocalStorage）。轻量配置已保留。");
     } catch (error) {
+      if (operation) {
+        recordBulkDiagnostic(operation, "final state", {
+          success: false,
+          errorName: error instanceof Error ? error.name : "unknown",
+          errorMessage: error instanceof Error ? error.message : String(error),
+          cacheCounts: getCachedCounts(),
+        });
+        completeDestructiveDiagnosticOperation(operation);
+      }
       setCopyStatus(
         error instanceof Error
           ? `清空失败：${error.message}`
@@ -407,6 +471,9 @@ export function DataManagement() {
           >
             Clear All App Data
           </button>
+          <div className="mt-3">
+            <BulkDiagnosticsCopyButton />
+          </div>
         </div>
       </div>
       {copyStatus ? <p className="mt-3 text-xs text-zinc-500" role="status">{copyStatus}</p> : null}
