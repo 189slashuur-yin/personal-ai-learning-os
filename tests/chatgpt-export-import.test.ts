@@ -1305,3 +1305,440 @@ describe("PALOS v1.4.9 — Round Generation (real ChatGPT fixture)", () => {
     });
   });
 });
+
+// ============================================================================
+// PALOS v1.6.2 — Import Count Parity (no text round-trip drift)
+// ============================================================================
+describe("PALOS v1.6.2 — Import Count Parity", () => {
+  function makeAdversarialJson(messages: { role: string; content: string }[]) {
+    const mapping: Record<string, unknown> = {};
+    let prevNode: string | null = null;
+    messages.forEach((msg, i) => {
+      const nodeId = `node-${i + 1}`;
+      mapping[nodeId] = {
+        id: `msg-${i + 1}`,
+        parent: prevNode,
+        message: {
+          id: `msg-${i + 1}`,
+          author: { role: msg.role },
+          content: { content_type: "text", parts: [msg.content] },
+          create_time: 1715875200 + i * 60,
+        },
+      };
+      prevNode = nodeId;
+    });
+    return JSON.stringify([
+      {
+        id: "conv-adversarial",
+        title: "Adversarial Test",
+        current_node: `node-${messages.length}`,
+        mapping,
+      },
+    ]);
+  }
+
+  /** Import and return persisted Message + Round counts, and the import result. */
+  function importAndCount(json: string) {
+    const conversations = new InMemoryConversationStorage();
+    const sources = new InMemorySourceStorage();
+    const messages = new InMemoryMessageStorage();
+    const rounds = new InMemoryRoundStorage();
+    const service = new ChatGPTExportImportService(
+      conversations,
+      sources,
+      messages,
+      rounds,
+    );
+    const previews = service.parseExport(json);
+    const importPreview = service.previewImport(previews[0]);
+    const result = service.importConversation(importPreview);
+    return {
+      previewMessageCount: importPreview.messages.length,
+      previewNewMessages: importPreview.newMessages,
+      importedMessageCount: result.appended,
+      importedRoundCount: result.roundsCreated,
+      persistedMessageCount: messages.getByConversationId(result.conversationId).length,
+      persistedRoundCount: rounds.getByConversationId(result.conversationId).length,
+      result,
+      messages: messages.getByConversationId(result.conversationId),
+      rounds: rounds.getByConversationId(result.conversationId),
+    };
+  }
+
+  // ---- CAT1: Content starts with "User:" ----
+  it("CAT1: content starting with 'User:' prefix does not cause extra Messages", () => {
+    const json = makeAdversarialJson([
+      { role: "user", content: "What is the format?" },
+      { role: "assistant", content: "User: this is a common format\nAssistant: this is the response" },
+    ]);
+    const counts = importAndCount(json);
+    expect(counts.previewMessageCount).toBe(2);
+    expect(counts.importedMessageCount).toBe(2);
+    expect(counts.persistedMessageCount).toBe(2);
+    expect(counts.previewNewMessages).toBe(counts.importedMessageCount);
+  });
+
+  // ---- CAT2: Double-newline followed by role prefix ----
+  it("CAT2: double-newline + role prefix in content does not cause extra Messages", () => {
+    const json = makeAdversarialJson([
+      { role: "user", content: "Show me examples" },
+      { role: "assistant", content: "Here are examples:\n\nUser: first input\nAssistant: first output\n\nUser: second input\nAssistant: second output" },
+    ]);
+    const counts = importAndCount(json);
+    expect(counts.previewMessageCount).toBe(2);
+    expect(counts.importedMessageCount).toBe(2);
+    expect(counts.persistedMessageCount).toBe(2);
+    expect(counts.previewNewMessages).toBe(counts.importedMessageCount);
+  });
+
+  // ---- CAT3: Markdown code block with role markers ----
+  it("CAT3: code block with role markers does not cause extra Messages (regression)", () => {
+    const json = makeAdversarialJson([
+      { role: "user", content: "Show me the format" },
+      { role: "assistant", content: "Use this format:\n\n```\nUser: input text\nAssistant: output text\n```\n\nSave it as a .txt file." },
+    ]);
+    const counts = importAndCount(json);
+    expect(counts.previewMessageCount).toBe(2);
+    expect(counts.importedMessageCount).toBe(2);
+    expect(counts.previewNewMessages).toBe(counts.importedMessageCount);
+  });
+
+  // ---- CAT4: Chinese role markers ----
+  it("CAT4: Chinese role markers (用户：/ 助手：) in content do not cause extra Messages", () => {
+    const json = makeAdversarialJson([
+      { role: "user", content: "格式是什么？" },
+      { role: "assistant", content: "参考以下格式：\n\n用户：这是用户输入\n助手：这是助手回复\n\n按照这个格式写。" },
+    ]);
+    const counts = importAndCount(json);
+    expect(counts.previewMessageCount).toBe(2);
+    expect(counts.importedMessageCount).toBe(2);
+    expect(counts.persistedMessageCount).toBe(2);
+    expect(counts.previewNewMessages).toBe(counts.importedMessageCount);
+  });
+
+  // ---- CAT5: AI model name prefixes ----
+  it("CAT5: AI model name prefixes in content do not cause extra Messages", () => {
+    const json = makeAdversarialJson([
+      { role: "user", content: "Compare models" },
+      { role: "assistant", content: "Here's a comparison:\n\nChatGPT: excels at creative writing\nClaude: excels at analysis\nDeepSeek: excels at coding\nGemini: excels at multimodal" },
+    ]);
+    const counts = importAndCount(json);
+    expect(counts.previewMessageCount).toBe(2);
+    expect(counts.importedMessageCount).toBe(2);
+    expect(counts.previewNewMessages).toBe(counts.importedMessageCount);
+  });
+
+  // ---- CAT6: Realistic "chat about chat logs" ----
+  it("CAT6: realistic chat-about-chat scenario has zero drift", () => {
+    const json = makeAdversarialJson([
+      { role: "user", content: "How do I format conversation logs?" },
+      { role: "assistant", content: 'Format them like:\n\nUser: "question"\nAssistant: "answer"\n\nUser: "thanks"\nAssistant: "welcome"' },
+      { role: "user", content: "What about other labels?" },
+      { role: "assistant", content: "Alternatives:\n\nHuman: question\nAI: answer\n\n用户：问题\n助手：回答" },
+    ]);
+    const counts = importAndCount(json);
+    expect(counts.previewMessageCount).toBe(4);
+    expect(counts.importedMessageCount).toBe(4);
+    expect(counts.previewNewMessages).toBe(counts.importedMessageCount);
+  });
+
+  // ---- CAT7: Continuous user messages produce correct Round grouping ----
+  it("CAT7: continuous user messages produce correct Round grouping", () => {
+    const json = makeAdversarialJson([
+      { role: "user", content: "First question" },
+      { role: "user", content: "Actually, second question" },
+      { role: "assistant", content: "Answer to both" },
+    ]);
+    const counts = importAndCount(json);
+    expect(counts.importedMessageCount).toBe(3);
+    expect(counts.importedRoundCount).toBeGreaterThan(0);
+    // Two consecutive users → first finishes a round, second starts new round
+    expect(counts.importedRoundCount).toBe(2);
+    // Round messageIds must reference real message IDs
+    const messageIdSet = new Set(counts.messages.map((m) => m.id));
+    for (const r of counts.rounds) {
+      for (const mid of r.messageIds) {
+        expect(messageIdSet.has(mid)).toBe(true);
+      }
+    }
+  });
+
+  // ---- CAT8: Orphan assistant produces correct Round grouping ----
+  it("CAT8: orphan assistant produces correct Round grouping", () => {
+    const json = makeAdversarialJson([
+      { role: "assistant", content: "Hello! How can I help?" },
+      { role: "user", content: "A question" },
+      { role: "assistant", content: "An answer" },
+    ]);
+    const counts = importAndCount(json);
+    expect(counts.importedMessageCount).toBe(3);
+    // Orphan assistant starts a round, user starts new round, assistant belongs to it
+    expect(counts.importedRoundCount).toBe(2);
+    // Orphan round has only assistant
+    const orphanRound = counts.rounds.find((r) => r.order === 1);
+    expect(orphanRound).toBeDefined();
+    expect(orphanRound!.messageIds.length).toBe(1);
+  });
+
+  // ---- CAT9: New Import preview counts === persisted counts ----
+  it("CAT9: new import preview counts equal persisted counts", () => {
+    const json = makeAdversarialJson([
+      { role: "user", content: "Question 1" },
+      { role: "assistant", content: "Answer 1 with User: and 用户： mixed in" },
+      { role: "user", content: "Question 2" },
+      { role: "assistant", content: "Answer 2" },
+    ]);
+    const counts = importAndCount(json);
+    expect(counts.previewNewMessages).toBe(4);
+    expect(counts.importedMessageCount).toBe(4);
+    expect(counts.persistedMessageCount).toBe(4);
+    expect(counts.previewNewMessages).toBe(counts.persistedMessageCount);
+    // Round count: 2 users → each starts a round, assistants added to each
+    expect(counts.importedRoundCount).toBe(2);
+    expect(counts.persistedRoundCount).toBe(2);
+    expect(counts.importedRoundCount).toBe(counts.persistedRoundCount);
+  });
+
+  // ---- CAT10: large.json fixture count parity ----
+  it("CAT10: chatgpt-large.json preview counts equal imported counts", () => {
+    const text = loadFixture("chatgpt-large.json");
+    const conversations = new InMemoryConversationStorage();
+    const sources = new InMemorySourceStorage();
+    const messages = new InMemoryMessageStorage();
+    const rounds = new InMemoryRoundStorage();
+    const service = new ChatGPTExportImportService(
+      conversations,
+      sources,
+      messages,
+      rounds,
+    );
+    const previews = service.parseExport(text);
+    const importPreview = service.previewImport(previews[0]);
+    const result = service.importConversation(importPreview);
+
+    // Preview counts === imported counts (the core fix)
+    expect(importPreview.newMessages).toBe(result.appended);
+    // Persisted count matches
+    expect(result.appended).toBe(
+      messages.getByConversationId(result.conversationId).length,
+    );
+    expect(result.roundsCreated).toBe(
+      rounds.getByConversationId(result.conversationId).length,
+    );
+    // 30 user messages → 30 rounds
+    expect(result.roundsCreated).toBe(30);
+  });
+
+  // ---- CAT11: Existing append counts accurate ----
+  it("CAT11: existing append produces accurate message and round counts", () => {
+    const conversations = new InMemoryConversationStorage();
+    const sources = new InMemorySourceStorage();
+    const messages = new InMemoryMessageStorage();
+    const rounds = new InMemoryRoundStorage();
+    const targetId = "target-append-parity";
+    conversations.save({
+      id: targetId,
+      title: "Target",
+      sourceType: "ChatGPT",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      lastOpenedAt: new Date().toISOString(),
+    });
+
+    const json = makeAdversarialJson([
+      { role: "user", content: "Question 1" },
+      { role: "assistant", content: "Answer with User: prefix in content" },
+      { role: "user", content: "Question 2 with 用户：test" },
+      { role: "assistant", content: "Answer 2" },
+    ]);
+
+    const service = new ChatGPTExportImportService(
+      conversations,
+      sources,
+      messages,
+      rounds,
+    );
+    const previews = service.parseExport(json);
+    const result = service.appendToConversation(previews[0], targetId);
+
+    // Counts must match
+    expect(result.appendedMessages).toBe(4);
+    expect(result.appendedRounds).toBe(2);
+    expect(messages.getByConversationId(targetId).length).toBe(4);
+    expect(rounds.getByConversationId(targetId).length).toBe(2);
+
+    // Round.messageIds must all be findable
+    const messageIdSet = new Set(messages.getByConversationId(targetId).map((m) => m.id));
+    for (const r of rounds.getByConversationId(targetId)) {
+      expect(r.conversationId).toBe(targetId);
+      for (const mid of r.messageIds) {
+        expect(messageIdSet.has(mid)).toBe(true);
+      }
+    }
+  });
+
+  // ---- CAT12: No duplicate import of existing source ----
+  it("CAT12: existing append does not re-import already-appended source", () => {
+    const conversations = new InMemoryConversationStorage();
+    const sources = new InMemorySourceStorage();
+    const messages = new InMemoryMessageStorage();
+    const rounds = new InMemoryRoundStorage();
+    const targetId = "target-no-dup";
+    conversations.save({
+      id: targetId,
+      title: "Target",
+      sourceType: "ChatGPT",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      lastOpenedAt: new Date().toISOString(),
+    });
+
+    const json = makeAdversarialJson([
+      { role: "user", content: "Q1" },
+      { role: "assistant", content: "A1" },
+    ]);
+
+    const service = new ChatGPTExportImportService(
+      conversations,
+      sources,
+      messages,
+      rounds,
+    );
+    const previews = service.parseExport(json);
+
+    // First append
+    const result1 = service.appendToConversation(previews[0], targetId);
+    expect(result1.appendedMessages).toBe(2);
+    expect(result1.appendedRounds).toBe(1);
+
+    // Second append — should skip completely
+    const result2 = service.appendToConversation(previews[0], targetId);
+    expect((result2 as Record<string, unknown>).skippedExistingSource).toBe(true);
+    expect(result2.appendedMessages).toBe(0);
+    expect(result2.appendedRounds).toBe(0);
+    // No duplicate messages
+    expect(messages.getByConversationId(targetId).length).toBe(2);
+  });
+
+  // ---- CAT13: Manual/Paste/TXT parser regression ----
+  it("CAT13: Manual/Paste/TXT labeled-text parsing is unchanged", () => {
+    const conversations = new InMemoryConversationStorage();
+    const sources = new InMemorySourceStorage();
+    const messages = new InMemoryMessageStorage();
+    const rounds = new InMemoryRoundStorage();
+    const preview = new ImportParserPipeline().preview(
+      { name: "paste", channel: "clipboard", content: "User: hello\nAssistant: hi" },
+      "chatgpt",
+    );
+    const result = new ImportService(conversations, sources, messages, rounds).confirm(preview);
+    expect(result.messageCount).toBe(2);
+    expect(result.roundCount).toBe(1);
+    expect(messages.getByConversationId(result.conversationId)).toHaveLength(2);
+    expect(rounds.getByConversationId(result.conversationId)).toHaveLength(1);
+  });
+
+  // ---- CAT14: empty content messages are handled correctly ----
+  it("CAT14: empty / whitespace-only messages from linearize don't cause drift", () => {
+    const json = JSON.stringify([
+      {
+        id: "conv-empty-edge",
+        title: "Edge Case",
+        current_node: "node-2",
+        mapping: {
+          "node-1": {
+            id: "msg-1",
+            parent: null,
+            message: {
+              id: "msg-1",
+              author: { role: "user" },
+              content: { content_type: "text", parts: ["Real question"] },
+            },
+          },
+          "node-2": {
+            id: "msg-2",
+            parent: "node-1",
+            message: {
+              id: "msg-2",
+              author: { role: "assistant" },
+              content: { content_type: "text", parts: ["Real answer"] },
+            },
+          },
+        },
+      },
+    ]);
+    const counts = importAndCount(json);
+    expect(counts.previewMessageCount).toBe(2);
+    expect(counts.importedMessageCount).toBe(2);
+    expect(counts.previewNewMessages).toBe(counts.importedMessageCount);
+  });
+
+  // ---- CAT15: Bulk 100-conversation count parity ----
+  it("CAT15: 100-conversation batch import preserves aggregate counts", () => {
+    const conversations = new InMemoryConversationStorage();
+    const sources = new InMemorySourceStorage();
+    const messages = new InMemoryMessageStorage();
+    const rounds = new InMemoryRoundStorage();
+    const service = new ChatGPTExportImportService(
+      conversations,
+      sources,
+      messages,
+      rounds,
+    );
+
+    // Generate 100 conversations, each with 2 messages (user + assistant)
+    // Some contain adversarial content
+    const convs = Array.from({ length: 100 }, (_, i) => {
+      const isAdversarial = i % 10 === 0;
+      const assistantContent = isAdversarial
+        ? `Response ${i}:\n\nUser: this looks like a new message\nAssistant: and this too\n\nEnd of response.`
+        : `Response ${i}: everything is normal here.`;
+      return {
+        id: `conv-${i}`,
+        title: `Conv ${i}`,
+        current_node: `a-${i}`,
+        mapping: {
+          [`u-${i}`]: {
+            id: `u-msg-${i}`,
+            parent: null,
+            message: {
+              id: `u-msg-${i}`,
+              author: { role: "user" },
+              content: { content_type: "text", parts: [`Question ${i}`] },
+            },
+          },
+          [`a-${i}`]: {
+            id: `a-msg-${i}`,
+            parent: `u-${i}`,
+            message: {
+              id: `a-msg-${i}`,
+              author: { role: "assistant" },
+              content: { content_type: "text", parts: [assistantContent] },
+            },
+          },
+        },
+      };
+    });
+
+    const json = JSON.stringify(convs);
+    const previews = service.parseExport(json);
+    expect(previews).toHaveLength(100);
+
+    let totalPreviewMessages = 0;
+    let totalImportedMessages = 0;
+    let totalImportedRounds = 0;
+    for (const preview of previews) {
+      const importPreview = service.previewImport(preview);
+      totalPreviewMessages += importPreview.newMessages;
+      const result = service.importConversation(importPreview, { forceNew: true });
+      totalImportedMessages += result.appended;
+      totalImportedRounds += result.roundsCreated;
+    }
+
+    // Aggregate counts must match exactly
+    expect(totalPreviewMessages).toBe(totalImportedMessages);
+    expect(totalPreviewMessages).toBe(200);
+    expect(totalImportedRounds).toBe(100);
+    expect(messages.getAll()).toHaveLength(200);
+    expect(rounds.getAll()).toHaveLength(100);
+  });
+});

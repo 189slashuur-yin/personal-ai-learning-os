@@ -3,7 +3,8 @@ import type { MessageStorage } from "@/core/contracts/message-storage";
 import type { RoundStorage } from "@/core/contracts/round-storage";
 import type { SourceStorage } from "@/core/contracts/source-storage";
 import type { Message, MessageRole } from "@/core/entities/message";
-import { ImportParserPipeline } from "@/core/services/import-parser-pipeline";
+import type { ImportPreview, ParsedMessageDraft } from "@/core/entities/import-parser";
+import { deriveRoundDrafts } from "@/core/services/import-parser-pipeline";
 import { ImportService } from "@/core/services/import-service";
 import { RoundService } from "@/core/services/round-service";
 
@@ -127,8 +128,45 @@ function linearize(conversation: ChatGPTConversation) {
   return { messages, unsupportedCount };
 }
 
+/** Build an ImportPreview directly from structured ChatGPTLinearMessages,
+ *  bypassing the lossy text serializer/parser round-trip. */
+function buildStructuredImportPreview(
+  messages: ChatGPTLinearMessage[],
+  title: string,
+): ImportPreview {
+  const messageDrafts: ParsedMessageDraft[] = messages.map((m) => ({
+    role: m.role as MessageRole,
+    content: m.content,
+  }));
+  const rounds = deriveRoundDrafts(messageDrafts);
+  const transcript = messages
+    .map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`)
+    .join("\n\n");
+
+  return {
+    parserId: "chatgpt",
+    parserVersion: "1.0.0",
+    producer: "ChatGPT",
+    format: "provider-transcript",
+    suggestedTitle: title,
+    messages: messageDrafts,
+    rounds,
+    warnings: [],
+    errors: [],
+    artifact: {
+      name: "conversations.json",
+      channel: "file",
+      content: transcript,
+      mediaType: "application/json",
+    },
+    messageCount: messageDrafts.length,
+    roundCount: rounds.length,
+    unknownMessageCount: 0,
+    canConfirm: true,
+  };
+}
+
 export class ChatGPTExportImportService {
-  private readonly pipeline = new ImportParserPipeline();
 
   constructor(
     private readonly conversations: ConversationStorage,
@@ -232,24 +270,13 @@ export class ChatGPTExportImportService {
     }
 
     if (forceNew || !preview.existingConversationId) {
-      const transcript = preview.messages
-        .map((message) => `${message.role === "user" ? "User" : "Assistant"}: ${message.content}`)
-        .join("\n\n");
-      const parserPreview = this.pipeline.preview(
-        {
-          name: "conversations.json",
-          channel: "file",
-          content: transcript,
-          mediaType: "application/json",
-        },
-        "chatgpt",
-      );
+      const importPreview = buildStructuredImportPreview(preview.messages, preview.title);
       const result = new ImportService(
         this.conversations,
         this.sources,
         this.messages,
         this.rounds,
-      ).confirm(parserPreview, { title: preview.title, workspaceId });
+      ).confirm(importPreview, { title: preview.title, workspaceId });
       const conversation = this.conversations.getById(result.conversationId);
       if (!conversation) throw new Error("Imported Conversation is unavailable.");
       this.conversations.save({
@@ -306,22 +333,11 @@ export class ChatGPTExportImportService {
       updatedAt: newMessages.length ? timestamp : existing.updatedAt,
     });
 
-    // Generate rounds for appended messages (same pattern as appendToConversation)
-    const appendTranscript = additions
-      .map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`)
-      .join("\n\n");
-    const appendParserPreview = this.pipeline.preview(
-      {
-        name: "conversations.json",
-        channel: "file",
-        content: appendTranscript,
-        mediaType: "application/json",
-      },
-      "chatgpt",
-    );
+    // Generate rounds for appended messages using structured derivation (no text round-trip)
+    const appendImportPreview = buildStructuredImportPreview(additions, preview.title);
     const roundService = new RoundService(this.rounds);
     let roundsCreated = 0;
-    for (const round of appendParserPreview.rounds) {
+    for (const round of appendImportPreview.rounds) {
       const mappedIds = round.messageIndexes
         .map((idx: number) => newMessages[idx]?.id)
         .filter(Boolean) as string[];
@@ -430,23 +446,12 @@ export class ChatGPTExportImportService {
       );
     }
 
-    const transcript = additions
-      .map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`)
-      .join("\n\n");
-    const parserPreview = this.pipeline.preview(
-      {
-        name: "append",
-        channel: "clipboard",
-        content: transcript,
-        mediaType: undefined,
-      },
-      "chatgpt",
-    );
+    const appendImportPreview = buildStructuredImportPreview(additions, preview.title);
 
     const roundService = new RoundService(this.rounds);
     let appendedRounds = 0;
     const createdRoundIds: string[] = [];
-    for (const round of parserPreview.rounds) {
+    for (const round of appendImportPreview.rounds) {
       const mappedIds = round.messageIndexes
         .map((idx: number) => newMessages[idx]?.id)
         .filter(Boolean) as string[];

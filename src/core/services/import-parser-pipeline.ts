@@ -65,7 +65,7 @@ function suggestedTitle(artifact: ImportArtifact, messages: ParsedMessageDraft[]
   return fromName || firstUserMessage?.content.split("\n")[0].slice(0, 80) || "Imported Conversation";
 }
 
-function deriveRoundDrafts(messages: ParsedMessageDraft[]): ParsedRoundDraft[] {
+export function deriveRoundDrafts(messages: ParsedMessageDraft[]): ParsedRoundDraft[] {
   const groups: number[][] = [];
   let current: number[] = [];
   let currentKind: "dialogue" | "orphan" | "context" | null = null;
