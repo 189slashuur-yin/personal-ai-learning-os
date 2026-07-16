@@ -5,7 +5,11 @@ import type { Round } from "@/core/entities/round";
 import { ChatGPTExportImportService } from "@/core/services/chatgpt-export-import";
 import { ImportParserPipeline } from "@/core/services/import-parser-pipeline";
 import { ImportService } from "@/core/services/import-service";
-import { batchDeleteConversationWorkspace, deleteConversationWorkspace } from "@/core/services/conversation-workspace";
+import {
+  batchDeleteConversationWorkspace,
+  deleteConversationSidecarMetadata,
+  deleteConversationWorkspace,
+} from "@/core/services/conversation-workspace";
 import { AppDataStorage } from "@/infrastructure/storage/app-data-storage";
 import {
   createStorageInstances,
@@ -37,8 +41,13 @@ import { IndexedDBSourceStorage } from "@/infrastructure/storage/indexeddb/idb-s
 import { IndexedDBProposalStorage } from "@/infrastructure/storage/indexeddb/idb-proposal-storage";
 import { IndexedDBKnowledgeCardStorage } from "@/infrastructure/storage/indexeddb/idb-knowledge-card-storage";
 import { IndexedDBConversationVersionStorage } from "@/infrastructure/storage/indexeddb/idb-conversation-version-storage";
+import { BrowserProposalStorage } from "@/infrastructure/storage/browser-proposal-storage";
+import { BrowserAnalyzerRunStorage } from "@/infrastructure/storage/browser-analyzer-run-storage";
+import { BrowserAssetStorage } from "@/infrastructure/storage/browser-asset-storage";
+import { BrowserTaskStorage } from "@/infrastructure/storage/browser-task-storage";
 import { SearchIndexService } from "@/core/services/search-index-service";
 import type { SearchIndexData } from "@/core/services/search-index-service";
+import { resolveProposalReviewLookup } from "@/core/services/proposal-review-lookup";
 
 type StoreData = Map<string, unknown>;
 
@@ -569,7 +578,9 @@ describe("IndexedDB storage reliability", () => {
     expect(new IndexedDBRoundStorage().getByConversationId("c-delete")).toHaveLength(0);
     expect(await readAll("sources")).toHaveLength(0);
     expect(await readAll("proposals")).toHaveLength(0);
-    expect(await readAll("knowledge-cards")).toHaveLength(0);
+    expect(
+      (await readAll<{ id: string }>("knowledge-cards")).map((card) => card.id),
+    ).toEqual(["k-delete"]);
     expect(await readAll("conversation-versions")).toHaveLength(0);
   });
 
@@ -2814,7 +2825,7 @@ describe("PALOS v1.4.10 — DataHealth uses canonical storage", () => {
         message("dh-m3", "dh-c2", 0),
       ],
       rounds: [round("dh-r1", "dh-c1", 1), round("dh-r2", "dh-c2", 1)],
-      sources: [],
+      sources: [sourceRecord("dh-s1", "dh-c1")],
       proposals: [
         {
           id: "dh-p1",
@@ -3093,8 +3104,22 @@ describe("PALOS v1.6.1 — atomic batch delete and Clear write barrier", () => {
     });
     expect(result.verification.pendingWriteCount).toBe(0);
     expect(result.verification.remainingRequestedIds).toEqual([]);
+    expect(result.verification.remainingDependentIds).toEqual({
+      messageIds: [],
+      roundIds: [],
+      sourceIds: [],
+      proposalIds: [],
+      conversationVersionIds: [],
+    });
     expect(result.verification.cacheMatchesIndexedDB).toBe(true);
     expect(result.verification.orphanDependentCounts).toEqual({ messages: 0, rounds: 0, sources: 0, proposals: 0, conversationVersions: 0 });
+    expect(result.verification.searchResidualDocumentIds).toEqual([]);
+    expect(result.verification.searchInvalidReferenceDocumentIds).toEqual([]);
+    expect(result.verification.reviewResidualProposalIds).toEqual([]);
+    expect(result.verification.staleFlowPointerIds).toEqual({
+      currentSourceId: undefined,
+      currentProposalId: undefined,
+    });
     expect(await readAll("conversations")).toHaveLength(0);
     expect(await readAll("messages")).toHaveLength(0);
     expect(await readAll("rounds")).toHaveLength(0);
@@ -3107,6 +3132,8 @@ describe("PALOS v1.6.1 — atomic batch delete and Clear write barrier", () => {
     clearCaches();
     await preloadAll();
     expect(getCachedCounts()).toMatchObject({ conversations: 0, messages: 0, rounds: 0, sources: 0, proposals: 0, conversationVersions: 0, knowledgeCards: 100 });
+    expect(new IndexedDBProposalStorage().getAll()).toHaveLength(0);
+    expect(getPendingWriteCount()).toBe(0);
   });
 
   it("aborted canonical replacement exposes no partial cross-store deletion", async () => {
@@ -3194,7 +3221,7 @@ describe("PALOS v1.6.1 — atomic batch delete and Clear write barrier", () => {
     await flushCachesToIndexedDB();
     clearCaches();
     await preloadAll();
-    expect(new IndexedDBKnowledgeCardStorage().getAll().map((card) => card.id)).not.toContain("single-knowledge");
+    expect(new IndexedDBKnowledgeCardStorage().getAll().map((card) => card.id)).toContain("single-knowledge");
 
     const batchResult = await bulkDeleteCanonicalConversations(["batch-delete"]);
     expect(batchResult.verification.remainingRequestedIds).toEqual([]);
@@ -3203,5 +3230,496 @@ describe("PALOS v1.6.1 — atomic batch delete and Clear write barrier", () => {
     const imported = await importSmallChatGPTConversation();
     expect(new IndexedDBConversationStorage().getById(imported.conversationId)).not.toBeNull();
     expect(getPendingWriteCount()).toBe(0);
+  });
+});
+
+describe("PALOS v1.6.3 — Proposal/Review/Search referential integrity", () => {
+  it("cleans an existing canonical orphan and never merges legacy Proposal data in IndexedDB mode", async () => {
+    const orphan = {
+      ...proposalRecord(
+        "v163-existing-orphan",
+        "v163-deleted-conversation",
+        "v163-deleted-source",
+      ),
+      conversationId: undefined,
+      sourceId: undefined,
+      sourceRoundId: "v163-deleted-round",
+      sourceMessageIds: ["v163-deleted-message"],
+    };
+    const legacyOnly = proposalRecord(
+      "v163-legacy-only",
+      "v163-legacy-conversation",
+      "v163-legacy-source",
+    );
+    await replaceStores({
+      conversations: [],
+      messages: [],
+      rounds: [],
+      sources: [],
+      proposals: [orphan],
+      "knowledge-cards": [],
+      "conversation-versions": [],
+    });
+    window.localStorage.setItem(
+      "ai-learning-os.proposals",
+      JSON.stringify([orphan, legacyOnly]),
+    );
+    window.localStorage.setItem(
+      "ai-learning-os.current-proposal",
+      JSON.stringify(orphan),
+    );
+
+    clearCaches();
+    const counts = await preloadAll();
+
+    expect(counts.proposals).toBe(0);
+    expect(await readAll("proposals")).toHaveLength(0);
+    expect(new IndexedDBProposalStorage().getAll()).toHaveLength(0);
+    expect(new BrowserProposalStorage().getAll().map((item) => item.id)).toEqual([
+      orphan.id,
+      legacyOnly.id,
+    ]);
+    expect(createStorageInstances().proposals.getAll()).toHaveLength(0);
+    expect(window.localStorage.getItem("ai-learning-os.current-proposal")).toBeNull();
+
+    const dashboardEquivalentProposalCount =
+      createStorageInstances().proposals.getAll().length;
+    expect(dashboardEquivalentProposalCount).toBe(0);
+
+    const search = new SearchIndexService({
+      workspaces: [],
+      conversations: [],
+      sources: [],
+      messages: [],
+      rounds: [],
+      proposals: createStorageInstances().proposals.getAll(),
+      knowledgeCards: [],
+      tasks: [],
+      tags: [],
+      assets: [],
+    });
+    expect(
+      search
+        .buildDocuments()
+        .filter((document) => document.entityType === "proposal"),
+    ).toHaveLength(0);
+    expect(
+      resolveProposalReviewLookup(
+        createStorageInstances().proposals.getById(orphan.id),
+      ),
+    ).toEqual({ status: "missing-proposal" });
+  });
+
+  it("preserves valid and unrelated Proposals until their own owner is deleted", async () => {
+    const deletedProposal = proposalRecord(
+      "v163-valid-deleted-proposal",
+      "v163-valid-deleted-conversation",
+      "v163-valid-deleted-source",
+    );
+    const keptProposal = proposalRecord(
+      "v163-valid-kept-proposal",
+      "v163-valid-kept-conversation",
+      "v163-valid-kept-source",
+    );
+    await replaceStores({
+      conversations: [
+        conversation("v163-valid-deleted-conversation"),
+        conversation("v163-valid-kept-conversation"),
+      ],
+      messages: [
+        message("v163-valid-deleted-message", "v163-valid-deleted-conversation"),
+        message("v163-valid-kept-message", "v163-valid-kept-conversation"),
+      ],
+      rounds: [
+        round("v163-valid-deleted-round", "v163-valid-deleted-conversation"),
+        round("v163-valid-kept-round", "v163-valid-kept-conversation"),
+      ],
+      sources: [
+        sourceRecord("v163-valid-deleted-source", "v163-valid-deleted-conversation"),
+        sourceRecord("v163-valid-kept-source", "v163-valid-kept-conversation"),
+      ],
+      proposals: [deletedProposal, keptProposal],
+      "knowledge-cards": [],
+      "conversation-versions": [],
+    });
+    clearCaches();
+    await preloadAll();
+
+    const before = createStorageInstances().proposals;
+    expect(before.getAll()).toHaveLength(2);
+    expect(resolveProposalReviewLookup(before.getById(deletedProposal.id)).status).toBe(
+      "ready",
+    );
+    const beforeSearch = new SearchIndexService({
+      workspaces: [],
+      conversations: createStorageInstances().conversations.getAll(),
+      sources: createStorageInstances().sources.getAll(),
+      messages: createStorageInstances().messages.getAll(),
+      rounds: createStorageInstances().rounds.getAll(),
+      proposals: before.getAll(),
+      knowledgeCards: [],
+      tasks: [],
+      tags: [],
+      assets: [],
+    });
+    expect(
+      beforeSearch
+        .buildDocuments()
+        .filter((document) => document.entityType === "proposal"),
+    ).toHaveLength(2);
+
+    await bulkDeleteCanonicalConversations([
+      "v163-valid-deleted-conversation",
+    ]);
+
+    const after = createStorageInstances().proposals;
+    expect(after.getById(deletedProposal.id)).toBeNull();
+    expect(after.getById(keptProposal.id)?.id).toBe(keptProposal.id);
+    expect(after.getAll()).toHaveLength(1);
+    expect(resolveProposalReviewLookup(after.getById(deletedProposal.id))).toEqual({
+      status: "missing-proposal",
+    });
+  });
+
+  it("stores current-proposal as an ID-only selection and resolves canonical content", async () => {
+    const canonical = proposalRecord(
+      "v163-pointer-canonical",
+      "v163-pointer-conversation",
+      "v163-pointer-source",
+    );
+    await replaceStores({
+      conversations: [conversation("v163-pointer-conversation")],
+      messages: [],
+      rounds: [],
+      sources: [sourceRecord("v163-pointer-source", "v163-pointer-conversation")],
+      proposals: [canonical],
+      "knowledge-cards": [],
+      "conversation-versions": [],
+    });
+    clearCaches();
+    await preloadAll();
+
+    const staleSnapshot = { ...canonical, title: "stale pointer title" };
+    window.localStorage.setItem(
+      "ai-learning-os.current-proposal",
+      JSON.stringify(staleSnapshot),
+    );
+    expect(new IndexedDBProposalStorage().getCurrent()?.title).toBe(
+      canonical.title,
+    );
+
+    new IndexedDBProposalStorage().saveCurrent(canonical);
+    expect(
+      JSON.parse(
+        window.localStorage.getItem("ai-learning-os.current-proposal") ?? "null",
+      ),
+    ).toEqual({ id: canonical.id });
+  });
+
+  it("does not revive a deleted Proposal from current-proposal", async () => {
+    const proposal = proposalRecord(
+      "v163-ghost-proposal",
+      "v163-ghost-conversation",
+      "v163-ghost-source",
+    );
+    await replaceStores({
+      conversations: [conversation("v163-ghost-conversation")],
+      messages: [
+        message(
+          "v163-ghost-message",
+          "v163-ghost-conversation",
+        ),
+      ],
+      rounds: [round("v163-ghost-round", "v163-ghost-conversation")],
+      sources: [
+        sourceRecord("v163-ghost-source", "v163-ghost-conversation"),
+      ],
+      proposals: [proposal],
+      "knowledge-cards": [],
+      "conversation-versions": [],
+    });
+    window.localStorage.setItem(
+      "ai-learning-os.current-proposal",
+      JSON.stringify(proposal),
+    );
+    clearCaches();
+    await preloadAll();
+
+    expect(new IndexedDBProposalStorage().getById(proposal.id)?.id).toBe(
+      proposal.id,
+    );
+
+    await bulkDeleteCanonicalConversations(["v163-ghost-conversation"]);
+
+    expect(await readAll("conversations")).toHaveLength(0);
+    expect(await readAll("rounds")).toHaveLength(0);
+    expect(await readAll("sources")).toHaveLength(0);
+    expect(await readAll("proposals")).toHaveLength(0);
+
+    const proposalStorage = new IndexedDBProposalStorage();
+    expect(proposalStorage.getAll().map((item) => item.id)).not.toContain(
+      proposal.id,
+    );
+    expect(new BrowserProposalStorage().getById(proposal.id)).toBeNull();
+    expect(proposalStorage.getById(proposal.id)).toBeNull();
+
+    const search = new SearchIndexService({
+      workspaces: [],
+      conversations: [],
+      sources: [],
+      messages: [],
+      rounds: [],
+      proposals: proposalStorage.getAll(),
+      knowledgeCards: [],
+      tasks: [],
+      tags: [],
+      assets: [],
+    });
+    search.buildDocuments();
+    expect(
+      search.searchDocuments("v163-ghost-proposal", {
+        entityTypes: ["proposal"],
+      }),
+    ).toHaveLength(0);
+    expect(
+      window.localStorage.getItem("ai-learning-os.current-proposal"),
+    ).toBeNull();
+  });
+
+  it("removes round/message-linked Proposals, clears flow pointers, and preserves accepted Knowledge without live source links", async () => {
+    const conversationId = "v163-linked-conversation";
+    const messageId = "v163-linked-message";
+    const roundId = "v163-linked-round";
+    const sourceId = "v163-linked-source";
+    const proposal = {
+      ...proposalRecord(
+        "v163-round-message-proposal",
+        conversationId,
+        sourceId,
+      ),
+      conversationId: undefined,
+      sourceId: undefined,
+      sourceRoundId: roundId,
+      sourceMessageIds: [messageId],
+    };
+    const source = sourceRecord(sourceId, conversationId);
+    const knowledge = {
+      ...knowledgeRecord("v163-preserved-knowledge", proposal.id),
+      sourceId,
+      sourceConversationId: conversationId,
+      sourceRoundId: roundId,
+      sourceMessageIds: [messageId],
+    };
+
+    await replaceStores({
+      conversations: [conversation(conversationId)],
+      messages: [message(messageId, conversationId)],
+      rounds: [
+        {
+          ...round(roundId, conversationId),
+          messageIds: [messageId],
+        },
+      ],
+      sources: [source],
+      proposals: [proposal],
+      "knowledge-cards": [knowledge],
+      "conversation-versions": [
+        versionRecord("v163-linked-version", conversationId),
+      ],
+    });
+    window.localStorage.setItem(
+      "ai-learning-os.current-source",
+      JSON.stringify(source),
+    );
+    window.localStorage.setItem(
+      "ai-learning-os.current-proposal",
+      JSON.stringify(proposal),
+    );
+    clearCaches();
+    await preloadAll();
+
+    const beforeSearch = new SearchIndexService({
+      workspaces: [],
+      conversations: new IndexedDBConversationStorage().getAll(),
+      sources: new IndexedDBSourceStorage().getAll(),
+      messages: new IndexedDBMessageStorage().getAll(),
+      rounds: new IndexedDBRoundStorage().getAll(),
+      proposals: new IndexedDBProposalStorage().getAll(),
+      knowledgeCards: new IndexedDBKnowledgeCardStorage().getAll(),
+      tasks: [],
+      tags: [],
+      assets: [],
+    });
+    beforeSearch.buildDocuments();
+    expect(
+      beforeSearch.searchDocuments(proposal.id, {
+        entityTypes: ["proposal"],
+      }),
+    ).toHaveLength(1);
+    expect(new IndexedDBProposalStorage().getById(proposal.id)).not.toBeNull();
+
+    const result = await bulkDeleteCanonicalConversations([conversationId]);
+    expect(result.deletedDependencyIds.proposalIds).toEqual([proposal.id]);
+    expect(result.flowPointerCleanup).toMatchObject({
+      clearedCurrentSourceId: sourceId,
+      clearedCurrentProposalId: proposal.id,
+      failures: [],
+    });
+
+    clearCaches();
+    await preloadAll();
+
+    expect(new IndexedDBConversationStorage().getById(conversationId)).toBeNull();
+    expect(
+      new IndexedDBMessageStorage().getAll().find((item) => item.id === messageId),
+    ).toBeUndefined();
+    expect(new IndexedDBRoundStorage().getById(roundId)).toBeNull();
+    expect(
+      new IndexedDBSourceStorage().getAll().find((item) => item.id === sourceId),
+    ).toBeUndefined();
+    expect(new IndexedDBProposalStorage().getById(proposal.id)).toBeNull();
+    expect(
+      new IndexedDBConversationVersionStorage()
+        .getAll()
+        .find((item) => item.id === "v163-linked-version"),
+    ).toBeUndefined();
+    expect(new IndexedDBProposalStorage().getCurrent()).toBeNull();
+    expect(window.localStorage.getItem("ai-learning-os.current-source")).toBeNull();
+    expect(window.localStorage.getItem("ai-learning-os.current-proposal")).toBeNull();
+    expect(result.verification.remainingDependentIds).toEqual({
+      messageIds: [],
+      roundIds: [],
+      sourceIds: [],
+      proposalIds: [],
+      conversationVersionIds: [],
+    });
+    expect(result.verification.orphanDependentCounts).toEqual({
+      messages: 0,
+      rounds: 0,
+      sources: 0,
+      proposals: 0,
+      conversationVersions: 0,
+    });
+
+    const preservedKnowledge = new IndexedDBKnowledgeCardStorage().getById(
+      knowledge.id,
+    );
+    expect(preservedKnowledge).not.toBeNull();
+
+    const afterSearch = new SearchIndexService({
+      workspaces: [],
+      conversations: new IndexedDBConversationStorage().getAll(),
+      sources: new IndexedDBSourceStorage().getAll(),
+      messages: new IndexedDBMessageStorage().getAll(),
+      rounds: new IndexedDBRoundStorage().getAll(),
+      proposals: new IndexedDBProposalStorage().getAll(),
+      knowledgeCards: new IndexedDBKnowledgeCardStorage().getAll(),
+      tasks: [],
+      tags: [],
+      assets: [],
+    });
+    const documents = afterSearch.buildDocuments();
+    expect(
+      afterSearch.searchDocuments(proposal.id, {
+        entityTypes: ["proposal"],
+      }),
+    ).toHaveLength(0);
+    const knowledgeDocument = documents.find(
+      (document) => document.entityId === knowledge.id,
+    );
+    expect(knowledgeDocument).toMatchObject({
+      entityType: "knowledge",
+      href: `/knowledge/${knowledge.id}`,
+      sourcePath: "来源已删除 > Knowledge",
+      metadata: {
+        proposalId: proposal.id,
+        conversationId: undefined,
+        sourceRoundId: undefined,
+        sourceReferenceMissing: true,
+      },
+    });
+    expect(getPendingWriteCount()).toBe(0);
+  });
+
+  it("cleans Conversation/Round sidecars after canonical deletion while preserving Task semantics", () => {
+    const analyzerRuns = new BrowserAnalyzerRunStorage();
+    const assets = new BrowserAssetStorage();
+    const tasks = new BrowserTaskStorage();
+    analyzerRuns.save({
+      id: "v163-deleted-run",
+      conversationId: "v163-sidecar-conversation",
+      roundId: "v163-sidecar-round",
+      providerId: "demo",
+      providerName: "Demo Provider",
+      status: "completed",
+      startedAt: now,
+    });
+    analyzerRuns.save({
+      id: "v163-kept-run",
+      conversationId: "v163-kept-conversation",
+      providerId: "demo",
+      providerName: "Demo Provider",
+      status: "completed",
+      startedAt: now,
+    });
+    analyzerRuns.save({
+      id: "v163-round-only-run",
+      roundId: "v163-sidecar-round",
+      messageIds: ["v163-sidecar-message"],
+      providerId: "demo",
+      providerName: "Demo Provider",
+      status: "completed",
+      startedAt: now,
+    });
+    for (const [id, entityType, entityId] of [
+      ["v163-conversation-asset", "conversation", "v163-sidecar-conversation"],
+      ["v163-round-asset", "round", "v163-sidecar-round"],
+      ["v163-knowledge-asset", "knowledge", "v163-kept-knowledge"],
+    ] as const) {
+      assets.save({
+        id,
+        entityType,
+        entityId,
+        filename: `${id}.txt`,
+        originalName: `${id}.txt`,
+        status: "unknown",
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+    tasks.save({
+      id: "v163-preserved-task",
+      title: "Preserve linked task",
+      status: "inbox",
+      type: "todo",
+      priority: "medium",
+      sourceRef: {
+        type: "conversation",
+        entityId: "v163-sidecar-conversation",
+        titleSnapshot: "Deleted conversation snapshot",
+      },
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    expect(
+      deleteConversationSidecarMetadata(
+        {
+          conversationIds: ["v163-sidecar-conversation"],
+          messageIds: ["v163-sidecar-message"],
+          roundIds: ["v163-sidecar-round"],
+          sourceIds: ["v163-sidecar-source"],
+        },
+        { analyzerRuns, assets },
+      ),
+    ).toEqual([]);
+
+    expect(analyzerRuns.getById("v163-deleted-run")).toBeNull();
+    expect(analyzerRuns.getById("v163-round-only-run")).toBeNull();
+    expect(analyzerRuns.getById("v163-kept-run")).not.toBeNull();
+    expect(assets.getById("v163-conversation-asset")).toBeNull();
+    expect(assets.getById("v163-round-asset")).toBeNull();
+    expect(assets.getById("v163-knowledge-asset")).not.toBeNull();
+    expect(tasks.getById("v163-preserved-task")).not.toBeNull();
   });
 });

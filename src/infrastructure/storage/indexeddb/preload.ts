@@ -5,7 +5,15 @@ import type { ImportedSource } from "@/core/entities/imported-source";
 import type { Proposal } from "@/core/entities/proposal";
 import type { KnowledgeCard } from "@/core/entities/knowledge-card";
 import type { ConversationVersion } from "@/core/entities/conversation-version";
-import { drainPendingWrites, readAll, replaceStores, type StoreBatch } from "./database";
+import { findInvalidProposalIds } from "@/core/services/conversation-referential-integrity";
+import { clearStaleCurrentProposalPointer } from "@/infrastructure/storage/flow-pointers";
+import {
+  deleteMany,
+  drainPendingWrites,
+  readAll,
+  replaceStores,
+  type StoreBatch,
+} from "./database";
 
 // ---- Module-level in-memory caches ----
 // These are populated by preloadAll() and used synchronously by
@@ -119,11 +127,34 @@ async function loadAll(): Promise<PreloadCounts> {
     readAll<ConversationVersion>("conversation-versions"),
   ]);
 
+  const invalidProposalIds = findInvalidProposalIds(proposals, {
+    conversations,
+    messages,
+    rounds,
+    sources,
+  });
+  if (invalidProposalIds.length > 0) {
+    await deleteMany("proposals", invalidProposalIds);
+  }
+  const invalidProposalIdSet = new Set(invalidProposalIds);
+  const validProposals = proposals.filter(
+    (proposal) => !invalidProposalIdSet.has(proposal.id),
+  );
+
+  try {
+    clearStaleCurrentProposalPointer(
+      new Set(validProposals.map((proposal) => proposal.id)),
+    );
+  } catch {
+    // LocalStorage pointer cleanup is a bounded sidecar operation. Canonical
+    // IndexedDB data remains authoritative even if the pointer is unavailable.
+  }
+
   _conversations = conversations;
   _messages = messages;
   _rounds = rounds;
   _sources = sources;
-  _proposals = proposals;
+  _proposals = validProposals;
   _knowledgeCards = knowledgeCards;
   _conversationVersions = conversationVersions;
   _loaded = true;
@@ -133,7 +164,7 @@ async function loadAll(): Promise<PreloadCounts> {
     messages: messages.length,
     rounds: rounds.length,
     sources: sources.length,
-    proposals: proposals.length,
+    proposals: validProposals.length,
     knowledgeCards: knowledgeCards.length,
     conversationVersions: conversationVersions.length,
   };

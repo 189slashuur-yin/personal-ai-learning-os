@@ -63,10 +63,12 @@ export function RoundWorkspace({ conversationId, onAnalyzeRound }: RoundWorkspac
       const requestedRoundId = new URLSearchParams(window.location.search).get("round");
       if (requestedRoundId) {
         window.requestAnimationFrame(() => {
-          document.getElementById(`round-${requestedRoundId}`)?.scrollIntoView({
-            behavior: "smooth",
-            block: "center",
-          });
+          const element = document.getElementById(`round-${requestedRoundId}`);
+          if (!element) return;
+          const headerOffset = 88;
+          const targetTop =
+            element.getBoundingClientRect().top + window.scrollY - headerOffset;
+          window.scrollTo({ top: Math.max(0, targetTop), behavior: "smooth" });
         });
       }
     }, 0);

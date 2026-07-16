@@ -20,6 +20,7 @@ import type { Round } from "@/core/entities/round";
 import type { ProviderCapability } from "@/core/entities/provider-capability";
 import { DEFAULT_WORKSPACE_ID, type Workspace } from "@/core/entities/workspace";
 import { AnalyzerExecutionService } from "@/core/services/analyzer-execution";
+import { shouldShowAnalyzerFailureInjection } from "@/core/services/analyzer-diagnostics";
 import { ImportProfileService } from "@/core/services/import-profile-service";
 import { ConversationVersionService } from "@/core/services/conversation-version-service";
 import { editMessage } from "@/core/services/message-editing";
@@ -31,6 +32,14 @@ import { deriveQAPairs } from "@/core/services/qa-pair-service";
 import { countWords } from "@/core/services/text-statistics";
 import { TaskService } from "@/core/services/task-service";
 import { WorkspaceService } from "@/core/services/workspace-service";
+import {
+  beginNoteEditing,
+  cancelNoteEditing as cancelNoteEditor,
+  createNoteEditorState,
+  getNoteEditorVisibility,
+  saveNoteEditing,
+  updateNoteDraft,
+} from "@/core/services/note-editing";
 import { BrowserAIProviderStorage } from "@/infrastructure/storage/browser-ai-provider-storage";
 import { BrowserAnalyzerRunStorage } from "@/infrastructure/storage/browser-analyzer-run-storage";
 import { BrowserPromptTemplateStorage } from "@/infrastructure/storage/browser-prompt-template-storage";
@@ -161,8 +170,9 @@ export function ConversationDetail({
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
   const [isRenaming, setIsRenaming] = useState(false);
   const [titleDraft, setTitleDraft] = useState("");
-  const [isEditingNote, setIsEditingNote] = useState(false);
-  const [noteDraft, setNoteDraft] = useState("");
+  const [conversationNoteEditor, setConversationNoteEditor] = useState(
+    createNoteEditorState(),
+  );
   const [summaryDraft, setSummaryDraft] = useState("");
   const [conclusionDraft, setConclusionDraft] = useState("");
   const [pendingQuestionsDraft, setPendingQuestionsDraft] = useState("");
@@ -383,7 +393,9 @@ export function ConversationDetail({
       lastSavedContent.current = sourceContent;
       setDraft(sourceContent);
       setTitleDraft(openedConversation.title);
-      setNoteDraft(openedConversation.note ?? "");
+      setConversationNoteEditor(
+        createNoteEditorState(openedConversation.note ?? ""),
+      );
       setSummaryDraft(openedConversation.summary ?? "");
       setConclusionDraft(openedConversation.conclusion ?? "");
       setPendingQuestionsDraft(openedConversation.pendingQuestions ?? "");
@@ -545,6 +557,12 @@ export function ConversationDetail({
     { label: "Knowledge", anchor: "section-knowledge" },
     { label: "Search", href: "/search" },
   ];
+  const conversationNoteVisibility = getNoteEditorVisibility(
+    conversationNoteEditor.mode,
+  );
+  const showAnalyzerFailureInjection = shouldShowAnalyzerFailureInjection(
+    process.env.NEXT_PUBLIC_PALOS_ANALYZER_DIAGNOSTICS,
+  );
 
   function scrollToAnchor(anchorId: string) {
     const element = document.getElementById(anchorId);
@@ -1148,12 +1166,12 @@ export function ConversationDetail({
       return;
     }
 
-    const normalizedNote = noteDraft.trim();
+    const nextEditor = saveNoteEditing(conversationNoteEditor);
+    const normalizedNote = nextEditor.savedValue.trim();
     const currentNote = state.conversation.note ?? "";
 
     if (normalizedNote === currentNote) {
-      setNoteDraft(currentNote);
-      setIsEditingNote(false);
+      setConversationNoteEditor(createNoteEditorState(currentNote));
       return;
     }
 
@@ -1164,8 +1182,9 @@ export function ConversationDetail({
     };
     createConversationStorage().save(nextConversation);
     setState({ ...state, conversation: nextConversation });
-    setNoteDraft(nextConversation.note ?? "");
-    setIsEditingNote(false);
+    setConversationNoteEditor(
+      createNoteEditorState(nextConversation.note ?? ""),
+    );
   }
 
   function cancelNoteEditing() {
@@ -1173,8 +1192,7 @@ export function ConversationDetail({
       return;
     }
 
-    setNoteDraft(state.conversation.note ?? "");
-    setIsEditingNote(false);
+    setConversationNoteEditor(cancelNoteEditor(conversationNoteEditor));
   }
 
   function saveConversationSummary() {
@@ -1358,8 +1376,16 @@ export function ConversationDetail({
         </div>
       ) : null}
 
-      <div className="flex gap-6">
-        <RoundNavigator conversationId={conversation.id} />
+      <div
+        className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-6"
+        data-testid="conversation-detail-navigator-layout"
+      >
+        <aside
+          className="sticky top-20 z-20 self-start"
+          data-testid="conversation-detail-navigator-rail"
+        >
+          <RoundNavigator conversationId={conversation.id} />
+        </aside>
         <div className="min-w-0 flex-1">
 
       {taskNotice ? (
@@ -1599,7 +1625,7 @@ export function ConversationDetail({
           <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
             <div>
               <h3 className="text-sm font-semibold text-zinc-900">Conversation Summary / 对话总结</h3>
-              <p className="mt-1 text-xs text-zinc-500">整本书摘要，由你确认后保存；Analyzer 只生成 Proposal 草稿。</p>
+              <p className="mt-1 text-xs text-zinc-500">结构化记录从 Conversation 生成或整理出的结论。</p>
             </div>
             <div className="flex flex-wrap items-center gap-2 text-xs">
               {summaryModified ? <span className="rounded-full bg-amber-100 px-2.5 py-1 font-semibold text-amber-800">● Modified</span> : summaryLastSaved ? <span className="rounded-full bg-emerald-100 px-2.5 py-1 font-semibold text-emerald-800">● Saved {summaryLastSaved}</span> : null}
@@ -1611,7 +1637,7 @@ export function ConversationDetail({
             <button className="rounded-md border border-zinc-200 bg-white px-2.5 py-1.5 text-xs font-medium text-zinc-600 hover:bg-zinc-50 disabled:opacity-30" disabled={summaryUndoStack.length === 0} onClick={undoSummary} type="button" title="撤销">↩ Undo</button>
             <button className="rounded-md border border-zinc-200 bg-white px-2.5 py-1.5 text-xs font-medium text-zinc-600 hover:bg-zinc-50 disabled:opacity-30" disabled={summaryRedoStack.length === 0} onClick={redoSummary} type="button" title="重做">↪ Redo</button>
             <button className="rounded-md border border-zinc-200 bg-white px-2.5 py-1.5 text-xs font-medium text-zinc-600 hover:bg-zinc-50" onClick={resetSummary} type="button" title="重置为已保存版本">⟳ Reset</button>
-            <span className="text-xs text-zinc-400">| Auto-save on</span>
+            <span className="text-xs text-zinc-400">| 结构化字段 · 点击“确认保存”</span>
           </div>
           <div className="grid gap-4 lg:grid-cols-3">
             <label className="text-sm font-semibold">总结<textarea className="mt-2 min-h-28 w-full rounded-lg border border-zinc-200 p-3 font-normal" onChange={(event) => { pushSummaryUndo(event.target.value); setSummaryDraft(event.target.value); setSummaryModified(true); }} value={summaryDraft} /></label>
@@ -1627,30 +1653,41 @@ export function ConversationDetail({
         <div className="mt-4 rounded-xl border border-zinc-200 bg-white p-5">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <h3 className="text-sm font-semibold text-zinc-900">备注 / Note</h3>
+              <h3 className="text-sm font-semibold text-zinc-900">Conversation Note / 对话备注</h3>
               <p className="mt-1 text-xs text-zinc-500">
-                仅记录 Conversation 级上下文，不会写入 Tags、Proposal 或 Knowledge。
+                手动记录附属于此 Conversation 的私有上下文。
               </p>
             </div>
-            {!isEditingNote ? (
+            {conversationNoteVisibility.showPreview ? (
               <button
                 className="rounded-lg border border-zinc-200 px-3 py-2 text-xs font-semibold text-zinc-700 hover:border-zinc-300 hover:text-zinc-950"
-                onClick={() => setIsEditingNote(true)}
+                onClick={() =>
+                  setConversationNoteEditor(
+                    beginNoteEditing(conversationNoteEditor),
+                  )
+                }
                 type="button"
               >
-                编辑备注
+                编辑对话备注
               </button>
             ) : null}
           </div>
-          {isEditingNote ? (
+          {conversationNoteVisibility.showEditor ? (
             <div className="mt-4">
               <textarea
-                aria-label="Conversation 备注"
+                aria-label="Conversation Note / 对话备注"
                 autoFocus
                 className="min-h-28 w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm leading-6 text-zinc-900 outline-none focus:border-zinc-400"
-                onChange={(event) => setNoteDraft(event.target.value)}
+                onChange={(event) =>
+                  setConversationNoteEditor(
+                    updateNoteDraft(
+                      conversationNoteEditor,
+                      event.target.value,
+                    ),
+                  )
+                }
                 placeholder="记录背景、后续整理方向或其它私有备注…"
-                value={noteDraft}
+                value={conversationNoteEditor.draftValue}
               />
               <div className="mt-3 flex gap-2">
                 <button
@@ -1658,7 +1695,7 @@ export function ConversationDetail({
                   onClick={saveNote}
                   type="button"
                 >
-                  保存备注
+                  保存
                 </button>
                 <button
                   className="rounded-lg border border-zinc-200 px-3 py-2 text-xs font-semibold text-zinc-600 hover:border-zinc-300"
@@ -1671,7 +1708,7 @@ export function ConversationDetail({
             </div>
           ) : (
             <p className="mt-4 whitespace-pre-wrap text-sm leading-6 text-zinc-700">
-              {conversation.note || "暂无备注。"}
+              {conversationNoteEditor.savedValue || "暂无对话备注。"}
             </p>
           )}
         </div>
@@ -2346,7 +2383,7 @@ export function ConversationDetail({
               可选：生成 AI 整理建议
             </button>
             <p className="mt-1 text-xs text-zinc-400">不影响原文、Round、Summary；失败也不会丢数据。</p>
-            {providerDetails.id === "demo" ? (
+            {providerDetails.id === "demo" && showAnalyzerFailureInjection ? (
             <button
               className="ml-2 rounded-lg border border-zinc-200 bg-white px-4 py-2.5 text-sm font-medium text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-40"
               disabled={!source || saveStatus === "editing"}

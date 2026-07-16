@@ -1,3 +1,186 @@
+# PALOS v1.6.3.1 — Current Referential Integrity and UI Regression Closure
+
+## 2026-07-16 checkpoint
+
+本轮继续使用 `fix/v1.6.3-referential-integrity` 与现有 dirty worktree；没有切分支、reset/restore、清理浏览器数据或创建 commit。改动只覆盖现存 orphan Proposal、Conversation Note 语义、Round Navigator 真实布局和 Analyze 手工失败注入入口。
+
+后续验收更新：用户已于 2026-07-16 确认 Safari manual QA 通过；此前仅剩的 Safari sticky / active-number / document-scroll smoke blocker 已关闭。
+
+### 真实 orphan Proposal 的物理来源
+
+在修改前，通过当前 `http://localhost:3000` 浏览器状态导出并核对，残留 Proposal 为：
+
+- ID：`demo-proposal-f962faf8-2086-463d-97f8-73279ff5da8e`
+- 短标题：`关于「Sprint2 验收对话-Claude」的内容提炼`
+- active storage mode：IndexedDB
+- canonical IndexedDB：Conversation / Message / Round / Source / Proposal / KnowledgeCard 均为 `0`；canonical `proposals` store **不包含**该 ID。
+- `ai-learning-os.proposals`：包含 2 条 legacy accepted Proposal，其中包含该 ID。
+- `ai-learning-os.current-proposal`：包含该 ID 的**完整 Proposal 对象**，不是仅有 ID 的选择指针。
+- 其他持久 Search index：不存在；Search 在运行时重建文档。
+
+修改前各读取路径的实际语义：
+
+- `BrowserProposalStorage.getAll()` 会返回 legacy `ai-learning-os.proposals`，因此能返回该 ID。
+- `IndexedDBProposalStorage.getAll()` 会把 `current-proposal` 完整对象合并到空 canonical cache，因而返回 1 条该 ID。
+- `createProposalStorage().getAll()` 在 IndexedDB mode 下走上述 IndexedDB adapter，同样返回 1 条该 ID。
+- Dashboard 与 Search 因 active adapter 把 stale pointer 当成实体而显示 Proposal `1`；Review 当时仍直接读 Browser storage，并可从 legacy Proposal / current selection 打开同一个 ID。
+- 因此这不是 canonical IndexedDB 中的 orphan，而是 **legacy Proposal 副本 + full-object current pointer 两个 LocalStorage 来源同时存在**，再由 adapter 合并/回退语义复活。Dashboard 的 Conversation 为 0、Proposal 为 1，根因正是 `current-proposal` 被当成 canonical entity，而不是独立 Search cache。
+
+仅记录了 ID、count、linkage 与短标题；没有输出完整 Conversation 内容。
+
+### Proposal cleanup 与一致性修复
+
+- `current-proposal` 现在只写 `{ id }`；仍可读取旧 full-object 格式以完成兼容清理，但对象内容永远不再作为 Proposal 实体或 `getAll()` 数据源。
+- Browser / IndexedDB adapter 的 `getCurrent()` 都先用 pointer ID 回查当前 active canonical collection；ID 不存在时清除 pointer 并返回 `null`。
+- IndexedDB preload 增加一次 bounded integrity cleanup：只检查 canonical Proposal drafts，通过 `conversationId`、`sourceId`、`sourceRoundId`、`sourceMessageIds` 核对 Conversation / Source / Round / Message；删除 linkage 已失效的 Proposal ID，并清理 stale current pointer。
+- preload cleanup 不扫描/重写其他业务 store，不删除 accepted formal KnowledgeCard，也不删除 IndexedDB mode 下的 legacy `ai-learning-os.proposals`。legacy 数据仍可供 LocalStorage mode 使用，但不会合并进 IndexedDB canonical 结果。
+- 单删和原子批删继续通过同一 dependency collector 处理全部四类 Proposal linkage；只通过 deleted Round 或 deleted Message 关联的 Proposal 也会删除。
+- Dashboard、Search、Review 均使用 active storage factory；Review 按 URL ID 回查 canonical storage，既不回退到 pointer full object，也不保留旧 component state。
+- 删除后的 direct URL 显示 `Proposal 不存在或已删除`，且不渲染旧 title、summary、evidence 或 action。
+
+### Conversation Summary / Conversation Note
+
+修改前真实页面左侧是 `Conversation Summary / 对话总结`，右侧却只有泛化的 `备注 / Note`，两者都呈现为可修改内容，容易被理解为重复编辑器；此前处理的是 Round Note，未解决这个 Conversation-level 语义问题。
+
+最终交互：
+
+- 左侧保持 `Conversation Summary / 对话总结`：说明为“结构化记录从 Conversation 生成或整理出的结论”，保留结构化字段与现有确认保存机制。
+- 右侧改为 `Conversation Note / 对话备注`：说明为“手动记录附属于此 Conversation 的私有上下文”。
+- 默认只读预览与 `编辑对话备注`；进入编辑态后只出现一个 textarea、`保存`、`取消`；preview/editor 互斥。
+- 继续使用现有 `Conversation.note` 字段与可靠 save 路径，没有 schema 变更、富文本、第二个 Inspector editor 或 Summary/Note 字段合并。
+
+### Round Navigator 的真实布局修复
+
+上一版把 `sticky top-4 self-start` 放在 Navigator 组件自身，仍处于页面 flex 子项语境，并与全局 sticky header 的高度冲突；Safari 实页没有形成稳定、清晰的 page-level sticky rail。sticky 的所有权与完整详情页边界没有被布局结构显式保证，这是“CSS 类存在但真实页面仍随正文移动”的原因。
+
+新布局：
+
+- Conversation Detail 使用 page-level 两列 grid；左侧是显式 `<aside class="sticky top-20 self-start">`，右侧包含 Raw Timeline、Context、Summary/Note、Assets、History、Source、Rounds、Proposal、Knowledge 的完整详情内容。
+- sticky parent 因此跨越整页详情，而不是在某个短 section 结束；`top-20` 避开全局 header。
+- 实测 ancestor chain 从 `aside` 到 `html` 均无 trapping `overflow`、`transform`、`filter` 或 `contain`；Navigator 自身有显式 max-height 与 internal `overflow-y-auto`。
+- collapsed 实测在 `scrollY=3691.5` 与 `4827.5` 时 rail top 均为 `80px`；expanded 在 `scrollY=4633.5` 与 `4895.5` 时 rail top 也均为 `80px`。
+- IntersectionObserver 只更新 active round ID；后续 effect 只调用 Navigator internal container 的 `scrollTo()`。Observer 路径不存在 `window.scrollTo()`、`element.scrollIntoView()` 或其他 document scroll。
+- 只有用户点击编号时才使用显式 element top + `88px` header offset 滚动正文；不再使用 `block: "center"`。
+
+### “模拟失败”
+
+该按钮是 Demo Analyzer 的手工 failure injection，用于测试真实 error banner、Retry、provider switch 与 timeout UI，不是正常业务入口。底层失败路径保留，但按钮默认隐藏；仅当显式设置 `NEXT_PUBLIC_PALOS_ANALYZER_DIAGNOSTICS=1` 时显示。普通本地开发与 production 均不会默认出现，真实 analyzer error handling 未删除。
+
+### Tests
+
+新增/更新回归覆盖：
+
+- IndexedDB canonical orphan（包括仅 `sourceRoundId` / `sourceMessageIds` linkage）清理。
+- stale legacy Proposal 不进入 IndexedDB mode，full-object pointer 不能复活 entity，pointer 被清除。
+- `createProposalStorage()` / Dashboard-equivalent count / Search docs / Review lookup 全部为 0。
+- valid Proposal 在删除 owner 前保留；删除 owner 后仅删除关联 Proposal，unrelated Proposal 保持。
+- valid/deleted direct Review URL 与 stale pointer fallback。
+- Conversation Note preview/edit 互斥、cancel restore、save persist、唯一 textarea，以及 Summary/Note label 区分。
+- Navigator observer/internal scroll 与 user/document scroll 合约、visible/above/below contained scroll、page-level layout source contract。
+- failure injection 默认隐藏、显式 diagnostics flag 可见、真实 Retry/provider/timeout error UI 仍存在。
+
+当前完整测试数为 5 files / 159 tests。
+
+### 真实浏览器 QA
+
+Codex in-app browser 在同一 `localhost:3000` origin 上实际访问了 IndexedDB，并跨 reload 与 production server restart 保持数据；没有清浏览器数据。
+
+1. 初始 orphan cleanup 后：Dashboard `Conversation 0 / Messages 0 / Knowledge 0 / Proposal 0`；Search 无旧 Proposal；旧 URL `/review?proposal=demo-proposal-f962faf8-2086-463d-97f8-73279ff5da8e` 显示 `Proposal 不存在或已删除`。
+2. 通过 UI 创建 `v1.6.3.1 QA Conversation`（2 Messages / 1 Round），生成 Proposal `source-proposal-eed7b3b4-0eb7-42fb-b93b-7e8b5a80c881`；Dashboard Proposal 1、Search 1、Review direct URL 可打开同一 Proposal。
+3. Note UI 显示最终两组 label；取消不会保留草稿，保存 `v1.6.3.1 QA private context` 后 reload 仍存在，任一时刻只有一个 Note textarea。
+4. Navigator collapsed / expanded 均保持 `80px` rail top；滚动 settle 后 `scrollY` 不反向变化；普通 UI 未出现“模拟失败”。
+5. 通过 UI 删除 QA Conversation 并 reload：Conversation list 0；Dashboard `Conversation 0 / Messages 0 / Proposal 0`；Search 无 Proposal；刚生成的 direct URL 显示 `Proposal 不存在或已删除`。
+
+Codex 工具执行上述同源浏览器 QA 时，无法在不读取用户其他 Safari tab URL 的情况下定位 authoritative localhost tab；该读取被隐私保护拒绝。因此上述记录只代表真实浏览器 IndexedDB QA，不把工具结果冒充 Safari app QA。随后用户已完成 Safari 专项手工验收并确认通过，collapsed / expanded rail、active number、document scroll、Dashboard/Search/Review 以及 Note / failure-injection 文案的最终 blocker 已关闭。
+
+### 关键文件
+
+- Proposal integrity / pointer：`src/core/services/conversation-referential-integrity.ts`、`src/infrastructure/storage/flow-pointers.ts`、`src/infrastructure/storage/indexeddb/preload.ts`、Browser/IndexedDB Proposal adapters、`canonical-operations.ts`
+- Dashboard/Search/Review：`src/core/services/global-search.ts`、`search-index-service.ts`、`proposal-review-lookup.ts`、`src/app/review/review-proposal.tsx`
+- Note / Navigator / diagnostics：`src/app/conversation/[id]/conversation-detail.tsx`、`round-navigator.tsx`、`conversation-workspace-mode.tsx`、`round-workspace.tsx`、`note-editing.ts`、`round-navigation.ts`、`analyzer-diagnostics.ts`
+- Existing delete/provenance support：Conversation list/workspace service、AnalyzerRun storage、Knowledge list/detail、Source adapters
+- Tests：`tests/indexeddb-reliability.test.ts`、`tests/v163-ui-regressions.test.ts`
+
+### Verification 与 commit 建议
+
+最终 gate：`npm run lint` passed；`npm run build` passed（19 routes）；`npm test -- --run` passed（5 files / 159 tests）；`git diff --check` passed。Safari manual QA 已由用户确认通过，提交阻塞项已关闭；本工作树适合整理为单独的 integrity / UI closure commit。
+
+---
+
+# PALOS v1.6.3 — Referential Integrity, Note UX, and Round Navigation Handoff
+
+## 2026-07-14 checkpoint
+
+本轮在 `fix/v1.6.3-referential-integrity`（基于 `v1.6.2-import-count-parity`）完成最小范围实现；未修改 IndexedDB schema、canonical store 集合、ChatGPT parser 或 v1.6.1 的单次 `replaceStores` 原子事务模型，未创建 commit。
+
+### Confirmed root cause
+
+- Conversation 删除只按 `proposal.conversationId` / `proposal.sourceId` 过滤，遗漏只通过 `sourceRoundId` 或 `sourceMessageIds` 关联的 Proposal。
+- `current-proposal` 是 LocalStorage 中的完整 Proposal 对象；Browser / IndexedDB Proposal adapter 的 `getAll()` 会把该指针重新合并进集合。canonical Proposal 已删除后，旧指针因此会被 Review 读取，并重新进入运行时 Search 文档。
+- Review 页面此前直接实例化 Browser storage，绕过 IndexedDB 默认 storage factory。
+- Search 没有持久化索引；幽灵结果的根因是残留 Proposal / 指针被 storage adapter 重新暴露，不是独立 Search 数据库。
+
+Proposal 的真实关联字段为：`conversationId?`、`sourceId?`、`sourceRoundId?`、`sourceMessageIds?`；`targetKnowledgeId?` 是更新目标，不是来源引用。不存在 `sourceRef` 或 `targetEntityId`。
+
+### 删除语义
+
+- 单删与批删统一：Conversation、Message、Round、Source、Proposal、ConversationVersion 删除；AnalyzerRun 按 Conversation / Source / Round / Message 引用清理；Conversation/Round Asset metadata 清理。
+- `current-source`、`current-proposal` 在 canonical commit 后按本次 dependency IDs 清理。
+- Task 延续既定语义，保留来源快照；不擅自删除。
+- 正式 KnowledgeCard 是独立 aggregate，单删和批删均保留。其历史 provenance ID 仍可留作快照，但 Search、Knowledge 列表和 Detail 只有在 Conversation/Round 仍存在时才生成实时跳转；否则明确显示来源已删除。
+- Proposal / 未确认草稿随 Conversation 删除，不与正式 KnowledgeCard 混同。
+- post-delete verification 现在核对请求 ID、每类 dependent ID、全局 orphan 数、cache/IndexedDB count、Search 重建、Review lookup、current pointers 与 pending write count。
+
+### Note UX
+
+- 根因：Workspace 模式对同一个 `Round.note` 同时展示正文只读预览和右侧 Inspector 无标签编辑器。
+- 新交互：正文位置默认只读 `Round Note`；点击“编辑备注”后原位置显示 textarea、保存、取消；预览与编辑器互斥；右侧重复入口移除；继续使用现有 `Round.note` 字段和手动保存。
+
+### Round Navigator
+
+- 根因：Navigator 项点击使用 `scrollIntoView({ block: "center" })`，且 sticky 放在内部子节点，导航内部没有独立 active-item 滚动策略；一旦自动 active 更新接入同一路径，会形成 document scroll → active update → document scroll 的反馈环。
+- Navigator 外层现在直接 `sticky top-4 self-start`；IntersectionObserver 只更新 active ID。
+- active item 可见性通过 `calculateContainedScrollTop()` 计算，并只调用 Navigator overflow container 的 `scrollTo()`；Observer 路径从不滚动 document。
+- 只有用户点击 Round 才调用 `window.scrollTo()` 定位正文，并使用固定 88px header offset。collapsed / expanded 共用同一内部滚动规则；空 Round 文案不变。
+
+### 关键文件
+
+- Referential integrity：`src/core/services/conversation-referential-integrity.ts`、`src/core/services/conversation-workspace.ts`、`src/infrastructure/storage/indexeddb/canonical-operations.ts`
+- Pointer / adapter：`src/infrastructure/storage/flow-pointers.ts`、Browser/IndexedDB Proposal 与 Source adapters
+- Review / Search / Knowledge：`src/app/review/review-proposal.tsx`、`src/core/services/proposal-review-lookup.ts`、`src/core/services/search-index-service.ts`、Knowledge list/detail
+- Note：`src/core/services/note-editing.ts`、`src/app/conversation/[id]/conversation-workspace-mode.tsx`
+- Navigator：`src/core/services/round-navigation.ts`、`src/app/conversation/[id]/round-navigator.tsx`、`round-workspace.tsx`
+- Tests：`tests/indexeddb-reliability.test.ts`、`tests/v163-ui-regressions.test.ts`
+
+### 自动化验证
+
+截至本 checkpoint：
+
+```text
+npm run lint       passed
+npm run build      passed, 19 routes
+npm test -- --run  passed, 5 files / 151 tests
+git diff --check   passed
+```
+
+新增回归覆盖 Proposal 指针复活、round/message-only Proposal、Review not-found、Search 重建、Knowledge 保留、100 Conversation 原子批量删除与 reload、pendingWriteCount、AnalyzerRun/Asset sidecar、Task 保留、Note 状态，以及 Navigator contained-scroll 纯函数。
+
+### 限制与下一步
+
+- 当前 Codex 内置浏览器执行环境报告 `indexedDB` 不可用，因此无法在本轮环境中完成用户要求的“真实浏览器 IndexedDB”自动复现；Vitest 覆盖的是完整 IDB transaction/cache harness，不能冒充真实浏览器验证。
+- commit 前必须在支持 IndexedDB 的桌面浏览器完成下方 smoke test；在该项完成前不建议 commit。
+- 未创建 commit。
+
+### Minimal manual QA
+
+1. IndexedDB 模式创建 Conversation + Message/Round/Source/Proposal；确认 Review 与 Search 可见。
+2. 分别单删与 100 条批删，刷新后确认 Proposal、Review URL、Search、current pointers 不恢复，正式 Knowledge 仍可打开且无失效来源跳转。
+3. 模拟 AnalyzerRun / Conversation 与 Round Asset metadata，确认删除后 metadata 清理而真实文件不受影响；Task 保留来源快照。
+4. Workspace 模式验证 Round Note 默认预览、编辑/取消/保存互斥，右侧无第二编辑器，刷新后内容保持。
+5. 长 Conversation 中持续滚动正文，确认 collapsed / expanded Navigator 均固定、只在内部滚动；点击 Round 使用稳定 header offset，无页面向上跳或抖动。
+
+---
+
 # PALOS v1.4 Finalization — IndexedDB Default Storage + Unified Import UX Handoff
 
 ## 2026-07-08 checkpoint

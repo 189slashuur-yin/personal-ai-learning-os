@@ -6,6 +6,14 @@ import type { Round } from "@/core/entities/round";
 import { RoundService } from "@/core/services/round-service";
 import { RoundKnowledgeService } from "@/core/services/round-knowledge-service";
 import { AssetService } from "@/core/services/asset-service";
+import {
+  beginNoteEditing,
+  cancelNoteEditing,
+  createNoteEditorState,
+  getNoteEditorVisibility,
+  saveNoteEditing,
+  updateNoteDraft,
+} from "@/core/services/note-editing";
 import { BrowserAssetStorage } from "@/infrastructure/storage/browser-asset-storage";
 import { BrowserKnowledgeCardStorage } from "@/infrastructure/storage/browser-knowledge-card-storage";
 import { BrowserProposalStorage } from "@/infrastructure/storage/browser-proposal-storage";
@@ -22,14 +30,16 @@ export function ConversationWorkspaceMode({ conversationId, onAnalyzeRound }: { 
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<"order" | "updated" | "knowledge">("order");
   const [analyzing, setAnalyzing] = useState(false);
-  const [draftNotes, setDraftNotes] = useState<Record<string, string>>({});
+  const [noteEditor, setNoteEditor] = useState(createNoteEditorState());
+  const [noteEditorRoundId, setNoteEditorRoundId] = useState<string | null>(
+    null,
+  );
   const [draftSummaries, setDraftSummaries] = useState<Record<string, string>>({});
   const [showRoundList, setShowRoundList] = useState(true);
 
   const reload = useCallback(() => {
     const nextRounds = createRoundStorage().getByConversationId(conversationId);
     setRounds(nextRounds);
-    setDraftNotes(Object.fromEntries(nextRounds.map((round) => [round.id, round.note ?? ""])));
     setDraftSummaries(Object.fromEntries(nextRounds.map((round) => [round.id, round.summary ?? ""])));
     setSelectedId((current) => current && nextRounds.some((round) => round.id === current) ? current : nextRounds[0]?.id ?? null);
   }, [conversationId]);
@@ -43,14 +53,37 @@ export function ConversationWorkspaceMode({ conversationId, onAnalyzeRound }: { 
   const proposals = new BrowserProposalStorage().getAll();
   const assets = new BrowserAssetStorage().getAll();
   const selected = rounds.find((round) => round.id === selectedId) ?? null;
+  const activeNoteEditor =
+    selected && noteEditorRoundId === selected.id
+      ? noteEditor
+      : createNoteEditorState(selected?.note ?? "");
+  const noteVisibility = getNoteEditorVisibility(activeNoteEditor.mode);
   const visible = useMemo(() => rounds
     .filter((round) => `${round.title} ${round.question} ${round.answer} ${round.note ?? ""}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()))
     .sort((left, right) => sort === "updated" ? right.updatedAt.localeCompare(left.updatedAt) : sort === "knowledge" ? knowledge.filter((card) => card.sourceRoundId === right.id).length - knowledge.filter((card) => card.sourceRoundId === left.id).length : left.order - right.order), [knowledge, query, rounds, sort]);
 
   function saveNote() {
     if (!selected) return;
-    new RoundService(createRoundStorage()).updateRound(selected.id, { note: draftNotes[selected.id] ?? "" });
+    const next = saveNoteEditing(activeNoteEditor);
+    new RoundService(createRoundStorage()).updateRound(selected.id, {
+      note: next.savedValue,
+    });
+    setNoteEditorRoundId(selected.id);
+    setNoteEditor(next);
     reload();
+  }
+
+  function startNoteEditing() {
+    if (!selected) return;
+    setNoteEditorRoundId(selected.id);
+    setNoteEditor(
+      beginNoteEditing(createNoteEditorState(selected.note ?? "")),
+    );
+  }
+
+  function cancelActiveNoteEditing() {
+    setNoteEditor(cancelNoteEditing(activeNoteEditor));
+    setNoteEditorRoundId(null);
   }
 
   function saveSummary() {
@@ -141,10 +174,55 @@ export function ConversationWorkspaceMode({ conversationId, onAnalyzeRound }: { 
               </div>
             ) : null}
 
-            {/* Note — always visible */}
+            {/* Round Note — preview and editor are mutually exclusive. */}
             <div className="mt-4 rounded-lg bg-amber-50 p-4">
-              <p className="text-xs font-semibold text-amber-800">Note</p>
-              <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-amber-950">{selected.note || "暂无备注。"}</p>
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-xs font-semibold text-amber-800">Round Note</p>
+                {noteVisibility.showPreview ? (
+                  <button
+                    className="text-xs font-semibold text-amber-800 hover:text-amber-950"
+                    onClick={startNoteEditing}
+                    type="button"
+                  >
+                    编辑备注
+                  </button>
+                ) : null}
+              </div>
+              {noteVisibility.showEditor ? (
+                <div className="mt-3">
+                  <textarea
+                    aria-label="Round Note"
+                    autoFocus
+                    className="min-h-24 w-full rounded-lg border border-amber-200 bg-white p-3 text-sm"
+                    onChange={(event) =>
+                      setNoteEditor(
+                        updateNoteDraft(activeNoteEditor, event.target.value),
+                      )
+                    }
+                    value={activeNoteEditor.draftValue}
+                  />
+                  <div className="mt-2 flex gap-2">
+                    <button
+                      className="rounded-lg bg-zinc-950 px-3 py-2 text-xs font-semibold text-white"
+                      onClick={saveNote}
+                      type="button"
+                    >
+                      保存
+                    </button>
+                    <button
+                      className="rounded-lg border border-amber-200 bg-white px-3 py-2 text-xs font-semibold text-amber-900"
+                      onClick={cancelActiveNoteEditing}
+                      type="button"
+                    >
+                      取消
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-amber-950">
+                  {activeNoteEditor.savedValue || "暂无备注。"}
+                </p>
+              )}
             </div>
 
             {/* Round navigation */}
@@ -213,17 +291,6 @@ export function ConversationWorkspaceMode({ conversationId, onAnalyzeRound }: { 
           <>
             <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500">Round Inspector</p>
             <h2 className="mt-2 text-xl font-semibold">{selected.title}</h2>
-
-            {/* Round Note */}
-            <label className="mt-5 block text-sm font-semibold">
-              Round Note
-              <textarea
-                className="mt-2 min-h-24 w-full rounded-lg border border-zinc-200 p-3 text-sm"
-                onChange={(event) => setDraftNotes((current) => ({ ...current, [selected.id]: event.target.value }))}
-                value={draftNotes[selected.id] ?? ""}
-              />
-            </label>
-            <button className="mt-2 rounded-lg bg-zinc-950 px-3 py-2 text-xs font-semibold text-white" onClick={saveNote} type="button">保存 Note</button>
 
             {/* Round Summary */}
             <div className="mt-5 rounded-lg bg-zinc-50 p-4">

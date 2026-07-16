@@ -14,14 +14,19 @@ import {
 } from "@/core/services/tag-management";
 import { TaskService } from "@/core/services/task-service";
 import { RoundKnowledgeService } from "@/core/services/round-knowledge-service";
-import { BrowserConversationStorage } from "@/infrastructure/storage/browser-conversation-storage";
-import { BrowserKnowledgeCardStorage } from "@/infrastructure/storage/browser-knowledge-card-storage";
-import { BrowserMessageStorage } from "@/infrastructure/storage/browser-message-storage";
-import { BrowserProposalStorage } from "@/infrastructure/storage/browser-proposal-storage";
 import { BrowserTagStorage } from "@/infrastructure/storage/browser-tag-storage";
 import { BrowserTaskStorage } from "@/infrastructure/storage/browser-task-storage";
 import { BrowserWorkspaceStorage } from "@/infrastructure/storage/browser-workspace-storage";
-import { BrowserRoundStorage } from "@/infrastructure/storage/browser-round-storage";
+import {
+  createConversationStorage,
+  createKnowledgeCardStorage,
+  createMessageStorage,
+  createProposalStorage,
+  createRoundStorage,
+  ensureIndexedDBLoaded,
+  getStorageMode,
+} from "@/infrastructure/storage/storage-factory";
+import { flushCachesToIndexedDB } from "@/infrastructure/storage/indexeddb/preload";
 
 type Draft = Pick<
   KnowledgeCard,
@@ -57,53 +62,67 @@ export function KnowledgeDetail({ cardId }: { cardId: string }) {
   const [tagError, setTagError] = useState<string | null>(null);
   const [taskNotice, setTaskNotice] = useState<string | null>(null);
   const [taskError, setTaskError] = useState<string | null>(null);
+  const [knowledgeError, setKnowledgeError] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<"idle" | "dirty" | "saved">(
     "idle",
   );
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      const storedCard = new BrowserKnowledgeCardStorage().getById(cardId);
-      const proposal = storedCard
-        ? new BrowserProposalStorage().getById(storedCard.proposalId)
-        : null;
-      const conversationId =
-        storedCard?.sourceConversationId ?? proposal?.conversationId;
-      const conversation = conversationId
-        ? new BrowserConversationStorage().getById(conversationId)
-        : null;
-      const roundId = storedCard?.sourceRoundId ?? proposal?.sourceRoundId ?? null;
-      const round = roundId ? new BrowserRoundStorage().getById(roundId) : null;
-      setCard(storedCard);
-      setTags(new BrowserTagStorage().getAll());
-      setSourceConversationTitle(conversation?.title ?? null);
-      setSourceRoundId(roundId);
-      setSourceRound(round);
-      setSourceMessageCount(
-        storedCard?.sourceMessageCount ?? proposal?.sourceMessageIds?.length ?? null,
-      );
-      const sourceMessageIds =
-        storedCard?.sourceMessageIds ?? proposal?.sourceMessageIds ?? [];
-      const availableMessageIds = new Set(
-        new BrowserMessageStorage().getAll().map((message) => message.id),
-      );
-      setMissingSourceMessageCount(
-        sourceMessageIds.filter((messageId) => !availableMessageIds.has(messageId)).length,
-      );
-      setSourceEvidenceExcerpt(
-        storedCard?.sourceEvidenceExcerpt ?? proposal?.sourceEvidence.excerpt ?? null,
-      );
-      setDraft(
-        storedCard
-          ? {
-              title: storedCard.title,
-              content: storedCard.content,
-              summary: storedCard.summary,
-              status: storedCard.status,
-              tagIds: storedCard.tagIds,
-            }
-          : null,
-      );
+      async function load() {
+        if (getStorageMode() === "indexedDB") await ensureIndexedDBLoaded();
+        const storedCard = createKnowledgeCardStorage().getById(cardId);
+        const proposal = storedCard
+          ? createProposalStorage().getById(storedCard.proposalId)
+          : null;
+        const conversationId =
+          storedCard?.sourceConversationId ?? proposal?.conversationId;
+        const conversation = conversationId
+          ? createConversationStorage().getById(conversationId)
+          : null;
+        const roundId = storedCard?.sourceRoundId ?? proposal?.sourceRoundId ?? null;
+        const round = roundId ? createRoundStorage().getById(roundId) : null;
+        setCard(storedCard);
+        setTags(new BrowserTagStorage().getAll());
+        setSourceConversationTitle(conversation?.title ?? null);
+        setSourceRoundId(roundId);
+        setSourceRound(round);
+        setSourceMessageCount(
+          storedCard?.sourceMessageCount ??
+            proposal?.sourceMessageIds?.length ??
+            null,
+        );
+        const sourceMessageIds =
+          storedCard?.sourceMessageIds ?? proposal?.sourceMessageIds ?? [];
+        const availableMessageIds = new Set(
+          createMessageStorage().getAll().map((message) => message.id),
+        );
+        setMissingSourceMessageCount(
+          sourceMessageIds.filter(
+            (messageId) => !availableMessageIds.has(messageId),
+          ).length,
+        );
+        setSourceEvidenceExcerpt(
+          storedCard?.sourceEvidenceExcerpt ??
+            proposal?.sourceEvidence.excerpt ??
+            null,
+        );
+        setDraft(
+          storedCard
+            ? {
+                title: storedCard.title,
+                content: storedCard.content,
+                summary: storedCard.summary,
+                status: storedCard.status,
+                tagIds: storedCard.tagIds,
+              }
+            : null,
+        );
+      }
+      void load().catch(() => {
+        setCard(null);
+        setDraft(null);
+      });
     }, 0);
     return () => window.clearTimeout(timer);
   }, [cardId]);
@@ -127,7 +146,13 @@ export function KnowledgeDetail({ cardId }: { cardId: string }) {
     setSaveStatus("dirty");
   }
 
-  function saveKnowledge() {
+  async function persistCanonicalKnowledgeState() {
+    if (getStorageMode() === "indexedDB") {
+      await flushCachesToIndexedDB();
+    }
+  }
+
+  async function saveKnowledge() {
     if (!card || !draft || saveStatus !== "dirty") return;
 
     const timestamp = new Date().toISOString();
@@ -141,12 +166,21 @@ export function KnowledgeDetail({ cardId }: { cardId: string }) {
           : undefined,
     };
 
-    new BrowserKnowledgeCardStorage().update(nextCard);
-    setCard(nextCard);
-    setSaveStatus("saved");
+    try {
+      setKnowledgeError(null);
+      createKnowledgeCardStorage().update(nextCard);
+      await persistCanonicalKnowledgeState();
+      setCard(nextCard);
+      setSaveStatus("saved");
+    } catch (error) {
+      setSaveStatus("dirty");
+      setKnowledgeError(
+        error instanceof Error ? error.message : "Knowledge 保存失败。",
+      );
+    }
   }
 
-  function deleteKnowledge() {
+  async function deleteKnowledge() {
     if (
       !window.confirm(
         "彻底删除这条知识？此操作无法撤销；关联 Task 会保留，并显示 source missing。",
@@ -161,17 +195,33 @@ export function KnowledgeDetail({ cardId }: { cardId: string }) {
     ) {
       return;
     }
-    new BrowserKnowledgeCardStorage().remove(cardId);
-    router.push("/knowledge");
+    try {
+      setKnowledgeError(null);
+      createKnowledgeCardStorage().remove(cardId);
+      await persistCanonicalKnowledgeState();
+      router.push("/knowledge");
+    } catch (error) {
+      setKnowledgeError(
+        error instanceof Error ? error.message : "Knowledge 删除失败。",
+      );
+    }
   }
 
-  function duplicateKnowledge() {
+  async function duplicateKnowledge() {
     if (!card) return;
-    const copy = new RoundKnowledgeService(
-      new BrowserKnowledgeCardStorage(),
-      new BrowserProposalStorage(),
-    ).duplicate(card);
-    router.push(`/knowledge/${copy.id}`);
+    try {
+      setKnowledgeError(null);
+      const copy = new RoundKnowledgeService(
+        createKnowledgeCardStorage(),
+        createProposalStorage(),
+      ).duplicate(card);
+      await persistCanonicalKnowledgeState();
+      router.push(`/knowledge/${copy.id}`);
+    } catch (error) {
+      setKnowledgeError(
+        error instanceof Error ? error.message : "Knowledge 复制失败。",
+      );
+    }
   }
 
   function exportKnowledge() { if (!card || !draft) return; const content = `# ${draft.title}\n\n${draft.summary}\n\n${draft.content}`; const blob = new Blob([content], { type: "text/markdown" }); const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = `${draft.title}.md`; link.click(); URL.revokeObjectURL(link.href); }
@@ -183,11 +233,11 @@ export function KnowledgeDetail({ cardId }: { cardId: string }) {
     setTaskError(null);
 
     try {
-      const proposal = new BrowserProposalStorage().getById(card.proposalId);
+      const proposal = createProposalStorage().getById(card.proposalId);
       const conversationId =
         card.sourceConversationId ?? proposal?.conversationId;
       const workspaceId = conversationId
-        ? new BrowserConversationStorage().getById(conversationId)?.workspaceId
+        ? createConversationStorage().getById(conversationId)?.workspaceId
         : undefined;
 
       new TaskService(
@@ -291,6 +341,11 @@ export function KnowledgeDetail({ cardId }: { cardId: string }) {
       ) : null}
       {taskError ? (
         <p className="mt-5 rounded-xl border border-red-200 bg-red-50 px-5 py-4 text-sm text-red-700" role="alert">{taskError}</p>
+      ) : null}
+      {knowledgeError ? (
+        <p className="mt-5 rounded-xl border border-red-200 bg-red-50 px-5 py-4 text-sm text-red-700" role="alert">
+          {knowledgeError}
+        </p>
       ) : null}
 
       <article className="mt-6 overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm">

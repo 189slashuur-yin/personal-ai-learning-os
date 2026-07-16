@@ -111,17 +111,19 @@ function getOrphanDependentCounts(
   );
   const sources = storages.sources.getAll();
   const sourceIds = new Set(sources.map((source) => source.id));
+  const messages = storages.messages.getAll();
+  const messageIds = new Set(messages.map((message) => message.id));
+  const rounds = storages.rounds?.getAll() ?? [];
+  const roundIds = new Set(rounds.map((round) => round.id));
   const proposals = storages.proposals.getAll();
   const proposalIds = new Set(proposals.map((proposal) => proposal.id));
 
   return {
-    messages: storages.messages
-      .getAll()
+    messages: messages
       .filter((message) => !conversationIds.has(message.conversationId)).length,
-    rounds:
-      storages.rounds
-        ?.getAll()
-        .filter((round) => !conversationIds.has(round.conversationId)).length ?? 0,
+    rounds: rounds.filter(
+      (round) => !conversationIds.has(round.conversationId),
+    ).length,
     sources: sources.filter(
       (source) =>
         Boolean(
@@ -134,7 +136,11 @@ function getOrphanDependentCounts(
         Boolean(
           (proposal.conversationId &&
             !conversationIds.has(proposal.conversationId)) ||
-            (proposal.sourceId && !sourceIds.has(proposal.sourceId)),
+            (proposal.sourceId && !sourceIds.has(proposal.sourceId)) ||
+            (proposal.sourceRoundId && !roundIds.has(proposal.sourceRoundId)) ||
+            proposal.sourceMessageIds?.some(
+              (messageId) => !messageIds.has(messageId),
+            ),
         ),
     ).length,
     knowledgeCards: storages.knowledgeCards
@@ -234,15 +240,51 @@ export function ConversationList() {
 
   async function handleDelete(conversation: Conversation) {
     const confirmed = window.confirm(
-      `确定删除「${conversation.title}」吗？关联的 Rounds、Messages、Source、Proposal、KnowledgeCard、AnalyzerRun、Conversation History 与 Asset metadata 也会删除；真实本地文件不会删除，关联 Task 会保留并显示 source missing。`,
+      `确定删除「${conversation.title}」吗？关联的 Rounds、Messages、Source、Proposal、AnalyzerRun、Conversation History 与 Asset metadata 会删除；已确认 Knowledge 和关联 Task 会保留，但来源会显示已删除。真实本地文件不会删除。`,
     );
 
     if (!confirmed) {
       return;
     }
 
-    deleteConversationWorkspace(conversation.id, createWorkspaceStorages());
-    await persistAndReload();
+    let sidecarCleanupFailures: string[] = [];
+    try {
+      if (getStorageMode() === "indexedDB") {
+        const result = await bulkDeleteCanonicalConversations([
+          conversation.id,
+        ]);
+        sidecarCleanupFailures = deleteConversationSidecarMetadata(
+          result.deletedDependencyIds,
+          {
+            analyzerRuns: new BrowserAnalyzerRunStorage(),
+            assets: new BrowserAssetStorage(),
+          },
+        );
+        const data = loadConversationData();
+        setItems(data.items);
+        setWorkspaces(data.workspaces);
+      } else {
+        const result = deleteConversationWorkspace(
+          conversation.id,
+          createWorkspaceStorages(),
+        );
+        sidecarCleanupFailures = result.sidecarCleanupFailures;
+        await persistAndReload();
+      }
+    } catch (error) {
+      console.error("[handleDelete] post-delete integrity verification failed", error);
+      alert(
+        "Conversation 删除未通过完整性验证。请复制诊断信息并刷新后复查；不会显示删除成功。",
+      );
+      return;
+    }
+
+    if (sidecarCleanupFailures.length > 0) {
+      console.error("[handleDelete] sidecar cleanup failures", sidecarCleanupFailures);
+      alert(
+        `Conversation 主数据已删除，但 ${sidecarCleanupFailures.length} 个 sidecar 清理失败。请复制诊断信息后重试。`,
+      );
+    }
 
     // Verify deletion
     const verifyStorages = createWorkspaceStorages();
@@ -310,7 +352,7 @@ export function ConversationList() {
         `选中数量：${ids.length}\n` +
         `其中 0 Message / 0 Round 的数量：${emptyCount}\n\n` +
         `删除后将同时移除关联的 Messages、Rounds、Source 和 Proposals。\n` +
-        `Knowledge 不会自动删除，但可能产生孤立 Knowledge。`,
+        `已确认 Knowledge 会保留，并显示来源已删除；关联 Task 也会保留。`,
     );
 
     if (!confirmed) return;
@@ -355,6 +397,8 @@ export function ConversationList() {
               recordBulkDiagnostic(operation, "before flush", data);
             } else if (phase === "after-replace") {
               recordBulkDiagnostic(operation, "after flush", data);
+            } else if (phase === "after-flow-pointer-cleanup") {
+              recordBulkDiagnostic(operation, "after flow pointer cleanup", data);
             } else if (phase === "after-clear-caches") {
               recordBulkDiagnostic(operation, "after clearCaches", data);
             } else if (phase === "after-preload") {
@@ -362,7 +406,17 @@ export function ConversationList() {
             }
           },
         );
-        beforeResult = canonicalResult.deletion;
+        const sidecarCleanupFailures = deleteConversationSidecarMetadata(
+          canonicalResult.deletedDependencyIds,
+          {
+            analyzerRuns: new BrowserAnalyzerRunStorage(),
+            assets: new BrowserAssetStorage(),
+          },
+        );
+        beforeResult = {
+          ...canonicalResult.deletion,
+          sidecarCleanupFailures,
+        };
         notDeleted = canonicalResult.verification.remainingRequestedIds;
         orphanDependentCounts = {
           ...canonicalResult.verification.orphanDependentCounts,
@@ -372,12 +426,11 @@ export function ConversationList() {
           Object.entries(canonicalResult.verification.indexedDBCounts),
         );
 
-        // Preserve the existing LocalStorage sidecar semantics without
-        // involving canonical IndexedDB adapters in the bulk transaction.
-        deleteConversationSidecarMetadata(ids, {
-          analyzerRuns: new BrowserAnalyzerRunStorage(),
-          assets: new BrowserAssetStorage(),
-        });
+        if (sidecarCleanupFailures.length > 0) {
+          recordBulkDiagnostic(operation, "sidecar cleanup failed", {
+            failures: sidecarCleanupFailures,
+          });
+        }
       } else {
         beforeResult = batchDeleteConversationWorkspace(
           ids,
@@ -481,6 +534,12 @@ export function ConversationList() {
       ...beforeResult,
       deletedConversations: actualDeletedCount,
     });
+
+    if (beforeResult.sidecarCleanupFailures.length > 0) {
+      alert(
+        `Canonical 数据已删除，但 ${beforeResult.sidecarCleanupFailures.length} 个 sidecar 清理失败。请复制诊断信息后复查。`,
+      );
+    }
 
     const data = loadConversationData();
     setItems(data.items);

@@ -1,4 +1,23 @@
 import type { BatchDeleteResult } from "@/core/services/conversation-workspace";
+import type { Conversation } from "@/core/entities/conversation";
+import type { ConversationVersion } from "@/core/entities/conversation-version";
+import type { ImportedSource } from "@/core/entities/imported-source";
+import type { KnowledgeCard } from "@/core/entities/knowledge-card";
+import type { Message } from "@/core/entities/message";
+import type { Proposal } from "@/core/entities/proposal";
+import type { Round } from "@/core/entities/round";
+import {
+  collectConversationDependencyIds,
+  toConversationDependencySets,
+  type ConversationDependencyIds,
+} from "@/core/services/conversation-referential-integrity";
+import { SearchIndexService } from "@/core/services/search-index-service";
+import {
+  clearDeletedFlowPointers,
+  readCurrentProposalPointer,
+  readCurrentSourcePointer,
+  type FlowPointerCleanupResult,
+} from "@/infrastructure/storage/flow-pointers";
 import {
   countStore,
   drainPendingWrites,
@@ -20,6 +39,7 @@ export type CanonicalOperationPhase =
   | "after-in-memory-snapshot"
   | "before-replace"
   | "after-replace"
+  | "after-flow-pointer-cleanup"
   | "after-clear-caches"
   | "after-preload";
 
@@ -34,6 +54,7 @@ export type CanonicalVerification = {
   cacheMatchesIndexedDB: boolean;
   pendingWriteCount: number;
   remainingRequestedIds: string[];
+  remainingDependentIds: Omit<ConversationDependencyIds, "conversationIds">;
   orphanDependentCounts: {
     messages: number;
     rounds: number;
@@ -41,10 +62,20 @@ export type CanonicalVerification = {
     proposals: number;
     conversationVersions: number;
   };
+  searchResidualDocumentIds: string[];
+  searchInvalidReferenceDocumentIds: string[];
+  reviewResidualProposalIds: string[];
+  staleFlowPointerIds: {
+    currentSourceId?: string;
+    currentProposalId?: string;
+  };
+  flowPointerCleanupFailures: string[];
 };
 
 export type CanonicalBatchDeleteResult = {
   deletion: BatchDeleteResult;
+  deletedDependencyIds: ConversationDependencyIds;
+  flowPointerCleanup: FlowPointerCleanupResult;
   verification: CanonicalVerification;
 };
 
@@ -127,80 +158,47 @@ async function enterCanonicalWriteBarrier(
 function buildBatchDeleteSnapshot(conversationIds: string[]): {
   batch: StoreBatch;
   deletion: BatchDeleteResult;
+  deletedDependencyIds: ConversationDependencyIds;
 } {
-  const idSet = new Set(conversationIds);
   const current = buildCacheBatch();
-  const conversations = current.conversations ?? [];
-  const messages = current.messages ?? [];
-  const rounds = current.rounds ?? [];
-  const sources = current.sources ?? [];
-  const proposals = current.proposals ?? [];
-  const knowledgeCards = current["knowledge-cards"] ?? [];
-  const versions = current["conversation-versions"] ?? [];
-
-  const sourceIds = new Set(
-    sources
-      .filter(
-        (source) =>
-          typeof source === "object" &&
-          source !== null &&
-          "conversationId" in source &&
-          typeof source.conversationId === "string" &&
-          idSet.has(source.conversationId),
-      )
-      .map((source) => (source as { id: string }).id),
+  const conversations = (current.conversations ?? []) as Conversation[];
+  const messages = (current.messages ?? []) as Message[];
+  const rounds = (current.rounds ?? []) as Round[];
+  const sources = (current.sources ?? []) as ImportedSource[];
+  const proposals = (current.proposals ?? []) as Proposal[];
+  const knowledgeCards = (current["knowledge-cards"] ?? []) as KnowledgeCard[];
+  const versions = (current["conversation-versions"] ?? []) as ConversationVersion[];
+  const deletedDependencyIds = collectConversationDependencyIds(
+    conversationIds,
+    {
+      conversations,
+      messages,
+      rounds,
+      sources,
+      proposals,
+      conversationVersions: versions,
+    },
   );
-  const proposalIds = new Set(
-    proposals
-      .filter((proposal) => {
-        if (typeof proposal !== "object" || proposal === null) return false;
-        const candidate = proposal as {
-          conversationId?: string;
-          sourceId?: string;
-        };
-        return Boolean(
-          (candidate.conversationId && idSet.has(candidate.conversationId)) ||
-            (candidate.sourceId && sourceIds.has(candidate.sourceId)),
-        );
-      })
-      .map((proposal) => (proposal as { id: string }).id),
-  );
+  const deleted = toConversationDependencySets(deletedDependencyIds);
   const orphanedKnowledgeIds = knowledgeCards
-    .filter(
-      (card) =>
-        typeof card === "object" &&
-        card !== null &&
-        "proposalId" in card &&
-        typeof card.proposalId === "string" &&
-        proposalIds.has(card.proposalId),
-    )
-    .map((card) => (card as { id: string }).id);
-
-  const belongsToDeletedConversation = (value: unknown): boolean =>
-    typeof value === "object" &&
-    value !== null &&
-    "conversationId" in value &&
-    typeof value.conversationId === "string" &&
-    idSet.has(value.conversationId);
+    .filter((card) => deleted.proposalIds.has(card.proposalId))
+    .map((card) => card.id);
 
   const nextBatch: StoreBatch = {
     conversations: conversations.filter(
-      (conversation) =>
-        typeof conversation !== "object" ||
-        conversation === null ||
-        !("id" in conversation) ||
-        typeof conversation.id !== "string" ||
-        !idSet.has(conversation.id),
+      (conversation) => !deleted.conversationIds.has(conversation.id),
     ),
-    messages: messages.filter((message) => !belongsToDeletedConversation(message)),
-    rounds: rounds.filter((round) => !belongsToDeletedConversation(round)),
-    sources: sources.filter((source) => !belongsToDeletedConversation(source)),
-    proposals: proposals.filter((proposal) => !proposalIds.has((proposal as { id: string }).id)),
-    // Batch delete intentionally preserves Knowledge Cards, matching the
-    // existing documented UI behavior.
+    messages: messages.filter((message) => !deleted.messageIds.has(message.id)),
+    rounds: rounds.filter((round) => !deleted.roundIds.has(round.id)),
+    sources: sources.filter((source) => !deleted.sourceIds.has(source.id)),
+    proposals: proposals.filter(
+      (proposal) => !deleted.proposalIds.has(proposal.id),
+    ),
+    // Accepted/manual Knowledge is an independent aggregate. Historical
+    // provenance IDs remain as snapshots; live links are resolved separately.
     "knowledge-cards": [...knowledgeCards],
     "conversation-versions": versions.filter(
-      (version) => !belongsToDeletedConversation(version),
+      (version) => !deleted.conversationVersionIds.has(version.id),
     ),
   };
 
@@ -215,29 +213,56 @@ function buildBatchDeleteSnapshot(conversationIds: string[]): {
       deletedProposals: proposals.length - (nextBatch.proposals?.length ?? 0),
       orphanedKnowledgeCount: orphanedKnowledgeIds.length,
       orphanedKnowledgeIds,
+      sidecarCleanupFailures: [],
     },
+    deletedDependencyIds,
   };
 }
 
 async function verifyCanonicalState(
   requestedIds: string[],
+  deletedDependencyIds: ConversationDependencyIds,
+  flowPointerCleanupFailures: string[] = [],
 ): Promise<CanonicalVerification> {
   const batch = buildCacheBatch();
-  const conversations = batch.conversations ?? [];
-  const messages = batch.messages ?? [];
-  const rounds = batch.rounds ?? [];
-  const sources = batch.sources ?? [];
-  const proposals = batch.proposals ?? [];
-  const versions = batch["conversation-versions"] ?? [];
+  const conversations = (batch.conversations ?? []) as Conversation[];
+  const messages = (batch.messages ?? []) as Message[];
+  const rounds = (batch.rounds ?? []) as Round[];
+  const sources = (batch.sources ?? []) as ImportedSource[];
+  const proposals = (batch.proposals ?? []) as Proposal[];
+  const knowledgeCards = (batch["knowledge-cards"] ?? []) as KnowledgeCard[];
+  const versions = (batch["conversation-versions"] ?? []) as ConversationVersion[];
   const conversationIds = new Set(
-    conversations.map((conversation) => (conversation as { id: string }).id),
+    conversations.map((conversation) => conversation.id),
   );
-  const sourceIds = new Set(
-    sources.map((source) => (source as { id: string }).id),
-  );
+  const messageIds = new Set(messages.map((message) => message.id));
+  const roundIds = new Set(rounds.map((round) => round.id));
+  const sourceIds = new Set(sources.map((source) => source.id));
+  const deleted = toConversationDependencySets(deletedDependencyIds);
   const requestedIdSet = new Set(requestedIds);
   const cacheCounts = getCachedCounts();
   const indexedDBCounts = await readCanonicalCounts();
+  const searchDocuments = new SearchIndexService({
+    workspaces: [],
+    conversations,
+    sources,
+    messages,
+    rounds,
+    proposals,
+    knowledgeCards,
+    tasks: [],
+    tags: [],
+    assets: [],
+  }).buildDocuments();
+  const deletedSearchDocuments = new Set([
+    ...deletedDependencyIds.conversationIds.map((id) => `conversation:${id}`),
+    ...deletedDependencyIds.messageIds.map((id) => `message:${id}`),
+    ...deletedDependencyIds.roundIds.map((id) => `round:${id}`),
+    ...deletedDependencyIds.sourceIds.map((id) => `source:${id}`),
+    ...deletedDependencyIds.proposalIds.map((id) => `proposal:${id}`),
+  ]);
+  const currentSource = readCurrentSourcePointer();
+  const currentProposal = readCurrentProposalPointer();
   const verification: CanonicalVerification = {
     cacheCounts,
     indexedDBCounts,
@@ -246,47 +271,108 @@ async function verifyCanonicalState(
     remainingRequestedIds: [...conversationIds].filter((id) =>
       requestedIdSet.has(id),
     ),
+    remainingDependentIds: {
+      messageIds: messages
+        .filter((message) => deleted.messageIds.has(message.id))
+        .map((message) => message.id),
+      roundIds: rounds
+        .filter((round) => deleted.roundIds.has(round.id))
+        .map((round) => round.id),
+      sourceIds: sources
+        .filter((source) => deleted.sourceIds.has(source.id))
+        .map((source) => source.id),
+      proposalIds: proposals
+        .filter((proposal) => deleted.proposalIds.has(proposal.id))
+        .map((proposal) => proposal.id),
+      conversationVersionIds: versions
+        .filter((version) =>
+          deleted.conversationVersionIds.has(version.id),
+        )
+        .map((version) => version.id),
+    },
     orphanDependentCounts: {
       messages: messages.filter(
         (message) =>
-          !conversationIds.has((message as { conversationId: string }).conversationId),
+          !conversationIds.has(message.conversationId),
       ).length,
       rounds: rounds.filter(
         (round) =>
-          !conversationIds.has((round as { conversationId: string }).conversationId),
+          !conversationIds.has(round.conversationId),
       ).length,
       sources: sources.filter((source) => {
-        const conversationId = (source as { conversationId?: string })
-          .conversationId;
+        const conversationId = source.conversationId;
         return Boolean(conversationId && !conversationIds.has(conversationId));
       }).length,
       proposals: proposals.filter((proposal) => {
-        const candidate = proposal as {
-          conversationId?: string;
-          sourceId?: string;
-        };
         return Boolean(
-          (candidate.conversationId &&
-            !conversationIds.has(candidate.conversationId)) ||
-            (candidate.sourceId && !sourceIds.has(candidate.sourceId)),
+          (proposal.conversationId &&
+            !conversationIds.has(proposal.conversationId)) ||
+            (proposal.sourceId && !sourceIds.has(proposal.sourceId)) ||
+            (proposal.sourceRoundId &&
+              !roundIds.has(proposal.sourceRoundId)) ||
+            proposal.sourceMessageIds?.some(
+              (messageId) => !messageIds.has(messageId),
+            ),
         );
       }).length,
       conversationVersions: versions.filter(
-        (version) =>
-          !conversationIds.has(
-            (version as { conversationId: string }).conversationId,
-          ),
+        (version) => !conversationIds.has(version.conversationId),
       ).length,
     },
+    searchResidualDocumentIds: searchDocuments
+      .filter((document) =>
+        deletedSearchDocuments.has(`${document.entityType}:${document.entityId}`),
+      )
+      .map((document) => document.id),
+    searchInvalidReferenceDocumentIds: searchDocuments
+      .filter((document) => {
+        const conversationId = document.metadata?.conversationId;
+        const sourceRoundId = document.metadata?.sourceRoundId;
+        return Boolean(
+          (typeof conversationId === "string" &&
+            deleted.conversationIds.has(conversationId)) ||
+            (typeof sourceRoundId === "string" &&
+              deleted.roundIds.has(sourceRoundId)),
+        );
+      })
+      .map((document) => document.id),
+    reviewResidualProposalIds: proposals
+      .filter((proposal) => deleted.proposalIds.has(proposal.id))
+      .map((proposal) => proposal.id),
+    staleFlowPointerIds: {
+      currentSourceId:
+        currentSource &&
+        (deleted.sourceIds.has(currentSource.id) ||
+          Boolean(
+            currentSource.conversationId &&
+              deleted.conversationIds.has(currentSource.conversationId),
+          ))
+          ? currentSource.id
+          : undefined,
+      currentProposalId:
+        currentProposal && deleted.proposalIds.has(currentProposal.id)
+          ? currentProposal.id
+          : undefined,
+    },
+    flowPointerCleanupFailures,
   };
 
   if (
     verification.pendingWriteCount !== 0 ||
     verification.remainingRequestedIds.length > 0 ||
+    Object.values(verification.remainingDependentIds).some(
+      (ids) => ids.length > 0,
+    ) ||
     !verification.cacheMatchesIndexedDB ||
     Object.values(verification.orphanDependentCounts).some(
       (count) => count > 0,
-    )
+    ) ||
+    verification.searchResidualDocumentIds.length > 0 ||
+    verification.searchInvalidReferenceDocumentIds.length > 0 ||
+    verification.reviewResidualProposalIds.length > 0 ||
+    Boolean(verification.staleFlowPointerIds.currentSourceId) ||
+    Boolean(verification.staleFlowPointerIds.currentProposalId) ||
+    verification.flowPointerCleanupFailures.length > 0
   ) {
     throw new Error(
       `Canonical batch verification failed: ${JSON.stringify(verification)}`,
@@ -300,7 +386,8 @@ export async function bulkDeleteCanonicalConversations(
   observer?: CanonicalOperationObserver,
 ): Promise<CanonicalBatchDeleteResult> {
   await enterCanonicalWriteBarrier(observer, true);
-  const { batch, deletion } = buildBatchDeleteSnapshot(conversationIds);
+  const { batch, deletion, deletedDependencyIds } =
+    buildBatchDeleteSnapshot(conversationIds);
   emit(observer, "after-in-memory-snapshot", {
     resultingCounts: normalizeBatchCounts(batch),
     deletion,
@@ -314,12 +401,23 @@ export async function bulkDeleteCanonicalConversations(
     resultingCounts: normalizeBatchCounts(batch),
     pendingWriteCount: getPendingWriteCount(),
   });
+  const flowPointerCleanup = clearDeletedFlowPointers(deletedDependencyIds);
+  emit(observer, "after-flow-pointer-cleanup", { flowPointerCleanup });
   clearCaches();
   emit(observer, "after-clear-caches", { cacheCounts: getCachedCounts() });
   const cacheCounts = await preloadAll();
   emit(observer, "after-preload", { cacheCounts });
-  const verification = await verifyCanonicalState(conversationIds);
-  return { deletion, verification };
+  const verification = await verifyCanonicalState(
+    conversationIds,
+    deletedDependencyIds,
+    flowPointerCleanup.failures,
+  );
+  return {
+    deletion,
+    deletedDependencyIds,
+    flowPointerCleanup,
+    verification,
+  };
 }
 
 const EMPTY_CANONICAL_BATCH: StoreBatch = {
@@ -349,7 +447,14 @@ export async function clearCanonicalBusinessData(
   emit(observer, "after-clear-caches", { cacheCounts: getCachedCounts() });
   const cacheCounts = await preloadAll();
   emit(observer, "after-preload", { cacheCounts });
-  const verification = await verifyCanonicalState([]);
+  const verification = await verifyCanonicalState([], {
+    conversationIds: [],
+    messageIds: [],
+    roundIds: [],
+    sourceIds: [],
+    proposalIds: [],
+    conversationVersionIds: [],
+  });
   if (Object.values(verification.indexedDBCounts).some((count) => count > 0)) {
     throw new Error(
       `Canonical clear verification failed: ${JSON.stringify(verification)}`,

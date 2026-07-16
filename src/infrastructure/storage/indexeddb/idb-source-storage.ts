@@ -1,5 +1,10 @@
 import type { SourceStorage } from "@/core/contracts/source-storage";
 import type { ImportedSource } from "@/core/entities/imported-source";
+import {
+  clearCurrentSourcePointer,
+  readCurrentSourcePointer,
+  writeCurrentSourcePointer,
+} from "@/infrastructure/storage/flow-pointers";
 import { getSourceCache, setSourceCache } from "./preload";
 import { deleteWhere, persistInBackground, writeOne } from "./database";
 
@@ -9,9 +14,6 @@ function normalize(source: ImportedSource): ImportedSource {
     updatedAt: source.updatedAt ?? source.importedAt,
   };
 }
-
-// Current source is tracked in localStorage for cross-session consistency
-const CURRENT_SOURCE_KEY = "ai-learning-os.current-source";
 
 export class IndexedDBSourceStorage implements SourceStorage {
   save(source: ImportedSource): void {
@@ -26,20 +28,15 @@ export class IndexedDBSourceStorage implements SourceStorage {
 
   saveCurrent(source: ImportedSource): void {
     try {
-      window.localStorage.setItem(CURRENT_SOURCE_KEY, JSON.stringify(source));
+      writeCurrentSourcePointer(source);
     } catch {
       // localStorage quota exceeded for current-source; non-critical
     }
   }
 
   getCurrent(): ImportedSource | null {
-    try {
-      const raw = window.localStorage.getItem(CURRENT_SOURCE_KEY);
-      if (!raw) return null;
-      return normalize(JSON.parse(raw) as ImportedSource);
-    } catch {
-      return null;
-    }
+    const source = readCurrentSourcePointer();
+    return source ? normalize(source) : null;
   }
 
   getAll(): ImportedSource[] {
@@ -78,7 +75,7 @@ export class IndexedDBSourceStorage implements SourceStorage {
     const current = this.getCurrent();
     if (current && removedIds.has(current.id)) {
       try {
-        window.localStorage.removeItem(CURRENT_SOURCE_KEY);
+        clearCurrentSourcePointer();
       } catch {
         // ignore
       }

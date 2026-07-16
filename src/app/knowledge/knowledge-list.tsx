@@ -6,12 +6,16 @@ import type { KnowledgeCard } from "@/core/entities/knowledge-card";
 import type { Tag } from "@/core/entities/tag";
 import { DEFAULT_WORKSPACE_ID } from "@/core/entities/workspace";
 import { WorkspaceService } from "@/core/services/workspace-service";
-import { BrowserConversationStorage } from "@/infrastructure/storage/browser-conversation-storage";
-import { BrowserKnowledgeCardStorage } from "@/infrastructure/storage/browser-knowledge-card-storage";
-import { BrowserMessageStorage } from "@/infrastructure/storage/browser-message-storage";
-import { BrowserProposalStorage } from "@/infrastructure/storage/browser-proposal-storage";
 import { BrowserTagStorage } from "@/infrastructure/storage/browser-tag-storage";
 import { BrowserWorkspaceStorage } from "@/infrastructure/storage/browser-workspace-storage";
+import {
+  createConversationStorage,
+  createKnowledgeCardStorage,
+  createMessageStorage,
+  createProposalStorage,
+  ensureIndexedDBLoaded,
+  getStorageMode,
+} from "@/infrastructure/storage/storage-factory";
 
 const PAGE_SIZE = 6;
 
@@ -44,44 +48,51 @@ export function KnowledgeList() {
 
   useEffect(() => {
     const loadTimer = window.setTimeout(() => {
-      const proposalStorage = new BrowserProposalStorage();
-      const conversationStorage = new BrowserConversationStorage();
-      const workspaceById = new Map(
-        new WorkspaceService(
-          new BrowserWorkspaceStorage(),
-          conversationStorage,
-        ).listWorkspaces().map((workspace) => [workspace.id, workspace]),
-      );
-      setTags(new BrowserTagStorage().getAll());
-      const availableMessageIds = new Set(
-        new BrowserMessageStorage().getAll().map((message) => message.id),
-      );
-      setCards(
-        new BrowserKnowledgeCardStorage().getAll().map((card) => {
-          const proposal = proposalStorage.getById(card.proposalId);
-          const conversationId =
-            card.sourceConversationId ?? proposal?.conversationId;
-          const conversation = conversationId
-            ? conversationStorage.getById(conversationId)
-            : null;
+      async function load() {
+        if (getStorageMode() === "indexedDB") await ensureIndexedDBLoaded();
+        const proposalStorage = createProposalStorage();
+        const conversationStorage = createConversationStorage();
+        const workspaceById = new Map(
+          new WorkspaceService(
+            new BrowserWorkspaceStorage(),
+            conversationStorage,
+          )
+            .listWorkspaces()
+            .map((workspace) => [workspace.id, workspace]),
+        );
+        setTags(new BrowserTagStorage().getAll());
+        const availableMessageIds = new Set(
+          createMessageStorage().getAll().map((message) => message.id),
+        );
+        setCards(
+          createKnowledgeCardStorage().getAll().map((card) => {
+            const proposal = proposalStorage.getById(card.proposalId);
+            const referencedConversationId =
+              card.sourceConversationId ?? proposal?.conversationId;
+            const conversation = referencedConversationId
+              ? conversationStorage.getById(referencedConversationId)
+              : null;
 
-          return {
-            ...card,
-            sourceConversationId: conversationId,
-            sourceMessageCount:
-              card.sourceMessageCount ?? proposal?.sourceMessageIds?.length,
-            sourceConversationTitle: conversation?.title,
-            sourceWorkspaceName: conversation
-              ? workspaceById.get(
-                  conversation.workspaceId ?? DEFAULT_WORKSPACE_ID,
-                )?.name ?? "unknown"
-              : "unknown",
-            missingSourceMessageCount: (
-              card.sourceMessageIds ?? proposal?.sourceMessageIds ?? []
-            ).filter((messageId) => !availableMessageIds.has(messageId)).length,
-          };
-        }),
-      );
+            return {
+              ...card,
+              sourceConversationId: conversation?.id,
+              sourceMessageCount:
+                card.sourceMessageCount ?? proposal?.sourceMessageIds?.length,
+              sourceConversationTitle: conversation?.title,
+              sourceWorkspaceName: conversation
+                ? workspaceById.get(
+                    conversation.workspaceId ?? DEFAULT_WORKSPACE_ID,
+                  )?.name ?? "unknown"
+                : "unknown",
+              missingSourceMessageCount: (
+                card.sourceMessageIds ?? proposal?.sourceMessageIds ?? []
+              ).filter((messageId) => !availableMessageIds.has(messageId))
+                .length,
+            };
+          }),
+        );
+      }
+      void load().catch(() => setCards([]));
     }, 0);
 
     return () => window.clearTimeout(loadTimer);

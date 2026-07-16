@@ -1,9 +1,12 @@
 import type { ProposalStorage } from "@/core/contracts/proposal-storage";
 import type { Proposal } from "@/core/entities/proposal";
+import {
+  clearCurrentProposalPointer,
+  readCurrentProposalPointer,
+  writeCurrentProposalPointer,
+} from "@/infrastructure/storage/flow-pointers";
 import { getProposalCache, setProposalCache } from "./preload";
 import { deleteOne, deleteWhere, persistInBackground, writeOne } from "./database";
-
-const CURRENT_PROPOSAL_KEY = "ai-learning-os.current-proposal";
 
 export class IndexedDBProposalStorage implements ProposalStorage {
   save(proposal: Proposal): void {
@@ -22,29 +25,29 @@ export class IndexedDBProposalStorage implements ProposalStorage {
   saveCurrent(proposal: Proposal): void {
     this.save(proposal);
     try {
-      window.localStorage.setItem(CURRENT_PROPOSAL_KEY, JSON.stringify(proposal));
+      writeCurrentProposalPointer(proposal);
     } catch {
       // non-critical
     }
   }
 
   getCurrent(): Proposal | null {
+    const current = readCurrentProposalPointer();
+    if (!current) return null;
+    const canonicalProposal = getProposalCache().find(
+      (proposal) => proposal.id === current.id,
+    );
+    if (canonicalProposal) return canonicalProposal;
     try {
-      const raw = window.localStorage.getItem(CURRENT_PROPOSAL_KEY);
-      if (!raw) return null;
-      return JSON.parse(raw) as Proposal;
+      clearCurrentProposalPointer();
     } catch {
-      return null;
+      // A stale pointer must never be promoted to canonical data.
     }
+    return null;
   }
 
   getAll(): Proposal[] {
-    const cache = getProposalCache();
-    const current = this.getCurrent();
-    if (current && !cache.some((p) => p.id === current.id)) {
-      return [...cache, current];
-    }
-    return cache;
+    return getProposalCache();
   }
 
   getById(id: string): Proposal | null {
@@ -68,7 +71,7 @@ export class IndexedDBProposalStorage implements ProposalStorage {
 
     if (this.getCurrent()?.id === id) {
       try {
-        window.localStorage.removeItem(CURRENT_PROPOSAL_KEY);
+        clearCurrentProposalPointer();
       } catch {
         // ignore
       }
@@ -92,7 +95,7 @@ export class IndexedDBProposalStorage implements ProposalStorage {
     const current = this.getCurrent();
     if (current?.sourceId && idSet.has(current.sourceId)) {
       try {
-        window.localStorage.removeItem(CURRENT_PROPOSAL_KEY);
+        clearCurrentProposalPointer();
       } catch {
         // ignore
       }
@@ -114,7 +117,7 @@ export class IndexedDBProposalStorage implements ProposalStorage {
 
     if (this.getCurrent()?.conversationId === conversationId) {
       try {
-        window.localStorage.removeItem(CURRENT_PROPOSAL_KEY);
+        clearCurrentProposalPointer();
       } catch {
         // ignore
       }

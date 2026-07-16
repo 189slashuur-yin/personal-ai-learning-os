@@ -1,10 +1,20 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Round } from "@/core/entities/round";
-import { createRoundStorage } from "@/infrastructure/storage/storage-factory";
-import { BrowserProposalStorage } from "@/infrastructure/storage/browser-proposal-storage";
-import { BrowserKnowledgeCardStorage } from "@/infrastructure/storage/browser-knowledge-card-storage";
+import {
+  calculateContainedScrollTop,
+  shouldAdjustNavigatorScroll,
+  shouldScrollDocumentForRoundActivation,
+  type RoundActivationSource,
+} from "@/core/services/round-navigation";
+import {
+  createKnowledgeCardStorage,
+  createProposalStorage,
+  createRoundStorage,
+  ensureIndexedDBLoaded,
+  getStorageMode,
+} from "@/infrastructure/storage/storage-factory";
 
 type RoundNavigatorProps = {
   conversationId: string;
@@ -28,37 +38,45 @@ export function RoundNavigator({ conversationId }: RoundNavigatorProps) {
     new Map(),
   );
   const [activeRoundId, setActiveRoundId] = useState<string | null>(null);
+  const navigatorScrollRef = useRef<HTMLElement | null>(null);
+  const roundButtonRefs = useRef(new Map<string, HTMLButtonElement>());
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      const roundList = createRoundStorage().getByConversationId(
-        conversationId,
-      );
-      setRounds(roundList);
-
-      const proposals = new BrowserProposalStorage().getAll();
-      const pCounts = new Map<string, number>();
-      proposals.forEach((proposal) => {
-        if (proposal.sourceRoundId) {
-          pCounts.set(
-            proposal.sourceRoundId,
-            (pCounts.get(proposal.sourceRoundId) ?? 0) + 1,
-          );
+      async function load() {
+        if (getStorageMode() === "indexedDB") {
+          await ensureIndexedDBLoaded();
         }
-      });
-      setProposalCounts(pCounts);
+        const roundList = createRoundStorage().getByConversationId(
+          conversationId,
+        );
+        setRounds(roundList);
 
-      const knowledge = new BrowserKnowledgeCardStorage().getAll();
-      const kCounts = new Map<string, number>();
-      knowledge.forEach((card) => {
-        if (card.sourceRoundId) {
-          kCounts.set(
-            card.sourceRoundId,
-            (kCounts.get(card.sourceRoundId) ?? 0) + 1,
-          );
-        }
-      });
-      setKnowledgeCounts(kCounts);
+        const proposals = createProposalStorage().getAll();
+        const pCounts = new Map<string, number>();
+        proposals.forEach((proposal) => {
+          if (proposal.sourceRoundId) {
+            pCounts.set(
+              proposal.sourceRoundId,
+              (pCounts.get(proposal.sourceRoundId) ?? 0) + 1,
+            );
+          }
+        });
+        setProposalCounts(pCounts);
+
+        const knowledge = createKnowledgeCardStorage().getAll();
+        const kCounts = new Map<string, number>();
+        knowledge.forEach((card) => {
+          if (card.sourceRoundId) {
+            kCounts.set(
+              card.sourceRoundId,
+              (kCounts.get(card.sourceRoundId) ?? 0) + 1,
+            );
+          }
+        });
+        setKnowledgeCounts(kCounts);
+      }
+      void load();
     }, 0);
     return () => window.clearTimeout(timer);
   }, [conversationId]);
@@ -80,11 +98,75 @@ export function RoundNavigator({ conversationId }: RoundNavigatorProps) {
     );
   }, [rounds, searchQuery]);
 
-  function scrollToRound(roundId: string) {
+  useEffect(() => {
+    if (typeof IntersectionObserver === "undefined" || rounds.length === 0) {
+      return;
+    }
+
+    const visibleRoundTops = new Map<string, number>();
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          const roundId = (entry.target as HTMLElement).dataset.roundId;
+          if (!roundId) continue;
+          if (entry.isIntersecting) {
+            visibleRoundTops.set(roundId, entry.boundingClientRect.top);
+          } else {
+            visibleRoundTops.delete(roundId);
+          }
+        }
+
+        const nextActive = [...visibleRoundTops.entries()].sort(
+          (left, right) =>
+            Math.abs(left[1] - 96) - Math.abs(right[1] - 96),
+        )[0]?.[0];
+        if (nextActive) setActiveRoundId(nextActive);
+      },
+      {
+        root: null,
+        rootMargin: "-96px 0px -55% 0px",
+        threshold: [0, 0.01],
+      },
+    );
+
+    for (const round of rounds) {
+      const element = document.getElementById(`round-${round.id}`);
+      if (!element) continue;
+      element.dataset.roundId = round.id;
+      observer.observe(element);
+    }
+
+    return () => observer.disconnect();
+  }, [rounds]);
+
+  useEffect(() => {
+    if (!activeRoundId) return;
+    const container = navigatorScrollRef.current;
+    const item = roundButtonRefs.current.get(activeRoundId);
+    if (!container || !item) return;
+
+    const targetScrollTop = calculateContainedScrollTop({
+      containerScrollTop: container.scrollTop,
+      containerClientHeight: container.clientHeight,
+      itemOffsetTop: item.offsetTop,
+      itemOffsetHeight: item.offsetHeight,
+    });
+    if (
+      shouldAdjustNavigatorScroll(container.scrollTop, targetScrollTop)
+    ) {
+      container.scrollTo({ top: targetScrollTop, behavior: "smooth" });
+    }
+  }, [activeRoundId, expanded, visibleRounds]);
+
+  function activateRound(roundId: string, source: RoundActivationSource) {
     setActiveRoundId(roundId);
+    if (!shouldScrollDocumentForRoundActivation(source)) return;
     const element = document.getElementById(`round-${roundId}`);
     if (element) {
-      element.scrollIntoView({ behavior: "smooth", block: "center" });
+      const headerOffset = 88;
+      const targetTop =
+        element.getBoundingClientRect().top + window.scrollY - headerOffset;
+      window.scrollTo({ top: Math.max(0, targetTop), behavior: "smooth" });
     }
   }
 
@@ -92,9 +174,10 @@ export function RoundNavigator({ conversationId }: RoundNavigatorProps) {
 
   return (
     <div
-      className={`relative shrink-0 transition-[width] duration-200 ${
+      className={`shrink-0 transition-[width] duration-200 ${
         expanded ? "w-64" : "w-11"
       }`}
+      data-testid="round-navigator"
     >
       {/* Toggle button */}
       <button
@@ -108,7 +191,7 @@ export function RoundNavigator({ conversationId }: RoundNavigatorProps) {
       </button>
 
       {expanded ? (
-        <div className="sticky top-4 max-h-[calc(100vh-2rem)] overflow-hidden rounded-xl border border-zinc-200 bg-white">
+        <div className="max-h-[calc(100vh-6rem)] overflow-hidden rounded-xl border border-zinc-200 bg-white">
           <div className="p-3">
             <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500">
               Round Navigator
@@ -131,7 +214,13 @@ export function RoundNavigator({ conversationId }: RoundNavigatorProps) {
           </div>
           {hasRounds ? (
             <>
-              <ol className="max-h-[calc(100vh-10rem)] space-y-0.5 overflow-y-auto px-2 pb-3">
+              <ol
+                className="max-h-[calc(100vh-14rem)] space-y-0.5 overflow-y-auto px-2 pb-3"
+                data-testid="round-navigator-scroll-container"
+                ref={(element) => {
+                  navigatorScrollRef.current = element;
+                }}
+              >
                 {visibleRounds.map((round) => {
                   const hasSummary = !!round.summary;
                   const proposalCount = proposalCounts.get(round.id) ?? 0;
@@ -146,7 +235,11 @@ export function RoundNavigator({ conversationId }: RoundNavigatorProps) {
                             ? "bg-zinc-950 text-white"
                             : "text-zinc-700 hover:bg-zinc-100"
                         }`}
-                        onClick={() => scrollToRound(round.id)}
+                        onClick={() => activateRound(round.id, "user")}
+                        ref={(element) => {
+                          if (element) roundButtonRefs.current.set(round.id, element);
+                          else roundButtonRefs.current.delete(round.id);
+                        }}
                         type="button"
                       >
                         <div className="flex items-center gap-1.5">
@@ -217,7 +310,13 @@ export function RoundNavigator({ conversationId }: RoundNavigatorProps) {
         </div>
       ) : (
         /* Collapsed rail: show round order numbers as dots, or empty indicator */
-        <div className="sticky top-4 flex max-h-[calc(100vh-2rem)] flex-col items-center gap-1 overflow-y-auto rounded-xl border border-zinc-200 bg-white py-2">
+        <div
+          className="flex max-h-[calc(100vh-6rem)] flex-col items-center gap-1 overflow-y-auto rounded-xl border border-zinc-200 bg-white py-2"
+          data-testid="round-navigator-scroll-container"
+          ref={(element) => {
+            navigatorScrollRef.current = element;
+          }}
+        >
           {hasRounds ? (
             rounds.map((round) => {
               const hasSummary = !!round.summary;
@@ -241,7 +340,11 @@ export function RoundNavigator({ conversationId }: RoundNavigatorProps) {
                       ? "bg-zinc-950 text-white"
                       : "bg-zinc-100 text-zinc-500 hover:bg-zinc-200"
                   }`}
-                  onClick={() => scrollToRound(round.id)}
+                  onClick={() => activateRound(round.id, "user")}
+                  ref={(element) => {
+                    if (element) roundButtonRefs.current.set(round.id, element);
+                    else roundButtonRefs.current.delete(round.id);
+                  }}
                   title={tooltip}
                   type="button"
                 >

@@ -90,6 +90,9 @@ export class SearchIndexService {
     const conversationById = new Map(
       this.data.conversations.map((conversation) => [conversation.id, conversation]),
     );
+    const roundById = new Map(
+      this.data.rounds.map((round) => [round.id, round]),
+    );
     const sourceById = new Map(
       this.data.sources.map((source) => [source.id, source]),
     );
@@ -108,9 +111,11 @@ export class SearchIndexService {
     };
 
     const getWorkspace = (conversationId?: string) => {
-      const workspaceId = conversationId
-        ? conversationById.get(conversationId)?.workspaceId ??
-          DEFAULT_WORKSPACE_ID
+      const conversation = conversationId
+        ? conversationById.get(conversationId)
+        : undefined;
+      const workspaceId = conversation
+        ? conversation.workspaceId ?? DEFAULT_WORKSPACE_ID
         : undefined;
       return {
         id: workspaceId,
@@ -344,12 +349,22 @@ export class SearchIndexService {
 
     const knowledge: SearchDocument[] = this.data.knowledgeCards.map((card) => {
       const proposal = proposalById.get(card.proposalId);
-      const conversationId =
+      const referencedConversationId =
         card.sourceConversationId ??
         (proposal ? getProposalConversationId(proposal) : undefined);
-      const conversation = conversationId
-        ? conversationById.get(conversationId)
+      const conversation = referencedConversationId
+        ? conversationById.get(referencedConversationId)
         : undefined;
+      const conversationId = conversation?.id;
+      const sourceRound = card.sourceRoundId
+        ? roundById.get(card.sourceRoundId)
+        : undefined;
+      const sourceRoundId =
+        sourceRound &&
+        conversationId &&
+        sourceRound.conversationId === conversationId
+          ? sourceRound.id
+          : undefined;
       const workspace = getWorkspace(conversationId);
       const tags = card.tagIds.flatMap((tagId) => {
         const tag = tagById.get(tagId);
@@ -366,7 +381,9 @@ export class SearchIndexService {
           .filter(Boolean)
           .join("\n"),
         sourceLabel: card.sourceFile,
-        sourcePath: `${conversation?.title ?? "Conversation"} > Knowledge`,
+        sourcePath: conversation
+          ? `${conversation.title} > Knowledge`
+          : "来源已删除 > Knowledge",
         tags,
         updatedAt: card.updatedAt,
         href: `/knowledge/${card.id}`,
@@ -383,7 +400,10 @@ export class SearchIndexService {
         metadata: {
           proposalId: card.proposalId,
           conversationId,
-          sourceRoundId: card.sourceRoundId,
+          sourceRoundId,
+          sourceReferenceMissing: Boolean(
+            referencedConversationId && !conversation,
+          ),
           status: card.status,
         },
       };

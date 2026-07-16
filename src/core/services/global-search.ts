@@ -96,8 +96,11 @@ function toSearchDocuments(data: SearchData): SearchDocument[] {
       ? sourceById.get(proposal.sourceId)?.conversationId
       : undefined);
   const getWorkspace = (conversationId?: string) => {
-    const workspaceId = conversationId
-      ? conversationById.get(conversationId)?.workspaceId ?? DEFAULT_WORKSPACE_ID
+    const conversation = conversationId
+      ? conversationById.get(conversationId)
+      : undefined;
+    const workspaceId = conversation
+      ? conversation.workspaceId ?? DEFAULT_WORKSPACE_ID
       : undefined;
     return {
       id: workspaceId,

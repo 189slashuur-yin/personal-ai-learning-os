@@ -1,7 +1,11 @@
 import type { SourceStorage } from "@/core/contracts/source-storage";
 import type { ImportedSource } from "@/core/entities/imported-source";
+import {
+  clearCurrentSourcePointer,
+  readCurrentSourcePointer,
+  writeCurrentSourcePointer,
+} from "@/infrastructure/storage/flow-pointers";
 
-const CURRENT_SOURCE_KEY = "ai-learning-os.current-source";
 const SOURCES_KEY = "ai-learning-os.sources";
 
 export class BrowserSourceStorage implements SourceStorage {
@@ -22,17 +26,12 @@ export class BrowserSourceStorage implements SourceStorage {
   }
 
   saveCurrent(source: ImportedSource) {
-    window.localStorage.setItem(CURRENT_SOURCE_KEY, JSON.stringify(source));
+    writeCurrentSourcePointer(source);
   }
 
   getCurrent() {
-    const storedSource = window.localStorage.getItem(CURRENT_SOURCE_KEY);
-
-    if (!storedSource) {
-      return null;
-    }
-
-    return this.normalize(JSON.parse(storedSource) as ImportedSource);
+    const source = readCurrentSourcePointer();
+    return source ? this.normalize(source) : null;
   }
 
   getByConversationId(conversationId: string) {
@@ -62,7 +61,7 @@ export class BrowserSourceStorage implements SourceStorage {
 
     const currentSource = this.getCurrent();
     if (currentSource && removedSourceIds.has(currentSource.id)) {
-      window.localStorage.removeItem(CURRENT_SOURCE_KEY);
+      clearCurrentSourcePointer();
     }
   }
 

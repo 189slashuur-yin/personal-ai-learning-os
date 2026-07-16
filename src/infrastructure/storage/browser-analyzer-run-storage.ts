@@ -1,4 +1,7 @@
-import type { AnalyzerRunStorage } from "@/core/contracts/analyzer-run-storage";
+import type {
+  AnalyzerRunDependencyIds,
+  AnalyzerRunStorage,
+} from "@/core/contracts/analyzer-run-storage";
 import type { AnalyzerRun } from "@/core/entities/analyzer-run";
 
 const ANALYZER_RUNS_KEY = "ai-learning-os.analyzer-runs";
@@ -68,6 +71,23 @@ export class BrowserAnalyzerRunStorage implements AnalyzerRunStorage {
   removeByConversationId(conversationId: string): void {
     const runs = this.getAll().filter(
       (run) => run.conversationId !== conversationId,
+    );
+    window.localStorage.setItem(ANALYZER_RUNS_KEY, JSON.stringify(runs));
+  }
+
+  removeByDependencies(dependencyIds: AnalyzerRunDependencyIds): void {
+    const conversationIds = new Set(dependencyIds.conversationIds);
+    const sourceIds = new Set(dependencyIds.sourceIds);
+    const roundIds = new Set(dependencyIds.roundIds);
+    const messageIds = new Set(dependencyIds.messageIds);
+    const runs = this.getAll().filter(
+      (run) =>
+        !(
+          (run.conversationId && conversationIds.has(run.conversationId)) ||
+          (run.sourceId && sourceIds.has(run.sourceId)) ||
+          (run.roundId && roundIds.has(run.roundId)) ||
+          run.messageIds?.some((messageId) => messageIds.has(messageId))
+        ),
     );
     window.localStorage.setItem(ANALYZER_RUNS_KEY, JSON.stringify(runs));
   }
