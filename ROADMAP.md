@@ -4,11 +4,34 @@
 
 ## Current release
 
-- Current Version：v1.0 alpha draft
-- Phase：v1.0 Phase2
-- Current Epic：Second Brain Workspace Epic M–AB（Implementation complete）
-- Current Focus：AC Docs / Alpha Review 与 AD Final Stabilization
-- Next Recommended Phase：执行 V10 Manual QA；在人工验收前保持 alpha
+- Current Version：v1.6.4 work-in-progress
+- Phase：Known Issues Closure / Import Reliability
+- Current Focus：Existing TXT append、完整 Import matrix、progress/error/quota state、production diagnostics cleanup
+- Automated Status：6 files / 184 tests；lint/build 已通过实现 checkpoint
+- Next Recommended Phase：在 disposable browser profile 执行真实 Existing + TXT 文件上传/刷新 smoke；通过后再创建 release commit
+
+## v1.6.4 — Known Issues Closure（implemented, browser QA pending）
+
+- New / Existing × ChatGPT Export / Paste Text / TXT File 六种组合已形成统一 Import mode matrix；Existing 始终只有一个 target selector。
+- Existing + TXT 复用 text/TXT parser pipeline，保存文件名与 Source metadata，只追加实际解析出的 Messages/Rounds；success 前完成 flush、cache reload 与 ID/reference/count verification。
+- Import phase/counters 覆盖 parsing、preview、confirm、importing、flushing、verifying、success、failed、quota-stopped；批量进度按 Conversation 节流。
+- Quota 超阈值改为 warning + explicit confirmation，不再通过 disabled button 形成不可达确认路径；quota stop 报告 durable success 与未处理数量。
+- ChatGPT Existing append 从“任一 ID 相交就整源跳过”改为 message identity 去重，因此同一 ChatGPT Conversation 后续更新可增量追加；不同 source 同内容不按 content hash 全局误删。
+- Bulk diagnostics 默认普通用户不可见；`NEXT_PUBLIC_PALOS_DIAGNOSTICS=1` 与 Analyzer 的独立 flag 不混用；长 ID 数组只记录 count + limited sample。
+- Quick filter、Round draft edge cases、invalid TXT、mode state、progress、diagnostics gate 与 Existing TXT reload durability 已补回归。
+- 保持 v1.6.1 canonical delete、v1.6.2 structured import 与 v1.6.3 referential integrity，不改 IndexedDB schema。
+
+### Future backlog（not implemented）
+
+- ChatGPT share-link import。
+- Update an existing Conversation from a share link。
+- Mobile / PWA。
+- Cloud / multi-device sync。
+- Multi-user / family sharing。
+- Attachment / voice / canvas / tool nodes。
+- Import transaction fan-out optimization（当前仍约每 Conversation 多次 pending writes，最终 flush durable）。
+- Advanced cross-source semantic dedup。
+- AI / RAG / Embedding。
 
 ## v1.0 Phase2 — Second Brain Workspace（M–AB implemented）
 

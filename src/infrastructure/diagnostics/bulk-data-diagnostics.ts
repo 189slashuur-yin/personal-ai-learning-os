@@ -3,6 +3,7 @@ import { getPendingWriteCount } from "@/infrastructure/storage/indexeddb/databas
 export const BULK_DIAGNOSTIC_PREFIX = "[PALOS BULK DIAG]";
 
 const MAX_DIAGNOSTIC_ENTRIES = 300;
+const MAX_DIAGNOSTIC_ID_SAMPLE = 10;
 export type BulkDiagnosticOperationType =
   | "bulk-chatgpt-import"
   | "batch-delete"
@@ -34,6 +35,38 @@ export type DestructiveOperationSummary = {
 
 const diagnosticEntries: BulkDiagnosticEntry[] = [];
 let lastDestructiveOperation: DestructiveOperationSummary | null = null;
+
+export function isBulkDiagnosticsEnabled(flag?: string): boolean {
+  return (flag ?? process.env.NEXT_PUBLIC_PALOS_DIAGNOSTICS) === "1";
+}
+
+function sanitizeDiagnosticValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.slice(0, MAX_DIAGNOSTIC_ID_SAMPLE).map(sanitizeDiagnosticValue);
+  }
+  if (value && typeof value === "object") {
+    return sanitizeDiagnosticData(value as Record<string, unknown>);
+  }
+  return value;
+}
+
+export function sanitizeDiagnosticData(
+  data: Record<string, unknown>,
+): Record<string, unknown> {
+  const sanitized: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(data)) {
+    if (Array.isArray(value) && /ids$/i.test(key)) {
+      const base = key.replace(/Ids$/i, "");
+      sanitized[`${base}Count`] = value.length;
+      sanitized[`${base}Sample`] = value
+        .slice(0, MAX_DIAGNOSTIC_ID_SAMPLE)
+        .map(sanitizeDiagnosticValue);
+      continue;
+    }
+    sanitized[key] = sanitizeDiagnosticValue(value);
+  }
+  return sanitized;
+}
 
 function monotonicNow(): number {
   return typeof performance === "undefined" ? Date.now() : performance.now();
@@ -73,7 +106,7 @@ export function recordBulkDiagnostic(
     phase,
     elapsedMs: Math.max(0, Math.round(monotonicNow() - operation.startedAtMs)),
     pendingWriteCount: getPendingWriteCount(),
-    ...(data ? { data } : {}),
+    ...(data ? { data: sanitizeDiagnosticData(data) } : {}),
   };
 
   diagnosticEntries.push(entry);
@@ -83,7 +116,9 @@ export function recordBulkDiagnostic(
       diagnosticEntries.length - MAX_DIAGNOSTIC_ENTRIES,
     );
   }
-  console.info(BULK_DIAGNOSTIC_PREFIX, entry);
+  if (isBulkDiagnosticsEnabled()) {
+    console.info(BULK_DIAGNOSTIC_PREFIX, entry);
+  }
   return entry;
 }
 

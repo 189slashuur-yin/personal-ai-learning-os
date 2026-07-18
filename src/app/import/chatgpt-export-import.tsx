@@ -22,10 +22,13 @@ import {
   getCachedCounts,
   preloadAll,
 } from "@/infrastructure/storage/indexeddb/preload";
-import { readAll } from "@/infrastructure/storage/indexeddb/database";
-import type { Message } from "@/core/entities/message";
-import type { Round } from "@/core/entities/round";
 import { BulkDiagnosticsCopyButton } from "@/app/bulk-diagnostics-copy-button";
+import {
+  createImportOperationProgress,
+  failImportOperation,
+  importPhaseLabel,
+  updateImportOperationProgress,
+} from "@/core/services/import-operation-state";
 import {
   getLastDestructiveDiagnosticOperation,
   recordBulkDiagnostic,
@@ -128,6 +131,8 @@ type BatchReportItem = {
   skipped: number;
   unsupported: number;
   error?: string;
+  messageIds: string[];
+  roundIds: string[];
 };
 
 type BatchReport = {
@@ -144,6 +149,9 @@ type BatchReport = {
   stoppedByQuota: boolean;
   /** Suggestion for next steps when quota is hit */
   suggestion?: string;
+  selectedConversationCount: number;
+  processedConversationCount: number;
+  unprocessedConversationCount: number;
 };
 
 // ---- Shared Props (lifted from parent) ----
@@ -191,24 +199,6 @@ function computeMultiAppendPreview(
     ),
   );
 
-  // Build content-hash set from existing messages
-  function fnv1a(input: string): string {
-    let hash = 2166136261;
-    for (let i = 0; i < input.length; i++) {
-      hash ^= input.charCodeAt(i);
-      hash = Math.imul(hash, 16777619);
-    }
-    return `fnv1a-${(hash >>> 0).toString(16).padStart(8, "0")}`;
-  }
-
-  const seenHashes = new Set(
-    existingMessages.map(
-      (m) =>
-        m.contentHash ??
-        fnv1a(`${m.role}\u0000${m.content.replace(/\s+/g, " ").trim()}`),
-    ),
-  );
-
   let totalNew = 0;
   let totalSkipped = 0;
 
@@ -216,12 +206,9 @@ function computeMultiAppendPreview(
     for (const msg of conv.messages) {
       if (msg.externalMessageId && seenExternalIds.has(msg.externalMessageId)) {
         totalSkipped++;
-      } else if (seenHashes.has(msg.contentHash)) {
-        totalSkipped++;
       } else {
         totalNew++;
         if (msg.externalMessageId) seenExternalIds.add(msg.externalMessageId);
-        seenHashes.add(msg.contentHash);
       }
     }
   }
@@ -255,6 +242,37 @@ function sumUnsupported(
     if (selectedIds.has(c.externalConversationId)) total += c.unsupportedCount;
   }
   return total;
+}
+
+function isPersistedBatchItem(item: BatchReportItem): boolean {
+  if (item.status !== "success" || !item.conversationId) return true;
+  const conversationStorage = createConversationStorage();
+  const messageStorage = createMessageStorage();
+  const roundStorage = createRoundStorage();
+  if (!conversationStorage.getById(item.conversationId)) return false;
+  const messages = messageStorage.getByConversationId(item.conversationId);
+  const rounds = roundStorage.getByConversationId(item.conversationId);
+  const messageIds = new Set(messages.map((message) => message.id));
+  const roundIds = new Set(rounds.map((round) => round.id));
+  return (
+    item.messageIds.length === item.messageCount &&
+    item.roundIds.length === item.roundCount &&
+    item.messageIds.every((messageId) => messageIds.has(messageId)) &&
+    item.roundIds.every((roundId) => roundIds.has(roundId)) &&
+    rounds
+      .filter((round) => item.roundIds.includes(round.id))
+      .every(
+        (round) =>
+          round.conversationId === item.conversationId &&
+          round.messageIds.every((messageId) => messageIds.has(messageId)),
+      )
+  );
+}
+
+async function reloadIndexedDBForVerification(): Promise<void> {
+  if (getStorageMode() !== "indexedDB") return;
+  clearCaches();
+  await preloadAll();
 }
 
 // ---- Component ----
@@ -296,6 +314,8 @@ export function ChatGPTExportImport({
   const [status, setStatus] = useState<string | null>(null);
   const [workspaceId, setWorkspaceId] = useState("inbox");
   const [batchReport, setBatchReport] = useState<BatchReport | null>(null);
+  const [progress, setProgress] = useState(() => createImportOperationProgress());
+  const appEventLogStorage = useMemo(() => new BrowserAppEventLogStorage(), []);
 
   // ---- Derived ----
   const selectedConversations = useMemo(
@@ -368,10 +388,17 @@ export function ChatGPTExportImport({
     onSelectedIdsChange(new Set());
     setBatchReport(null);
     setStatus(null);
+    setProgress(createImportOperationProgress("parsing"));
 
     if (!FILE_PATTERN.test(file.name)) {
       onParseError(
         "请选择 conversations.json 或 conversations-*.json（例如 conversations-000.json）。不支持直接读取 zip 文件。",
+      );
+      setProgress(
+        failImportOperation(
+          createImportOperationProgress("parsing"),
+          "ChatGPT Export 文件名不受支持。",
+        ),
       );
       return;
     }
@@ -382,19 +409,29 @@ export function ChatGPTExportImport({
     try {
       const text = await file.text();
       const parsed = service().parseExport(text);
+      if (parsed.length === 0) {
+        throw new Error("文件中没有可导入的 ChatGPT Conversation。 ");
+      }
       onFileParsed({ name: file.name, size: file.size }, parsed, isLarge);
+      setProgress(createImportOperationProgress("preview-ready", parsed.length));
     } catch (error) {
-      onParseError(
+      const message =
         error instanceof Error
           ? error.message
-          : "无法解析文件，请确认是有效的 ChatGPT Export JSON。",
-      );
+          : "无法解析文件，请确认是有效的 ChatGPT Export JSON。";
+      onParseError(message);
+      setProgress((current) => failImportOperation(current, message));
     }
   }
 
   // ---- Batch import (new mode) ----
   async function confirmBatchNewImport() {
     if (selectedConversations.length === 0) return;
+    setBatchReport(null);
+    setStatus(null);
+    setProgress(
+      createImportOperationProgress("confirming", selectedConversations.length),
+    );
 
     // Large import guard: warn and ask for explicit confirmation, but do not hard block.
     const sizeEstimate = estimateSelectedSize(conversations, selectedIds);
@@ -405,13 +442,23 @@ export function ChatGPTExportImport({
       const confirmed = window.confirm(
         `${quotaExceededMessage}\n\n将导入 ${sizeEstimate.totalMessages} 条 Message，约 ${sizeEstimate.totalChars.toLocaleString()} 字符。继续？`,
       );
-      if (!confirmed) return;
+      if (!confirmed) {
+        setProgress(
+          createImportOperationProgress(
+            "preview-ready",
+            selectedConversations.length,
+          ),
+        );
+        return;
+      }
     }
 
     setImporting(true);
-    setStatus(null);
+    setProgress(
+      createImportOperationProgress("importing", selectedConversations.length),
+    );
 
-    const items: BatchReportItem[] = [];
+    let items: BatchReportItem[] = [];
     let totalSuccess = 0;
     const totalFailed = 0;
     let totalMessages = 0;
@@ -419,6 +466,7 @@ export function ChatGPTExportImport({
     let totalSkipped = 0;
     let totalUnsupported = 0;
     let stoppedByQuota = false;
+    let processedConversationCount = 0;
     let lastCompletedAwaitedPhase = "user confirmation";
     const operation = startBulkDiagnosticOperation("bulk-chatgpt-import", {
       importMode: "new",
@@ -447,6 +495,15 @@ export function ChatGPTExportImport({
         cacheCounts: getCachedCounts(),
         lastCompletedAwaitedPhase,
       });
+      setProgress((current) =>
+        updateImportOperationProgress(current, {
+          phase: "importing",
+          processedConversations: processedConversationCount,
+          importedMessages: totalMessages,
+          importedRounds: totalRounds,
+          skippedMessages: totalSkipped,
+        }),
+      );
     }
 
     try {
@@ -476,12 +533,15 @@ export function ChatGPTExportImport({
             roundCount: 0,
             skipped: result.skipped,
             unsupported: conv.unsupportedCount,
+            messageIds: [],
+            roundIds: [],
           });
+          processedConversationCount = index + 1;
           recordProgress(index + 1);
           continue;
         }
 
-        new BrowserAppEventLogStorage().record(
+        appEventLogStorage.record(
           "import created",
           result.conversationId,
           `ChatGPT new ${result.appended} messages`,
@@ -499,7 +559,10 @@ export function ChatGPTExportImport({
           roundCount: result.roundsCreated,
           skipped: result.skipped,
           unsupported: conv.unsupportedCount,
+          messageIds: result.messageIds,
+          roundIds: result.roundIds,
         });
+        processedConversationCount = index + 1;
         recordProgress(index + 1);
       }
       recordBulkDiagnostic(operation, "after in-memory mutation", {
@@ -514,12 +577,27 @@ export function ChatGPTExportImport({
         cacheCounts: getCachedCounts(),
         lastCompletedAwaitedPhase,
       });
+      setProgress((current) =>
+        updateImportOperationProgress(current, { phase: "flushing" }),
+      );
       await persistIndexedDBImportIfNeeded();
       lastCompletedAwaitedPhase = "flush";
       recordBulkDiagnostic(operation, "after flush", {
         cacheCounts: getCachedCounts(),
         lastCompletedAwaitedPhase,
       });
+      setProgress((current) =>
+        updateImportOperationProgress(current, { phase: "verifying" }),
+      );
+      await reloadIndexedDBForVerification();
+      const missingPersistedItems = items.filter(
+        (item) => item.status === "success" && !isPersistedBatchItem(item),
+      );
+      if (missingPersistedItems.length > 0) {
+        throw new Error(
+          `持久化验证失败：${missingPersistedItems.length} 个 Conversation 的 Message/Round 不完整。`,
+        );
+      }
     } catch (error) {
       recordBulkDiagnostic(operation, "operation error", {
         errorName: error instanceof Error ? error.name : "unknown",
@@ -529,6 +607,20 @@ export function ChatGPTExportImport({
       });
       if (isQuotaExceededError(error)) {
         stoppedByQuota = true;
+        try {
+          await restoreIndexedDBCachesAfterFailure();
+        } catch {
+          // The quota result below only counts items that can still be read.
+        }
+        items = items.filter(
+          (item) => item.status !== "success" || isPersistedBatchItem(item),
+        );
+        totalSuccess = items.filter((item) => item.status === "success").length;
+        totalMessages = items.reduce((sum, item) => sum + item.messageCount, 0);
+        totalRounds = items.reduce((sum, item) => sum + item.roundCount, 0);
+        totalSkipped = items.reduce((sum, item) => sum + item.skipped, 0);
+        totalUnsupported = items.reduce((sum, item) => sum + item.unsupported, 0);
+        processedConversationCount = items.length;
       } else {
         try {
           await restoreIndexedDBCachesAfterFailure();
@@ -545,11 +637,12 @@ export function ChatGPTExportImport({
           });
         }
         setBatchReport(null);
-        setStatus(
+        const message =
           error instanceof Error
-            ? `❌ IndexedDB 写入失败：${error.message}`
-            : "❌ IndexedDB 写入失败，没有报告成功。",
-        );
+            ? `❌ 导入失败：${error.message}`
+            : "❌ 导入失败，没有报告成功。";
+        setStatus(message);
+        setProgress((current) => failImportOperation(current, message));
         recordBulkDiagnostic(operation, "final state", {
           success: false,
           cacheCounts: getCachedCounts(),
@@ -574,6 +667,12 @@ export function ChatGPTExportImport({
           ? "建议：减少选择数量（IndexedDB 模式建议单次不超过 30000 条 Message），或分批导入。"
           : "建议：减少选择数量（每次导入少量重要对话），或先清理 0 Message / 0 Round 的失败对话。建议迁移到 IndexedDB（设置页）以支持更大批量。"
         : undefined,
+      selectedConversationCount: selectedConversations.length,
+      processedConversationCount,
+      unprocessedConversationCount: Math.max(
+        0,
+        selectedConversations.length - processedConversationCount,
+      ),
     });
 
     setStatus(
@@ -596,6 +695,15 @@ export function ChatGPTExportImport({
       cacheCounts: getCachedCounts(),
       lastCompletedAwaitedPhase,
     });
+    setProgress((current) =>
+      updateImportOperationProgress(current, {
+        phase: stoppedByQuota ? "quota-stopped" : "success",
+        processedConversations: processedConversationCount,
+        importedMessages: totalMessages,
+        importedRounds: totalRounds,
+        skippedMessages: totalSkipped,
+      }),
+    );
     setImporting(false);
     // P0: Notify parent to refresh existingConversations so "import to existing" unlocks
     const newIds = items
@@ -610,6 +718,11 @@ export function ChatGPTExportImport({
   // ---- Batch append (existing mode) ----
   async function confirmBatchAppend() {
     if (selectedConversations.length === 0 || !targetConversationId) return;
+    setBatchReport(null);
+    setStatus(null);
+    setProgress(
+      createImportOperationProgress("confirming", selectedConversations.length),
+    );
 
     // Large import guard: warn and ask for explicit confirmation, but do not hard block.
     const sizeEstimate = estimateSelectedSize(conversations, selectedIds);
@@ -620,16 +733,26 @@ export function ChatGPTExportImport({
       const confirmed = window.confirm(
         `${quotaExceededMessage}\n\n将追加 ${sizeEstimate.totalMessages} 条 Message，约 ${sizeEstimate.totalChars.toLocaleString()} 字符。继续？`,
       );
-      if (!confirmed) return;
+      if (!confirmed) {
+        setProgress(
+          createImportOperationProgress(
+            "preview-ready",
+            selectedConversations.length,
+          ),
+        );
+        return;
+      }
     }
 
     const targetConv = existingConversations.find(
       (c) => c.id === targetConversationId,
     );
     setImporting(true);
-    setStatus(null);
+    setProgress(
+      createImportOperationProgress("importing", selectedConversations.length),
+    );
 
-    const items: BatchReportItem[] = [];
+    let items: BatchReportItem[] = [];
     let totalSuccess = 0;
     const totalFailed = 0;
     let totalMessages = 0;
@@ -637,6 +760,7 @@ export function ChatGPTExportImport({
     let totalSkipped = 0;
     let totalUnsupported = 0;
     let stoppedByQuota = false;
+    let processedConversationCount = 0;
     let lastCompletedAwaitedPhase = "user confirmation";
     const operation = startBulkDiagnosticOperation("bulk-chatgpt-import", {
       importMode: "append-existing",
@@ -666,6 +790,15 @@ export function ChatGPTExportImport({
         cacheCounts: getCachedCounts(),
         lastCompletedAwaitedPhase,
       });
+      setProgress((current) =>
+        updateImportOperationProgress(current, {
+          phase: "importing",
+          processedConversations: processedConversationCount,
+          importedMessages: totalMessages,
+          importedRounds: totalRounds,
+          skippedMessages: totalSkipped,
+        }),
+      );
     }
 
     try {
@@ -691,12 +824,15 @@ export function ChatGPTExportImport({
             roundCount: 0,
             skipped: result.skipped,
             unsupported: result.unsupported,
+            messageIds: [],
+            roundIds: [],
           });
+          processedConversationCount = index + 1;
           recordProgress(index + 1);
           continue;
         }
 
-        new BrowserAppEventLogStorage().record(
+        appEventLogStorage.record(
           "import created",
           targetConversationId,
           `ChatGPT append ${result.appendedMessages} messages from "${conv.title}"`,
@@ -714,7 +850,10 @@ export function ChatGPTExportImport({
           roundCount: result.appendedRounds,
           skipped: result.skipped,
           unsupported: result.unsupported,
+          messageIds: result.messageIds,
+          roundIds: result.roundIds,
         });
+        processedConversationCount = index + 1;
         recordProgress(index + 1);
       }
       recordBulkDiagnostic(operation, "after in-memory mutation", {
@@ -729,51 +868,26 @@ export function ChatGPTExportImport({
         cacheCounts: getCachedCounts(),
         lastCompletedAwaitedPhase,
       });
+      setProgress((current) =>
+        updateImportOperationProgress(current, { phase: "flushing" }),
+      );
       await persistIndexedDBImportIfNeeded();
       lastCompletedAwaitedPhase = "flush";
       recordBulkDiagnostic(operation, "after flush", {
         cacheCounts: getCachedCounts(),
         lastCompletedAwaitedPhase,
       });
-
-      // [v1.4.6] Post-persist verification: ensure appended data survived the flush
-      // by reading directly from IndexedDB (not cache).  If messages/rounds
-      // were reported as appended but are not found in IDB, the persist
-      // failed silently and we must NOT show a success report.
-      if (totalMessages > 0 && getStorageMode() === "indexedDB") {
-        const idbMessages = await readAll<Message>("messages");
-        const targetMessagesInIDB = idbMessages.filter(
-          (m) => m.conversationId === targetConversationId,
+      setProgress((current) =>
+        updateImportOperationProgress(current, { phase: "verifying" }),
+      );
+      await reloadIndexedDBForVerification();
+      const missingPersistedItems = items.filter(
+        (item) => item.status === "success" && !isPersistedBatchItem(item),
+      );
+      if (missingPersistedItems.length > 0) {
+        throw new Error(
+          `持久化验证失败：${missingPersistedItems.length} 个来源的 Message/Round 不完整。`,
         );
-        if (targetMessagesInIDB.length === 0) {
-          await restoreIndexedDBCachesAfterFailure();
-          lastCompletedAwaitedPhase = "verification failure preload/reload";
-          setBatchReport(null);
-          setStatus(
-            "❌ 持久化验证失败：IndexedDB 中未找到目标 Conversation 的 Messages。追加可能未写入，没有报告成功。",
-          );
-          recordBulkDiagnostic(operation, "final state", {
-            success: false,
-            verificationFailure: "target messages missing",
-            cacheCounts: getCachedCounts(),
-            lastCompletedAwaitedPhase,
-          });
-          setImporting(false);
-          return;
-        }
-
-        if (totalRounds > 0) {
-          const idbRounds = await readAll<Round>("rounds");
-          const targetRoundsInIDB = idbRounds.filter(
-            (r) => r.conversationId === targetConversationId,
-          );
-          if (targetRoundsInIDB.length === 0) {
-            console.warn(
-              "[confirmBatchAppend] Rounds not found in IDB after flush — messages OK. Rounds may have failed to parse.",
-            );
-            // Don't fail entirely — messages are the critical data
-          }
-        }
       }
     } catch (error) {
       recordBulkDiagnostic(operation, "operation error", {
@@ -784,6 +898,20 @@ export function ChatGPTExportImport({
       });
       if (isQuotaExceededError(error)) {
         stoppedByQuota = true;
+        try {
+          await restoreIndexedDBCachesAfterFailure();
+        } catch {
+          // The quota result below only counts items that can still be read.
+        }
+        items = items.filter(
+          (item) => item.status !== "success" || isPersistedBatchItem(item),
+        );
+        totalSuccess = items.filter((item) => item.status === "success").length;
+        totalMessages = items.reduce((sum, item) => sum + item.messageCount, 0);
+        totalRounds = items.reduce((sum, item) => sum + item.roundCount, 0);
+        totalSkipped = items.reduce((sum, item) => sum + item.skipped, 0);
+        totalUnsupported = items.reduce((sum, item) => sum + item.unsupported, 0);
+        processedConversationCount = items.length;
       } else {
         try {
           await restoreIndexedDBCachesAfterFailure();
@@ -800,11 +928,12 @@ export function ChatGPTExportImport({
           });
         }
         setBatchReport(null);
-        setStatus(
+        const message =
           error instanceof Error
-            ? `❌ IndexedDB 写入失败：${error.message}`
-            : "❌ IndexedDB 写入失败，没有报告成功。",
-        );
+            ? `❌ 追加失败：${error.message}`
+            : "❌ 追加失败，没有报告成功。";
+        setStatus(message);
+        setProgress((current) => failImportOperation(current, message));
         recordBulkDiagnostic(operation, "final state", {
           success: false,
           cacheCounts: getCachedCounts(),
@@ -830,6 +959,12 @@ export function ChatGPTExportImport({
           ? "建议：减少选择数量（IndexedDB 模式建议单次不超过 30000 条 Message），或分批追加。"
           : "建议：减少选择数量（每次导入少量重要对话），或先清理 0 Message / 0 Round 的失败对话。建议迁移到 IndexedDB（设置页）以支持更大批量。"
         : undefined,
+      selectedConversationCount: selectedConversations.length,
+      processedConversationCount,
+      unprocessedConversationCount: Math.max(
+        0,
+        selectedConversations.length - processedConversationCount,
+      ),
     });
 
     setStatus(
@@ -853,6 +988,15 @@ export function ChatGPTExportImport({
       cacheCounts: getCachedCounts(),
       lastCompletedAwaitedPhase,
     });
+    setProgress((current) =>
+      updateImportOperationProgress(current, {
+        phase: stoppedByQuota ? "quota-stopped" : "success",
+        processedConversations: processedConversationCount,
+        importedMessages: totalMessages,
+        importedRounds: totalRounds,
+        skippedMessages: totalSkipped,
+      }),
+    );
     setImporting(false);
     // P0: Notify parent to refresh existingConversations after successful append
     if (totalSuccess > 0) {
@@ -955,6 +1099,7 @@ export function ChatGPTExportImport({
             onSelectedIdsChange(new Set());
             setBatchReport(null);
             setStatus(null);
+            setProgress(createImportOperationProgress());
           }}
           type="button"
         >
@@ -1255,8 +1400,7 @@ export function ChatGPTExportImport({
                     className="mt-4 w-full rounded-lg bg-zinc-950 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-40"
                     disabled={
                       importing ||
-                      selectedConversations.length === 0 ||
-                      exceedsQuotaThreshold
+                      selectedConversations.length === 0
                     }
                     onClick={confirmBatchNewImport}
                     type="button"
@@ -1264,7 +1408,7 @@ export function ChatGPTExportImport({
                     {importing
                       ? "导入中…"
                       : exceedsQuotaThreshold
-                        ? "内容过大，请减少选择"
+                        ? `确认并继续导入 ${selectedConversations.length} 个 Conversation`
                         : selectedConversations.length === 1
                           ? "导入为新 Conversation"
                           : `批量导入 ${selectedConversations.length} 个为新 Conversation`}
@@ -1275,8 +1419,7 @@ export function ChatGPTExportImport({
                     disabled={
                       importing ||
                       !targetConversationId ||
-                      selectedConversations.length === 0 ||
-                      exceedsQuotaThreshold
+                      selectedConversations.length === 0
                     }
                     onClick={confirmBatchAppend}
                     type="button"
@@ -1284,7 +1427,7 @@ export function ChatGPTExportImport({
                     {importing
                       ? "追加中…"
                       : exceedsQuotaThreshold
-                        ? "内容过大，请减少选择"
+                        ? `确认并继续追加 ${selectedConversations.length} 个源`
                         : !targetConversationId
                           ? "请先选择目标 Conversation"
                           : selectedConversations.length === 1
@@ -1300,6 +1443,18 @@ export function ChatGPTExportImport({
             ) : null}
           </div>
         </>
+      ) : null}
+
+      {progress.phase !== "idle" ? (
+        <div className="mt-4 rounded-lg border border-sky-200 bg-sky-50 p-4 text-sm text-sky-900" role="status">
+          <p className="font-semibold">Phase: {importPhaseLabel(progress.phase)}</p>
+          <p className="mt-1 text-xs">
+            Processed {progress.processedConversations} / {progress.selectedConversations} Conversations · {progress.importedMessages} Messages · {progress.importedRounds} Rounds · {progress.skippedMessages} skipped
+          </p>
+          {progress.phase === "quota-stopped" ? (
+            <p className="mt-1 text-xs font-semibold">未处理：{progress.unprocessedConversations} Conversations</p>
+          ) : null}
+        </div>
       ) : null}
 
       {/* ---- Status ---- */}
@@ -1343,7 +1498,7 @@ export function ChatGPTExportImport({
                 ⚠️ 存储配额已满
               </p>
               <p className="mt-1 text-xs text-amber-800">
-                浏览器 LocalStorage 配额不足，导入已停止。已成功导入的内容已保留。
+                浏览器存储配额不足，导入已停止。下方只统计持久化验证后仍可读取的内容。已处理 {batchReport.processedConversationCount} / {batchReport.selectedConversationCount}，未处理 {batchReport.unprocessedConversationCount}。
                 {batchReport.suggestion ? (
                   <span className="mt-1 block">{batchReport.suggestion}</span>
                 ) : null}

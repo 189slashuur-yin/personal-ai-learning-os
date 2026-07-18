@@ -78,6 +78,7 @@ type DetailState =
       status: "ready";
       conversation: Conversation;
       source: ImportedSource | null;
+      sourceCount: number;
       messages: Message[];
       proposals: Proposal[];
       knowledgeCard: KnowledgeCard | null;
@@ -350,7 +351,11 @@ export function ConversationDetail({
         ).listWorkspaces(),
       );
 
-      const source = createSourceStorage().getByConversationId(conversationId);
+      const sourceStorage = createSourceStorage();
+      const source = sourceStorage.getByConversationId(conversationId);
+      const sourceCount = sourceStorage
+        .getAll()
+        .filter((candidate) => candidate.conversationId === conversationId).length;
       const proposalStorage = createProposalStorage();
       const conversationProposals = proposalStorage.getByConversationId(
         conversationId,
@@ -404,6 +409,7 @@ export function ConversationDetail({
         status: "ready",
         conversation: openedConversation,
         source,
+        sourceCount,
         messages,
         proposals,
         knowledgeCard,
@@ -480,6 +486,9 @@ export function ConversationDetail({
               ...currentState,
               conversation: nextConversation,
               source: nextSource,
+              sourceCount: currentState.source
+                ? currentState.sourceCount
+                : currentState.sourceCount + 1,
             }
           : currentState,
       );
@@ -1346,7 +1355,7 @@ export function ConversationDetail({
           </span>
           <span>
             Sources:{" "}
-            <strong className="text-zinc-700">{source ? 1 : 0}</strong>
+            <strong className="text-zinc-700">{state.sourceCount}</strong>
           </span>
           <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 font-semibold text-zinc-600">
             {conversation.sourceType}

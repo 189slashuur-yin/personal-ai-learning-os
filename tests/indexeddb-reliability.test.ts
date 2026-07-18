@@ -759,9 +759,7 @@ describe("IndexedDB storage reliability", () => {
     expect(new IndexedDBMessageStorage().getByConversationId("batch-2")).toHaveLength(0);
   });
 
-  // ---- Round 1.3: Debug test - simulate real import flow with save() + persistInBackground ----
-
-  it("Round 1.3 DEBUG: import-via-save then delete survives full cycle", async () => {
+  it("import-via-save then delete survives a full persistence cycle", async () => {
     // Simulate the REAL import flow: use save() + persistInBackground (not replaceStores)
     // to populate data, then wait for writes to settle, then flush.
     // This mirrors exactly what the actual app does during import.
@@ -800,28 +798,12 @@ describe("IndexedDB storage reliability", () => {
     // Wait for all persistInBackground writes to settle
     await settle();
 
-    // Step 2: DEBUG - log IDB counts immediately after import saves
-    console.log("=== R1.3 AFTER IMPORT (before flush) ===");
-    console.log("IDB conv:", (await readAll("conversations")).length);
-    console.log("IDB msgs:", (await readAll("messages")).length);
-    console.log("IDB rounds:", (await readAll("rounds")).length);
-    console.log("IDB sources:", (await readAll("sources")).length);
-
-    // Step 3: Flush (post-import persistence, like import-workbench does)
+    // Flush after import, like the production workbench does.
     await flushCachesToIndexedDB();
     clearCaches();
     await preloadAll();
 
-    console.log("=== R1.3 AFTER IMPORT FLUSH + RELOAD ===");
-    console.log("Cache conv:", getCachedCounts().conversations);
-    console.log("Cache msgs:", getCachedCounts().messages);
-    console.log("Cache rounds:", getCachedCounts().rounds);
-    console.log("IDB conv:", (await readAll("conversations")).length);
-    console.log("IDB msgs:", (await readAll("messages")).length);
-    console.log("IDB rounds:", (await readAll("rounds")).length);
-    console.log("IDB sources:", (await readAll("sources")).length);
-
-    // Step 4: Delete one conversation (simulating user clicking delete)
+    // Delete one conversation (simulating user clicking delete).
     const storages = createStorageInstances("indexedDB");
     deleteConversationWorkspace("delete-me", {
       ...storages,
@@ -829,36 +811,12 @@ describe("IndexedDB storage reliability", () => {
       rounds: storages.rounds,
     });
 
-    console.log("=== R1.3 AFTER DELETE (before flush) ===");
-    console.log("Cache conv:", getCachedCounts().conversations);
-    console.log("Cache msgs:", getCachedCounts().messages);
-    console.log("Cache rounds:", getCachedCounts().rounds);
-    console.log("IDB conv (pre-flush):", (await readAll("conversations")).length);
-    console.log("IDB msgs (pre-flush):", (await readAll("messages")).length);
-    console.log("IDB rounds (pre-flush):", (await readAll("rounds")).length);
-    console.log("IDB sources (pre-flush):", (await readAll("sources")).length);
-
-    // Step 5: Flush the delete - THIS IS THE CRITICAL persistAndReload step
+    // Flush the delete at the durable write barrier.
     await flushCachesToIndexedDB();
 
-    console.log("=== R1.3 AFTER FLUSH (post-delete) ===");
-    console.log("IDB conv:", (await readAll("conversations")).length);
-    console.log("IDB msgs:", (await readAll("messages")).length);
-    console.log("IDB rounds:", (await readAll("rounds")).length);
-    console.log("IDB sources:", (await readAll("sources")).length);
-
-    // Step 6: Simulate page refresh - clear caches and reload
+    // Simulate page refresh by clearing caches and reloading.
     clearCaches();
     await preloadAll();
-
-    console.log("=== R1.3 AFTER RELOAD (simulated page refresh) ===");
-    console.log("Cache conv:", getCachedCounts().conversations);
-    console.log("Cache msgs:", getCachedCounts().messages);
-    console.log("Cache rounds:", getCachedCounts().rounds);
-    console.log("IDB conv:", (await readAll("conversations")).length);
-    console.log("IDB msgs:", (await readAll("messages")).length);
-    console.log("IDB rounds:", (await readAll("rounds")).length);
-    console.log("IDB sources:", (await readAll("sources")).length);
 
     // Verifications
     expect(new IndexedDBConversationStorage().getById("delete-me")).toBeNull();
@@ -3721,5 +3679,72 @@ describe("PALOS v1.6.3 — Proposal/Review/Search referential integrity", () => 
     expect(assets.getById("v163-round-asset")).toBeNull();
     expect(assets.getById("v163-knowledge-asset")).not.toBeNull();
     expect(tasks.getById("v163-preserved-task")).not.toBeNull();
+  });
+});
+
+describe("PALOS v1.6.4 — Existing TXT append durability", () => {
+  it("flushes, clears caches, preloads, and preserves exact Message/Round references", async () => {
+    const targetId = "v164-existing-txt-target";
+    const conversations = new IndexedDBConversationStorage();
+    const sources = new IndexedDBSourceStorage();
+    const messages = new IndexedDBMessageStorage();
+    const rounds = new IndexedDBRoundStorage();
+    conversations.save(conversation(targetId));
+    messages.save(message("v164-existing-message", targetId, 0));
+    rounds.save({
+      ...round("v164-existing-round", targetId, 1),
+      messageIds: ["v164-existing-message"],
+    });
+    await settle();
+
+    const beforeMessages = messages.getByConversationId(targetId).length;
+    const beforeRounds = rounds.getByConversationId(targetId).length;
+    const preview = new ImportParserPipeline().preview(
+      {
+        name: "v164-append.txt",
+        channel: "file",
+        content: "User: New TXT question?\nAssistant: New TXT answer.",
+        mediaType: "text/plain",
+      },
+      "txt",
+    );
+    const result = new ImportService(
+      conversations,
+      sources,
+      messages,
+      rounds,
+    ).appendToConversation(preview, targetId);
+
+    await flushCachesToIndexedDB();
+    clearCaches();
+    await preloadAll();
+
+    const reloadedConversations = new IndexedDBConversationStorage();
+    const reloadedMessages = new IndexedDBMessageStorage().getByConversationId(targetId);
+    const reloadedRounds = new IndexedDBRoundStorage().getByConversationId(targetId);
+    const reloadedSources = new IndexedDBSourceStorage().getAll();
+    const messageIds = new Set(reloadedMessages.map((item) => item.id));
+
+    expect(reloadedConversations.getAll()).toHaveLength(1);
+    expect(reloadedMessages).toHaveLength(beforeMessages + result.messageCount);
+    expect(reloadedRounds).toHaveLength(beforeRounds + result.roundCount);
+    expect(result.messageIds.every((id) => messageIds.has(id))).toBe(true);
+    expect(
+      reloadedRounds
+        .filter((item) => result.roundIds.includes(item.id))
+        .every(
+          (item) =>
+            item.conversationId === targetId &&
+            item.messageIds.every((id) => messageIds.has(id)),
+        ),
+    ).toBe(true);
+    expect(reloadedMessages.every((item) => item.conversationId === targetId)).toBe(true);
+    expect(reloadedSources).toContainEqual(
+      expect.objectContaining({
+        id: result.sourceId,
+        conversationId: targetId,
+        name: "v164-append.txt",
+      }),
+    );
   });
 });

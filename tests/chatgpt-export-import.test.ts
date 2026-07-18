@@ -812,7 +812,7 @@ describe("ChatGPTExportImportService — P0-E dedup", () => {
     expect(result.appended).toBeGreaterThan(0);
   });
 
-  it("Existing append: skips source when externalMessageIds already exist in target (source-level dedup)", () => {
+  it("Existing append: skips known message identities but appends a later source update", () => {
     const conversations = new InMemoryConversationStorage();
     const messages = new InMemoryMessageStorage();
 
@@ -848,13 +848,11 @@ describe("ChatGPTExportImportService — P0-E dedup", () => {
 
     const result = service.appendToConversation(previews[0], "target-conv");
 
-    // Source-level dedup: externalMessageId "msg-user-1" already in target → skip
-    expect((result as Record<string, unknown>).skippedExistingSource).toBe(true);
-    expect(result.appendedMessages).toBe(0);
-    expect(result.skipped).toBe(3);  // all messages skipped at source level
+    expect(result.skippedExistingSource).toBeFalsy();
+    expect(result.appendedMessages).toBe(2);
+    expect(result.skipped).toBe(1);
 
-    // Verify no new messages were written to the target
-    expect(messages.getByConversationId("target-conv")).toHaveLength(1);
+    expect(messages.getByConversationId("target-conv")).toHaveLength(3);
   });
 
   it("Existing append: proceeds normally when source is new (no false positive)", () => {

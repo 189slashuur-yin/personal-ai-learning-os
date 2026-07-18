@@ -34,6 +34,11 @@ import {
 } from "@/infrastructure/diagnostics/bulk-data-diagnostics";
 import { WorkspaceService } from "@/core/services/workspace-service";
 import { BulkDiagnosticsCopyButton } from "@/app/bulk-diagnostics-copy-button";
+import {
+  deriveConversationQuickFilterIds,
+  filterConversationQuickItems,
+  type ConversationQuickFilter,
+} from "@/core/services/conversation-quick-filters";
 import { ConversationCard } from "./conversation-card";
 import { CreateConversationDialog } from "./create-conversation-dialog";
 
@@ -163,7 +168,7 @@ export function ConversationList() {
 
   // P0-8: Batch selection
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [quickFilter, setQuickFilter] = useState<"all" | "empty" | "imported" | "failed-import">("all");
+  const [quickFilter, setQuickFilter] = useState<ConversationQuickFilter>("all");
   const [deleteResult, setDeleteResult] = useState<BatchDeleteResult | null>(null);
 
   useEffect(() => {
@@ -192,40 +197,13 @@ export function ConversationList() {
   }, []);
 
   // P0-8: Derived sets for quick filters
-  const emptyConversationIds = useMemo(
-    () =>
-      new Set(
-        (items ?? [])
-          .filter((item) => item.messageCount === 0 || item.roundCount === 0)
-          .map((item) => item.conversation.id),
-      ),
+  const quickFilterIds = useMemo(
+    () => deriveConversationQuickFilterIds(items ?? []),
     [items],
   );
-
-  const importedConversationIds = useMemo(
-    () =>
-      new Set(
-        (items ?? [])
-          .filter((item) => item.conversation.externalSource === "chatgpt")
-          .map((item) => item.conversation.id),
-      ),
-    [items],
-  );
-
-  const failedImportIds = useMemo(
-    () =>
-      new Set(
-        (items ?? [])
-          .filter(
-            (item) =>
-              item.conversation.externalSource === "chatgpt" &&
-              item.messageCount === 0 &&
-              item.roundCount === 0,
-          )
-          .map((item) => item.conversation.id),
-      ),
-    [items],
-  );
+  const emptyConversationIds = quickFilterIds.empty;
+  const importedConversationIds = quickFilterIds.imported;
+  const failedImportIds = quickFilterIds.failedImport;
 
   async function persistAndReload() {
     if (getStorageMode() === "indexedDB") {
@@ -509,7 +487,7 @@ export function ConversationList() {
     if (notDeleted.length > 0) {
       console.error(
         `[handleBatchDelete] ${notDeleted.length} conversation(s) still present after canonical verification.`,
-        notDeleted,
+        { remainingCount: notDeleted.length, sample: notDeleted.slice(0, 10) },
       );
     }
 
@@ -562,23 +540,11 @@ export function ConversationList() {
     );
   }
 
-  const visibleItems = items.filter((item) => {
-    // Workspace filter
-    if (workspaceFilter !== "all" && item.conversation.workspaceId !== workspaceFilter) {
-      return false;
-    }
-    // Quick filter
-    switch (quickFilter) {
-      case "empty":
-        return emptyConversationIds.has(item.conversation.id);
-      case "imported":
-        return importedConversationIds.has(item.conversation.id);
-      case "failed-import":
-        return failedImportIds.has(item.conversation.id);
-      default:
-        return true;
-    }
-  });
+  const visibleItems = filterConversationQuickItems(
+    items,
+    workspaceFilter,
+    quickFilter,
+  );
 
   const allVisibleSelected =
     visibleItems.length > 0 &&

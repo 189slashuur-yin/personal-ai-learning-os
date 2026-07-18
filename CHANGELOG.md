@@ -2,7 +2,21 @@
 
 本文件记录当前仓库已经完成的 Sprint 与关键提交。日期使用仓库 commit date。
 
-当前口径：Runtime Version 为 v1.1 alpha draft；Epic C–J 已实现并通过自动门禁；人工 QA 待执行。
+当前口径：Runtime Version 为 v1.6.4 work-in-progress；Known Issues Closure 已实现，并通过 184 tests / lint / build checkpoint 与真实 Existing + TXT 浏览器闭环；未创建 commit。
+
+## 2026-07-16 — v1.6.4 WIP: Known Issues Closure / Existing TXT / Import Diagnostics
+
+- **Import matrix**：统一 New / Existing target 与 ChatGPT Export / Paste Text / TXT File input source，支持全部六种组合；Existing 只有一个 target selector。
+- **Existing + TXT**：复用 TXT/parser pipeline，追加 Source、Messages、Rounds，保留文件名；Message/Round ownership 与 `messageIds` 在 flush → clear caches → preload 后验证，失败不显示 success。
+- **TXT errors**：拒绝 empty、whitespace-only、无可解析角色标签与 invalid UTF-8；不创建额外 Empty Conversation。
+- **Mode state**：切换 target/input 时清理不适用的 target、file/text、report/error；URL 只保留当前有效参数。
+- **Progress / quota**：新增 idle → parsing → preview-ready → confirming → importing → flushing → verifying → success/failed/quota-stopped；批量每 10 个 Conversation 更新，quota warning 可进入显式确认，停止后报告 durable success 与未处理数。
+- **Duplicate semantics**：ChatGPT Existing append 按 message identity 去重并允许同 source 后续更新；不同 source 的相同 content 不再被纯 content hash 全局跳过。Advanced semantic dedup 仍未实现。
+- **Diagnostics**：Copy Diagnostics 与 `[PALOS BULK DIAG]` console 由 `NEXT_PUBLIC_PALOS_DIAGNOSTICS=1` gate；Analyzer 使用独立 flag；ID arrays 限制为 count + sample；移除 R1.3 DEBUG logs。
+- **Small quality fixes**：batch import 复用单个 `BrowserAppEventLogStorage`；quick-filter 与 Import page state 抽取为可测 pure helper；未改 import transaction fan-out。
+- **Real browser closure**：在 Codex 应用内浏览器创建临时 Conversation，真实上传 UTF-8 TXT，核对追加前后与整页刷新后的 Message/Round/Source 统计，并删除临时数据；修复详情页把多个已保存 Source 错误显示为 `1` 的计数问题。Dashboard、精确标题 Search 与 Review 均无删除残留，PALOS 页面 Console error 为 0。
+- **Tests**：保留原 159 tests，新增 25 tests；当前 6 files / 184 tests。
+- **Non-goals**：未改 IndexedDB schema、canonical atomic delete、structured ChatGPT parser 或 v1.6.3 integrity；未实现 share link、PWA/mobile、cloud/multi-user、attachment nodes 或 AI/RAG/Embedding。
 
 ## 2026-07-06 — v1.1 Alpha: Long Conversation UX & Import Stabilization
 
@@ -14,8 +28,6 @@
 - **Search UX**：Round 搜索结果可跳转到对应 Round；Conversation/Knowledge/Round/Proposal 默认优先；Raw Message 仍在高级模式。
 - **Error / Feedback**：Feedback 增加 page 字段，支持从 Conversation 页面一键跳转并自动捕获路径；Data Health 增加 duplicate import risk 与 orphan round 检查。
 - **Docs & Help**：Help 增加 v1.1 新功能说明与全部新增概念；CHANGELOG/HANDOFF/QA_CHECKLIST 同步。
-
-## 2026-07-06 — v1.0 Phase2 Alpha: Second Brain Workspace
 
 ## 2026-07-06 — v1.0 Phase2 Alpha: Second Brain Workspace
 

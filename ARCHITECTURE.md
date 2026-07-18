@@ -2,11 +2,21 @@
 
 ## Current release context
 
-- Current Version：v1.0 alpha draft
-- Current Focus：Phase2 Second Brain Workspace runtime implemented；manual QA pending
-- Next Recommended Phase：验证 M–AB 与旧数据回归；通过前保持 alpha
+- Current Version：v1.6.4 work-in-progress
+- Current Focus：Import mode matrix / durable append / progress and error semantics / production diagnostics cleanup
+- Next Recommended Phase：完成 v1.6.4 minimal browser QA；自动门禁与浏览器验证均通过后再提交
 
 当前架构结论仍受单浏览器、本地优先与浏览器存储边界约束。PALOS 业务数据默认使用 IndexedDB；LocalStorage 保留为轻量配置、UI 偏好、schema/storage metadata 与旧数据迁移来源。v1.0 候选必须先完成范围和验收评审，不能从本文的演进 seam 推定为已批准实现。
+
+## v1.6.4 runtime delta
+
+- Import UI 是两个正交选择：target 为 New / Existing，input source 为 ChatGPT Export / Paste Text / TXT File，共六种有效组合；每种组合只渲染一个输入区，Existing 只渲染一个 target selector。
+- Paste/TXT 复用 `ImportParserPipeline` 与 `ImportService`；Existing + TXT 不进入 structured ChatGPT parser。TXT 必须是可解码 UTF-8、非空且包含可解析角色标签。
+- `ImportService` 生成 canonical Message/Round IDs 后返回实际 ID 集；IndexedDB success 需经过 flush → clear caches → preload → Conversation/Source/Message/Round count、ownership 与 Round.messageIds verification。
+- Import phase 明确为 idle、parsing、preview-ready、confirming、importing、flushing、verifying、success、failed、quota-stopped；批量 UI 每 10 个 Conversation 更新一次 React progress，不逐 Message setState。
+- ChatGPT Existing append 按 external message identity 去重；同一 source 的后续更新可追加新 identity。不同 source 的相同 content 不用纯 `contentHash` 全局去重；缺少可靠 identity 时宁可保留，advanced semantic dedup 留在 backlog。
+- Bulk diagnostics 始终可写入 bounded memory buffer，但 Copy Diagnostics 与 console 只在 `NEXT_PUBLIC_PALOS_DIAGNOSTICS=1` 开启；Analyzer failure diagnostics 独立使用 `NEXT_PUBLIC_PALOS_ANALYZER_DIAGNOSTICS=1`。
+- v1.6.1 canonical atomic delete、v1.6.2 structured ChatGPT linearization/count parity 与 v1.6.3 referential integrity 都保持原边界，没有重写。
 
 ## v1.0 Phase2 runtime delta
 
@@ -17,7 +27,7 @@
 - Asset 仍只保存 metadata/path/status，不读取或删除真实文件。
 - Recipe 只记录本地手动步骤，不执行 Analyzer，不是 Agent。
 - App Data 导入导出由 BrowserAppDataStorage 集中拥有 PALOS keys，导入先校验/预览，失败回滚。
-- ChatGPT `conversations.json` 由 pure linearizer 读取 current-node 主分支，只接收 User/Assistant 文本。首次导入复用现有 Parser/ImportService 生成 Rounds；重复导入按 external ID/content hash append Message，绝不自动覆盖旧 Rounds。
+- ChatGPT `conversations.json` 由 pure linearizer 读取 current-node 主分支，只接收 User/Assistant 文本。首次导入复用现有 ImportService 生成 Rounds；重复导入按 external conversation/message identity append Message，绝不自动覆盖旧 Rounds。
 
 ## v1.0 Phase0 architecture freeze
 
@@ -49,7 +59,7 @@ SearchDocument → SearchResult（read-only）
 - Import Parser 纯函数化、版本化，不写 Storage；Preview + 人工确认后才由 ImportService 持久化。
 - 不引入 Session；Conversation、Round、Workspace、ImportReceipt 已覆盖其候选职责。
 
-所有权边界：Conversation 只拥有 Source segment、Round、Message、Version、Note 与对应 owner metadata。删除 Conversation 后，Proposal、Knowledge、Task、ImportReceipt 默认保留并显示 live reference missing；需要删除派生副本时必须使用独立 privacy-erasure 用例并展示影响。
+当前删除边界：Conversation 删除使用统一 dependency collector 清理 Source、Round、Message、Version、关联 Proposal 与 owner sidecars；正式 KnowledgeCard 与 Task 保留，但 provenance 降级为 missing，不生成失效 live link。该语义由 v1.6.3 referential-integrity 回归覆盖。
 
 详细决策见 [RFC-005](./docs/rfc/RFC-005-conversation-round-model.md)、[RFC-006](./docs/rfc/RFC-006-import-parser-contract.md)、[RFC-007](./docs/rfc/RFC-007-search-result-contract.md)、[RFC-008](./docs/rfc/RFC-008-proposal-review-knowledge-lifecycle.md)、[ADR-004](./docs/adr/ADR-004-conversation-remains-aggregate-root.md) 与 [Freeze Report](./docs/reviews/Architecture-Freeze-v1.0-Phase0.md)。
 
@@ -93,9 +103,9 @@ Page ───────────────→ Service ──────
  │                       │                        ↑
  │                       └────────→ Entity        │ implements
  │                                                │
- └── composition / simple CRUD ─────────→ BrowserStorage
-                                          │
-                                          └── LocalStorage
+ └── composition / simple CRUD ─────────→ Storage Adapter
+                                          ├── IndexedDB canonical stores
+                                          └── LocalStorage config / sidecars / legacy
 ```
 
 依赖方向的关键点是：Core 中的 Entity、Contract 和 Service 不依赖 Next.js、React 或 LocalStorage。BrowserStorage 位于 Infrastructure 并实现 Contract。Page 是组合入口，可以实例化 BrowserStorage 并调用 Service，但不能直接读写 `window.localStorage`。
@@ -119,7 +129,7 @@ Entity 定义产品语言、数据形状、状态和实体引用，不包含页�
 
 | Entity | 作用与主要关系 |
 | --- | --- |
-| `Workspace` | Conversation 的单层归属；Inbox 是默认 Workspace。 |
+| `Workspace` | Conversation 的多层 Workspace/Folder 归属；Inbox 是默认根节点。 |
 | `Conversation` | 工作区聚合入口；保存标题、来源类型和时间信息。 |
 | `ImportProfile` | Clipboard 纯文本来源的名称、来源类型、说明与角色别名定义。 |
 | `ImportedSource` | 原始文本；可通过 `conversationId` 归属 Conversation。 |
@@ -133,7 +143,7 @@ Entity 定义产品语言、数据形状、状态和实体引用，不包含页�
 | `ProviderConfiguration` | Provider 默认参数、配置启用状态、离线测试状态与能力集合。 |
 | `ProviderCapability` | chat、vision、tool_call 等可枚举能力。 |
 | `SearchFilter` | Search 2.0 的关键词、实体类型、Workspace、Tag、Provider、状态、Task 筛选与日期范围条件。 |
-| `SearchResult` | 六类实体统一映射后的标题、摘要、匹配字段与展示元数据。 |
+| `SearchResult` | 当前 Search entity 类型统一映射后的标题、摘要、匹配字段与展示元数据。 |
 | `Task` | 独立行动实体；拥有状态、优先级、类型、日期、Workspace、SourceRef 快照与生命周期时间。 |
 
 `Task` 已实现并遵循 RFC-003 的独立生命周期与删除边界；当前 SourceRef 在兼容设计上扩展到 Message、Proposal、Workspace 与 Manual 快照。`Activity` 尚未实现，仍为 planned / not immediate。
@@ -174,6 +184,18 @@ Contract 描述 Core 需要的能力，而不是具体实现。目前包括 Work
 
 Storage adapters 是 Contract 的浏览器持久化实现。IndexedDB 是 Conversation、Message、Round、Source、Proposal、KnowledgeCard 与 ConversationVersion 的默认正式业务存储；Browser LocalStorage adapter 保留用于 legacy compatibility、migration source、rollback/debug 与轻量配置。
 
+七个 canonical IndexedDB stores：
+
+1. `conversations`
+2. `messages`
+3. `rounds`
+4. `sources`
+5. `proposals`
+6. `knowledge-cards`
+7. `conversation-versions`
+
+LocalStorage sidecars 包括 `current-source`、`current-proposal` 等当前选择指针；它们必须通过 Infrastructure adapter 读取和清理，不能被合并回 canonical entity 集合。Workspace、Task、Tag、AnalyzerRun、Asset metadata、Feedback/AppEventLog、Provider 配置与 UI preference 仍是现有 LocalStorage/sidecar 边界，不得误写为上述七个 canonical stores。
+
 Storage adapters 负责：
 
 - IndexedDB store 或 LocalStorage key 的集中管理。
@@ -193,6 +215,9 @@ LocalStorage 集合 key 继续使用 `ai-learning-os.*` 命名空间。`current-
 Service 承担领域转换和跨实体编排：
 
 - `message-parser`：把原始文本按说话人规则解析为 Message。
+- `import-parser-pipeline`：纯函数解析 Paste/TXT，生成 Message/Round drafts 与 errors/warnings。
+- `import-service`：New confirm 与 Existing append 的唯一 text/TXT write boundary，返回实际新增 ID/count 供 durability verification。
+- `chatgpt-export-import`：structured ChatGPT linearization、external identity 去重与 append orchestration；不承担 TXT parsing。
 - `import-profile-service`：提供六种默认 Import Profile，驱动来源专属解析、标题建议与导入预览统计。
 - `demo-provider`：以确定性本地逻辑分析 Source 或 Messages。
 - `ollama-provider`：使用 ProviderConfiguration 与 PromptTemplate，通过本地 `/api/chat` 非流式生成结构化输出并执行 Validator。
@@ -292,7 +317,7 @@ Search 不新增持久化 key 或索引；`q`、`workspaceId` 和 `type` 只保�
 ## 一致性与兼容
 
 - 同一 Proposal 只能对应一张 KnowledgeCard。
-- 删除 Conversation 会通过 Service 清理关联 Message、Source、Proposal 和 KnowledgeCard。
+- 删除 Conversation 会通过 canonical Service 清理关联 Message、Round、Source、Proposal、Version；正式 KnowledgeCard 与 Task 保留并降级来源。
 - 复制 Conversation 会为关联实体生成新 ID，并重建 Source、Message、Proposal 引用。
 - 删除 Proposal 不会删除已经生成的 KnowledgeCard；知识卡保留来源快照并可提示引用缺失。
 - 删除 Tag 会从 KnowledgeCard 的 `tagIds` 中解除关联，不会删除知识卡。
@@ -306,12 +331,14 @@ Search 不新增持久化 key 或索引；`q`、`workspaceId` 和 `type` 只保�
 
 ## 当前限制与演进边界
 
-LocalStorage 适合当前单设备 MVP，但容量有限、同步读写、无事务，也不解决备份、跨设备同步和并发。需要更换存储时，应新增或替换 Contract Adapter，而不是让 Page 直接依赖数据库。
+IndexedDB 是当前七类 canonical business data 的事实来源；LocalStorage 仍承载轻量配置与部分 sidecars，其容量、同步写与无事务限制仍适用。需要继续迁移其它集合时，应新增或替换 Contract Adapter，而不是让 Page 直接依赖数据库。
 
 同理，接入真实 AI 前应先确认安全、密钥、错误处理、成本、重试和隐私方案。Provider 仍只能生成 Proposal，人工 Review 边界保持不变。
 
-Workspace 只提供单层归属，不形成目录树，也不引入账号、权限、团队协作、数据库或云同步。相关决策见 [RFC-002](./docs/rfc/RFC-002-workspace.md)；LocalStorage 与人工审核边界分别见 [ADR-001](./docs/adr/ADR-001-localstorage-first.md) 和 [ADR-002](./docs/adr/ADR-002-human-review-required.md)。
+Workspace/Folder 已支持本地多层组织，但不引入账号、权限、团队协作、服务端数据库或云同步。相关历史决策见 [RFC-002](./docs/rfc/RFC-002-workspace.md)；人工审核边界见 [ADR-002](./docs/adr/ADR-002-human-review-required.md)。
 
 v0.9 SearchIndexService 是对当前 LocalStorage 集合的同步运行时构建与线性评分，适合当前单浏览器小数据量边界；它不包含数据库索引、RAG、Embedding、AI 语义搜索或云同步。
 
 Task 使用独立 Contract、BrowserStorage 与 Service，并由 Search 只读映射。Knowledge 不负责行动，Task 不负责知识内容，Provider 不负责业务决策，Search 不拥有数据，未来 Activity 不负责当前业务状态。AI 不能直接创建、完成或删除 Task；AI Suggest Task 也未实现。
+
+明确 backlog：ChatGPT share-link import、从 share link 更新已有 Conversation、mobile/PWA、cloud/multi-device sync、multi-user/family sharing、attachment/voice/canvas/tool nodes、import transaction fan-out optimization、advanced cross-source semantic dedup，以及 AI/RAG/Embedding。它们都不是当前 runtime 能力。

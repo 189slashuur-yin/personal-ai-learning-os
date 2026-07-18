@@ -139,7 +139,13 @@ class TextConversationParser implements ConversationParser {
 
     if (!artifact.content.trim()) errors.push("Import content is empty.");
     if (messages.length > 0 && unknownCount === messages.length) {
-      warnings.push("No supported speaker labels were found; content is preserved as unknown.");
+      if (this.id === "txt") {
+        errors.push(
+          "TXT does not contain parseable speaker labels. Use User/Assistant, 用户/AI, 我/GPT, or 问/答.",
+        );
+      } else {
+        warnings.push("No supported speaker labels were found; content is preserved as unknown.");
+      }
     }
 
     return {

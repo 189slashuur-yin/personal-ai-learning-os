@@ -1,3 +1,143 @@
+# PALOS v1.6.4 — Known Issues Closure / Existing TXT / Import Diagnostics
+
+## 2026-07-16 work-in-progress checkpoint
+
+本轮在 `fix/v1.6.4-known-issues-closure`、基线 `9d8a83c` / `v1.6.3-integrity-ui-closure` 上完成实现；没有修改 IndexedDB schema，没有重写 v1.6.1 canonical atomic delete、v1.6.2 structured ChatGPT import 或 v1.6.3 referential integrity，没有清理用户浏览器数据，也没有创建 commit。
+
+Canonical IndexedDB stores 仍固定为 7 个：`conversations`、`messages`、`rounds`、`sources`、`proposals`、`knowledge-cards`、`conversation-versions`。LocalStorage 继续承载 `current-source` / `current-proposal` 选择指针、轻量配置、UI preference、storage metadata、legacy migration 数据与其它非 canonical sidecars。
+
+### Complete Known Issues Matrix
+
+| ID | 来源 | 审计状态 | 级别 | 本轮结果 | 验收证据 |
+| --- | --- | --- | --- | --- | --- |
+| KI-01 Existing + TXT | 用户反馈 / code audit | partially fixed | P1 | fixed | Existing 可直接选 TXT；`ImportService.appendToConversation` 追加 Source/Message/Round；reload durability test |
+| KI-02 Import progress | 用户反馈 / code audit | confirmed open | P1 | fixed | 明确 10 phases；批量每 10 Conversations 更新；显示 Message/Round/skipped counters |
+| KI-03 quota warning / confirm | 用户反馈 / code audit | confirmed open | P1 | fixed | 超阈值按钮不再 disabled；warning 后进入 explicit confirm；quota stop 有 processed/unprocessed |
+| KI-04 Copy Diagnostics 普通用户可见 | 用户反馈 / code audit | confirmed open | P1 | fixed | `NEXT_PUBLIC_PALOS_DIAGNOSTICS=1` gate；默认 component 返回 null |
+| KI-05 production debug/console | TODO / code audit | confirmed open | P1 | fixed | console 只在 bulk flag 输出；移除 R1.3 logs 与旧 console fallback 文案 |
+| KI-06 AppEventLog 循环实例化 | code audit | confirmed open | P2 | fixed | ChatGPT batch 每个 component 复用一个 `BrowserAppEventLogStorage` |
+| KI-07 Quick filter tests | code audit | confirmed open | P2 | fixed | pure quick-filter helper + all/empty/imported/failed/workspace tests |
+| KI-08 deriveRoundDrafts edges | code audit | partially fixed | P2 | fixed | empty/system/orphan/unknown/consecutive assistant tests；既有 parsing 不变 |
+| KI-09 cross-source duplicate | 用户反馈 / code audit | confirmed open | P1 | fixed | same identity skip；same source later update append；different source same content preserved |
+| KI-10 docs stale | README/ARCHITECTURE/ROADMAP/CHANGELOG/HANDOFF | confirmed open | P1 | fixed | 五份文档统一 v1.6.4 WIP、7 stores、sidecars、matrix 与 backlog |
+| KI-11 mode stale state / URL | 用户反馈 / code audit | confirmed open | P1 | fixed | target/input switch 清无效 state；New URL 不保留 target；legacy target param 移除 |
+| KI-12 invalid TXT | 用户反馈 / code audit | partially fixed | P1 | fixed | empty/whitespace/no labels/invalid UTF-8 全部 failed，不可 confirm |
+| KI-13 Existing append report count | 用户反馈 / code audit | partially fixed | P1 | fixed | report 来自实际新增 ID/count；success 前 reload 后核对 delta 与引用 |
+| KI-14 error + stale success | 用户反馈 / code audit | confirmed open | P1 | fixed | 新操作清旧 report/error；失败清 report；success 只在 verifying 后设置 |
+| KI-15 delete/Clear 后立即 import | v1.6.1 regression | already fixed | P1 | preserved | 既有 Clear / single delete / batch delete 后 import tests 继续通过 |
+| KI-16 Proposal/Note/Navigator | v1.6.3 HANDOFF | already fixed | P0/P1 | preserved | orphan cleanup、Review not-found、single Note editor、contained Navigator、Analyzer gate tests 继续通过 |
+| KI-17 import transaction fan-out | code comment / HANDOFF | feature backlog | feature | not implemented | 记录为 future performance debt；本轮不改 canonical storage contracts |
+| KI-18 share link / mobile / cloud / AI | product non-goals | feature backlog | feature | not implemented | 五份文档明确未支持，不冒充 current capability |
+
+### Existing + TXT final execution chain
+
+```text
+Existing target selector
+  → TXT File input
+  → fatal UTF-8 decode
+  → ImportParserPipeline.preview(parserId = txt)
+  → reject empty / whitespace / no speaker labels / no Messages
+  → ImportService.appendToConversation(targetId)
+  → save Source(filename + raw content)
+  → save Messages(target conversationId + actual IDs)
+  → save Rounds(target conversationId + actual Message IDs)
+  → update target Conversation.updatedAt
+  → flushCachesToIndexedDB
+  → clearCaches
+  → preloadAll
+  → verify Conversation count unchanged, Source metadata, exact Message/Round delta,
+     ownership, returned IDs, and every Round.messageIds reference
+  → success report
+```
+
+失败会清除旧 success report 并显示明确 error；不会创建额外 Conversation。Existing TXT 不调用 ChatGPT structured parser。
+
+### Final Import mode matrix
+
+| Target | Input | Status | Write semantics |
+| --- | --- | --- | --- |
+| New | ChatGPT Export | supported | structured linearizer → one canonical Conversation per selected source；external conversation duplicate skip |
+| New | Paste Text | supported | labeled-text Preview → new Source/Messages/Rounds |
+| New | TXT File | supported | UTF-8 TXT Preview → new Source/Messages/Rounds |
+| Existing | ChatGPT Export | supported | append new external message identities；old content untouched |
+| Existing | Paste Text | supported | append one Source segment + parsed Messages/Rounds |
+| Existing | TXT File | supported | same text/TXT pipeline；preserve filename；durable reload verification |
+
+### Duplicate semantics boundary
+
+- Same ChatGPT Export imported in New mode：existing `externalConversationId` means no duplicate Conversation copy.
+- Same ChatGPT Conversation later update：Existing append skips existing `externalMessageId` values and appends new identities; no longer skips the whole source after the first intersection.
+- Same TXT file appended again：there is no reliable cross-file identity, so PALOS does not pretend to provide semantic file dedup.
+- Repeated content inside one TXT append：each parser result is written exactly once; identical legitimate utterances are preserved with distinct canonical IDs.
+- Different source, same content：not globally deduplicated by pure content hash.
+- `skipped` for ChatGPT means messages skipped by known external identity; `skipped` for Paste/TXT is currently `0`.
+
+### Progress / error / quota state machine
+
+`idle → parsing → preview-ready → confirming → importing → flushing → verifying → success`
+
+Terminal alternatives are `failed` and `quota-stopped`. Batch progress reports processed/selected Conversations, imported Messages, imported Rounds and skipped Messages; React state updates every 10 Conversations or at final item, not per Message. New operations clear old error/success. Storage success is impossible before flush and reload verification. Quota warning does not disable the action; user may cancel at confirmation. `quota-stopped` only counts items still readable after persistence verification and reports unprocessed Conversations.
+
+### Production diagnostics
+
+- Bounded in-memory buffer remains available to code and tests without affecting correctness.
+- `BulkDiagnosticsCopyButton` and `[PALOS BULK DIAG]` console output require `NEXT_PUBLIC_PALOS_DIAGNOSTICS=1`.
+- Analyzer failure injection remains independent behind `NEXT_PUBLIC_PALOS_ANALYZER_DIAGNOSTICS=1`.
+- ID arrays are normalized to count + at most 10 sample IDs; batch-delete residual console output is also sampled.
+- Diagnostics did not add any drain、flush、clearCaches or preload call and is not a success dependency.
+
+### Small performance / quality changes
+
+- `BrowserAppEventLogStorage` moved out of both ChatGPT batch loops and is reused.
+- Import progress is throttled per 10 Conversations.
+- Import preview remains memoized only on artifact/parser inputs; unrelated progress/report state does not trigger full parse.
+- Conversation quick filters and Import URL/phase state are reusable pure helpers.
+- ChatGPT per-Conversation pending-write fan-out was not refactored and remains documented performance debt.
+
+### Tests
+
+- 原 159 tests 全部保留。
+- 新增 25 tests；当前总数为 6 files / 184 tests。
+- 新增覆盖：六种 Import 组合、Existing TXT count/ownership/reference/source metadata、flush→clear→preload durability、invalid TXT、mode/URL、same-source update、cross-source same content、TXT repeats、progress/failure/quota、diagnostic flags/sampling、quick filters、deriveRoundDrafts edges。
+- 既有 atomic batch delete、Clear write barrier、Proposal integrity、Review not-found、Note editor、Navigator contained scroll、ChatGPT count parity 与 Manual text parsing 回归继续通过。
+
+### Files
+
+- Import UI：`src/app/import/import-workbench.tsx`、`src/app/import/chatgpt-export-import.tsx`
+- Import services/state：`src/core/services/import-service.ts`、`chatgpt-export-import.ts`、`import-parser-pipeline.ts`、`import-page-state.ts`、`import-operation-state.ts`
+- Diagnostics/quality：`src/infrastructure/diagnostics/bulk-data-diagnostics.ts`、`src/app/bulk-diagnostics-copy-button.tsx`、`src/core/services/conversation-quick-filters.ts`、`src/app/conversation/conversation-list.tsx`
+- Tests：`tests/v164-known-issues.test.ts`、`chatgpt-export-import.test.ts`、`indexeddb-reliability.test.ts`、`bulk-data-diagnostics.test.ts`
+- Docs：`README.md`、`ARCHITECTURE.md`、`ROADMAP.md`、`CHANGELOG.md`、`HANDOFF.md`
+
+### Explicit backlog
+
+- ChatGPT share-link import；update an existing Conversation from share link。
+- mobile / PWA；cloud / multi-device sync；multi-user / family sharing。
+- attachment / voice / canvas / tool nodes。
+- import transaction fan-out optimization。
+- advanced cross-source semantic dedup。
+- AI / RAG / Embedding。
+
+### Verification / browser QA / commit
+
+最终 gate：`npm run lint` passed；`npm run build` passed（19 routes）；`npm test -- --run` passed（6 files / 184 tests）；`git diff --check` passed。
+
+2026-07-19 已完成真实、可回收的应用内浏览器闭环，没有清空整个浏览器数据：
+
+1. 通过 New + Paste 创建临时 Conversation，初始统计为 2 Messages / 1 Round / 1 Source。
+2. 从详情页真实点击进入 Import，选择 Existing + TXT；页面只显示 1 个 target selector 与 1 个 file input。
+3. 真实上传 UTF-8 TXT；preview 与 success report 均为新增 4 Messages / 2 Rounds / 0 skipped。
+4. 首轮发现详情页显示 6 Messages / 3 Rounds / **1 Source**。底层 Source 记录实际均已保存，问题是详情页把 singular latest Source 错当作总数。先保存截图与 Console 证据，再让 `conversation-detail.tsx` 按 `conversationId` 统计全部 Source；回归测试增加已有 Source 后 append 应保留 2 条的断言。
+5. 修复后从创建临时 Conversation 开始完整复跑：追加后为 6 Messages / 3 Rounds / 2 Sources；整页刷新后仍为 6 / 3 / 2。
+6. 删除临时 Conversation 后，Dashboard 无标题残留；Search 使用完整临时标题查询返回 no-results；Review 显示 canonical missing/deleted state，没有旧实体内容。
+7. 每个截图检查点的 PALOS tab Console error 均为 0。文件选择期间 Codex Browser client 的 Statsig 遥测请求发生超时，但不在 PALOS 页面 Console 中，也未影响解析、flush、verify 或删除。
+
+截图与逐步 Console 记录位于 workspace 外的 Codex visualization artifact：`palos-v164-browser-qa-2026-07-19/`。两个临时 Conversation 均已通过现有 UI 删除，没有清理或重置其他浏览器数据。
+
+本轮不创建 commit。真实浏览器 QA 与最终自动门禁均通过后，可以建议用户创建聚焦的 v1.6.4 commit。
+
+---
+
 # PALOS v1.6.3.1 — Current Referential Integrity and UI Regression Closure
 
 ## 2026-07-16 checkpoint
@@ -587,7 +727,9 @@ None。所有新 provenance 字段为 optional；旧 Message、Q&A Pair、Propos
 4. 覆盖全部 Round 操作、Round Analyze → Review → Knowledge、Search 深链与 History restore。
 5. 回归 v0.9 Search/Asset、旧 Q&A Pair、Proposal Evidence、Knowledge Source、Task SourceRef 与 Conversation copy/delete。
 
-## Remaining TODO
+## Historical Phase1 follow-up list（superseded; not current TODO）
+
+以下是旧 Phase1 checkpoint 的历史记录；其中已完成项以本文件顶部 v1.6.4 matrix 和当前 ROADMAP 为准，不应作为当前待办继续执行。
 
 - 执行并记录 Phase1 人工 QA；在通过前保持 alpha draft。
 - 完成 recovery export/staging/checksum/commit marker/rollback 后，才能讨论任何破坏性 schema migration。

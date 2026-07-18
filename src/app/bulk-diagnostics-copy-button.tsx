@@ -4,10 +4,12 @@ import { useState } from "react";
 import {
   formatBulkDiagnostics,
   getBulkDiagnosticEntries,
+  isBulkDiagnosticsEnabled,
 } from "@/infrastructure/diagnostics/bulk-data-diagnostics";
 
 export function BulkDiagnosticsCopyButton() {
   const [status, setStatus] = useState<string | null>(null);
+  const diagnosticsEnabled = isBulkDiagnosticsEnabled();
 
   async function copyDiagnostics() {
     const count = getBulkDiagnosticEntries().length;
@@ -19,9 +21,11 @@ export function BulkDiagnosticsCopyButton() {
       await navigator.clipboard.writeText(formatBulkDiagnostics());
       setStatus(`已复制 ${count} 条诊断记录。`);
     } catch {
-      setStatus("复制失败，请从浏览器 Console 复制 [PALOS BULK DIAG] 记录。");
+      setStatus("复制失败，请重试或使用浏览器开发工具检查诊断记录。");
     }
   }
+
+  if (!diagnosticsEnabled) return null;
 
   return (
     <span className="inline-flex items-center gap-2">

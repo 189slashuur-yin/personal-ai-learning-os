@@ -4,10 +4,10 @@ Personal AI Learning OS 是一个本地优先的个人学习与知识整理工�
 
 ## Project Status
 
-- Current Version：v1.0 alpha draft
-- Current Phase：v1.0 Phase2 — Second Brain Workspace
-- Current Focus：Epic M–AB 已实现并通过自动门禁；alpha 人工 QA 待执行
-- Next Recommended Phase：执行 `docs/qa/V10-MANUAL-QA-PLAN.md`，解决 Release Review 中的人工验收阻塞项
+- Current Version：v1.6.4 work-in-progress
+- Current Phase：Known Issues Closure / Import Reliability
+- Current Focus：完整 Import mode matrix、Existing + TXT durable append、progress/error/quota 状态与 production diagnostics 清理
+- Verification：6 个测试文件 / 184 tests；non-mutating minimal browser smoke 已通过；真实 Existing + TXT 文件上传建议在 disposable profile 复测
 
 ### Feature Matrix
 
@@ -24,7 +24,7 @@ Personal AI Learning OS 是一个本地优先的个人学习与知识整理工�
 | Knowledge | ✅ | Review 后生成、编辑、归档与来源追溯。 |
 | Provider | ✅ | Demo Provider 与可选本地 Ollama；云 Provider 未启用。 |
 | Version | ✅ | Conversation History、版本记录与恢复点。 |
-| Import | ✅ alpha | Paste/TXT/Manual Round Builder，以及 ChatGPT `conversations.json` 最小导入、增量与去重。 |
+| Import | ✅ v1.6.4 WIP | New / Existing × ChatGPT Export / Paste Text / TXT File 六种组合；Preview、进度、flush/reload verification 与明确错误。 |
 | Export / Restore | ✅ alpha | PALOS App Data 预览/分类导入、失败回滚，以及 Conversation/Round/Knowledge/Workspace 导出。 |
 | Recipe | ✅ foundation | 本地手动工作流模板；不自动执行，不是 Agent。 |
 | Tag | ✅ | Tag 管理、关联与筛选。 |
@@ -46,9 +46,18 @@ Q&A Pair → Analyze → Proposal → Review
 KnowledgeCard + Tags
 ```
 
-v0.9 draft 在 v0.8 基线上增加统一 SearchDocument、具体文本片段检索、轻量 fuzzy、Conversation Note、Asset metadata、备份脚本和 Data Management 说明。结构化数据仍保存在 LocalStorage 中，不引入数据库、RAG 或云同步。
+v0.9 draft 在当时的 LocalStorage 基线上增加统一 SearchDocument、具体文本片段检索、轻量 fuzzy、Conversation Note、Asset metadata、备份脚本和 Data Management 说明。当前 v1.6.x 已将七个 canonical business stores 迁到 IndexedDB；该段只描述历史版本。
 
-v1.0 Phase2 已把 Phase1 的 Conversation/Round 基线扩展为 Second Brain Workspace：Conversation 是长对话线程，Round 是最小整理单位，Knowledge 是已确认知识，Proposal 是 AI 整理建议，Workspace/Folder 提供多层组织。ChatGPT 导入仅支持官方 Export zip 解压后的 `conversations.json` 文本消息；重复导入按 external ID、缺失时按 content hash 增量去重，不自动覆盖旧 Rounds。
+v1.0 Phase2 已把 Phase1 的 Conversation/Round 基线扩展为 Second Brain Workspace。当前 ChatGPT 导入仅支持官方 Export zip 解压后的 `conversations.json` 文本消息；同一 ChatGPT source 优先按 `externalConversationId` / `externalMessageId` 识别，后续更新只追加新 identity。Existing append 不用纯 content hash 做跨 source 全局去重，避免误删不同来源的合法同内容 Message。
+
+### Import mode matrix
+
+| Import target | ChatGPT Export | Paste Text | TXT File |
+| --- | --- | --- | --- |
+| New Conversation | 支持；每个选中 ChatGPT Conversation 新建或按既有 external identity 跳过重复 | 支持；labeled-text parser + Preview | 支持；UTF-8 `.txt` + TXT parser + Preview |
+| Existing Conversation | 支持；追加新 message identity，不覆盖旧内容 | 支持；追加 Source / Messages / Rounds | 支持；保留文件名与 Source metadata，追加后执行 flush → clear caches → preload → 引用/计数验证 |
+
+Import target 与 input source 各只有一个选择区。切换 New/Existing 或 ChatGPT/Paste/TXT 时会清理不适用的 target、文件、文本、success/error 与 URL 参数。空白 TXT、无法 UTF-8 解码、没有可解析角色标签或没有 Message 的文件不会显示成功，也不会创建 Empty Conversation。
 
 ## 当前功能
 
@@ -117,6 +126,7 @@ npm run start
 ```bash
 npm run lint
 npm run build
+npm test -- --run
 git diff --check
 ```
 
@@ -134,7 +144,7 @@ node scripts/backup-local-data.mjs
 node scripts/backup-local-data.mjs --target "/Users/xxx/Library/Mobile Documents/com~apple~CloudDocs/PALOS-Backups"
 ```
 
-备份包含 `docs/`、README、PROJECT、ARCHITECTURE、ROADMAP、HANDOFF、CHANGELOG，以及存在时的项目内 `data/`。脚本不会读取项目外文件；浏览器 LocalStorage 请使用 Settings 的 Export App Data，外部 Asset 文件仍需自行保留。
+备份包含 `docs/`、README、PROJECT、ARCHITECTURE、ROADMAP、HANDOFF、CHANGELOG，以及存在时的项目内 `data/`。脚本不会读取项目外文件；浏览器业务数据请使用 Settings 的 Export App Data，外部 Asset 文件仍需自行保留。
 
 ## 主要页面
 
@@ -163,15 +173,27 @@ node scripts/backup-local-data.mjs --target "/Users/xxx/Library/Mobile Documents
 - Next.js 16、React 19、TypeScript、Tailwind CSS 4。
 - 模块化单体：`Entity → Contract ← BrowserStorage`，由 Service 编排业务，Page 负责交互。
 - 页面不得直接调用 LocalStorage；所有 key、序列化和兼容逻辑集中在 `src/infrastructure/storage`。
+- IndexedDB 的 7 个 canonical stores 为 `conversations`、`messages`、`rounds`、`sources`、`proposals`、`knowledge-cards`、`conversation-versions`。
+- LocalStorage 只保留 lightweight config、UI preference、storage/schema metadata、legacy migration 数据与 sidecars；其中 `current-source`、`current-proposal` 是选择指针，不是 canonical entity。
+- Bulk diagnostics 默认隐藏且只保留 bounded memory buffer；设置 `NEXT_PUBLIC_PALOS_DIAGNOSTICS=1` 才显示 Copy Diagnostics 并输出 `[PALOS BULK DIAG]` console。Analyzer failure injection 使用独立的 `NEXT_PUBLIC_PALOS_ANALYZER_DIAGNOSTICS=1`。
 - 当前没有账号、云同步、服务端数据库、云端 AI 调用或多人协作；唯一真实模型调用是用户显式启用的本地 Ollama。
 - Ollama 仅使用非流式本地 HTTP；项目不负责安装、启动或下载模型，也不实现 streaming、RAG、embedding 或数据库。
-- 清除浏览器站点数据会删除本地内容；当前尚无正式备份恢复流程。
+- 清除浏览器站点数据会删除本地内容；Settings 提供 PALOS App Data export/import，但外部 Asset 文件仍需用户自行备份。
+
+## 明确未实现 / Backlog
+
+- ChatGPT share-link import，以及从 share link 更新已有 Conversation。
+- mobile / PWA、cloud or multi-device sync、multi-user / family sharing。
+- attachment、voice、canvas、tool nodes 的完整导入。
+- ChatGPT import transaction fan-out optimization。
+- advanced cross-source semantic dedup。
+- AI / RAG / Embedding、云 Provider 与自动接受 Proposal。
 
 更详细的产品边界见 [PROJECT.md](./PROJECT.md)，分层与数据流见 [ARCHITECTURE.md](./ARCHITECTURE.md)，后续计划见 [ROADMAP.md](./ROADMAP.md)。
 
 当前工程统计见 [Project Status](./docs/project-status.md)，本版本变更与限制见 [Release v0.9 Draft](./docs/releases/v0.9-draft.md)。
 
-架构图与决策记录见 [Architecture Diagram](./docs/architecture/architecture-diagram.md)、[RFC-004](./docs/rfc/RFC-004-data-and-search-foundation.md)、[RFC-005](./docs/rfc/RFC-005-conversation-round-model.md)、[RFC-006](./docs/rfc/RFC-006-import-parser-contract.md)、[RFC-007](./docs/rfc/RFC-007-search-result-contract.md)、[RFC-008](./docs/rfc/RFC-008-proposal-review-knowledge-lifecycle.md)、[ADR-001](./docs/adr/ADR-001-localstorage-first.md)、[ADR-002](./docs/adr/ADR-002-human-review-required.md)、[ADR-003](./docs/adr/ADR-003-local-asset-library.md) 与 [ADR-004](./docs/adr/ADR-004-conversation-remains-aggregate-root.md)。RFC-005–008 与 ADR-004 当前均为 approval-pending candidate。
+架构图与决策记录见 [Architecture Diagram](./docs/architecture/architecture-diagram.md)、[RFC-004](./docs/rfc/RFC-004-data-and-search-foundation.md)、[RFC-005](./docs/rfc/RFC-005-conversation-round-model.md)、[RFC-006](./docs/rfc/RFC-006-import-parser-contract.md)、[RFC-007](./docs/rfc/RFC-007-search-result-contract.md)、[RFC-008](./docs/rfc/RFC-008-proposal-review-knowledge-lifecycle.md)、[ADR-001](./docs/adr/ADR-001-localstorage-first.md)、[ADR-002](./docs/adr/ADR-002-human-review-required.md)、[ADR-003](./docs/adr/ADR-003-local-asset-library.md) 与 [ADR-004](./docs/adr/ADR-004-conversation-remains-aggregate-root.md)。RFC-005–008 与 ADR-004 已形成当前 v1.x domain baseline；历史 ADR-001 不再代表 v1.6.x 的默认 business storage。
 
 手工验收步骤见 [Manual QA Checklist](./docs/QA_CHECKLIST.md)。
 

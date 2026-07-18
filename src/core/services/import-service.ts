@@ -68,8 +68,9 @@ export class ImportService {
       updatedAt: timestamp,
       lastOpenedAt: timestamp,
     });
+    const sourceId = crypto.randomUUID();
     this.sources.save({
-      id: crypto.randomUUID(),
+      id: sourceId,
       conversationId,
       kind: "text",
       name: preview.artifact.name,
@@ -86,6 +87,10 @@ export class ImportService {
       roundCount: canonicalRounds.length,
       parserId: preview.parserId,
       parserVersion: preview.parserVersion,
+      sourceId,
+      messageIds: canonicalMessages.map((message) => message.id),
+      roundIds: canonicalRounds.map((round) => round.id),
+      skippedCount: 0,
     };
   }
 
@@ -128,8 +133,9 @@ export class ImportService {
       updatedAt: timestamp,
     }));
 
+    const sourceId = crypto.randomUUID();
     this.sources.save({
-      id: crypto.randomUUID(),
+      id: sourceId,
       conversationId,
       kind: "text",
       name: preview.artifact.name,
@@ -151,6 +157,10 @@ export class ImportService {
       roundCount: appendedRounds.length,
       parserId: preview.parserId,
       parserVersion: preview.parserVersion,
+      sourceId,
+      messageIds: appendedMessages.map((message) => message.id),
+      roundIds: appendedRounds.map((round) => round.id),
+      skippedCount: 0,
     };
   }
 }
