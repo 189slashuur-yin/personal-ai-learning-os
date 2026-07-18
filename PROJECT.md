@@ -14,13 +14,13 @@ Personal AI Learning OS 面向希望长期整理 AI 对话与学习材料的个�
 
 ## 当前阶段
 
-截至 2026-07-06，运行时进入 v1.0 alpha draft — Second Brain Workspace。Phase2 Epic M–AB 已在 Phase1 Round 基线上实现多层 Workspace/Folder、Conversation Explorer/Workspace Mode、Round/Conversation Summary、Round Knowledge、Import UX、Analyzer UX、Search Anchors、Asset metadata、Recipe、Feedback/Data Health、导航与本地 Export/Restore。
+截至 2026-07-19，运行时进入 v1.6.5 Stable candidate。v1.6.4 Known Issues Closure 已由 checkpoint commit `9ed8feb` 保护；本轮只收口 canonical Storage Factory、App Data restore 安全链和最小 Playwright E2E，没有新增产品功能或修改 IndexedDB schema。
 
-- Current Version：v1.0 alpha draft
-- Current Focus：Phase2 Epic M–AB implementation complete；alpha manual QA pending
-- Next Recommended Phase：执行 V10 Manual QA 与 Release Review；通过前保持 alpha
+- Current Version：v1.6.5 Stable candidate
+- Current Focus：Storage Factory / App Data Restore / E2E closure
+- Next Recommended Phase：完成 release review 后创建独立 release commit；当前不 push、不标记正式 release
 
-当前实现仍是 alpha：自动质量门禁已通过，但人工浏览器 QA 尚未执行，不能标记正式 v1.0 release。
+当前候选已通过自动质量门禁和 Playwright 浏览器闭环。Restore backup 只保证当前进程内失败回滚；异常退出后的 journal recovery 尚未实现，因此仍保持 candidate 状态。
 
 ## v1.0 Phase2 product language
 

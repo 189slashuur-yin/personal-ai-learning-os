@@ -4,10 +4,10 @@ Personal AI Learning OS 是一个本地优先的个人学习与知识整理工�
 
 ## Project Status
 
-- Current Version：v1.6.4 work-in-progress
-- Current Phase：Known Issues Closure / Import Reliability
-- Current Focus：完整 Import mode matrix、Existing + TXT durable append、progress/error/quota 状态与 production diagnostics 清理
-- Verification：6 个测试文件 / 184 tests；non-mutating minimal browser smoke 已通过；真实 Existing + TXT 文件上传建议在 disposable profile 复测
+- Current Version：v1.6.5 Stable candidate
+- Current Phase：Storage Factory / App Data Restore / E2E closure
+- Current Focus：固化 v1.6.4 Known Issues Closure，不增加新功能
+- Verification：7 个 Vitest 文件 / 187 tests；Playwright 1 个完整 create/import/reload/search/export/delete/restore 闭环；lint/build/diff-check passed
 
 ### Feature Matrix
 
@@ -24,8 +24,8 @@ Personal AI Learning OS 是一个本地优先的个人学习与知识整理工�
 | Knowledge | ✅ | Review 后生成、编辑、归档与来源追溯。 |
 | Provider | ✅ | Demo Provider 与可选本地 Ollama；云 Provider 未启用。 |
 | Version | ✅ | Conversation History、版本记录与恢复点。 |
-| Import | ✅ v1.6.4 WIP | New / Existing × ChatGPT Export / Paste Text / TXT File 六种组合；Preview、进度、flush/reload verification 与明确错误。 |
-| Export / Restore | ✅ alpha | PALOS App Data 预览/分类导入、失败回滚，以及 Conversation/Round/Knowledge/Workspace 导出。 |
+| Import | ✅ v1.6.5 candidate | New / Existing × ChatGPT Export / Paste Text / TXT File 六种组合；Preview、进度、flush/reload verification 与明确错误。 |
+| Export / Restore | ✅ candidate | PALOS App Data restore 先预校验并备份，写入后验证；失败只在备份恢复也通过验证时声明已回滚。 |
 | Recipe | ✅ foundation | 本地手动工作流模板；不自动执行，不是 Agent。 |
 | Tag | ✅ | Tag 管理、关联与筛选。 |
 | Proposal | ✅ | Source / Messages 分析、证据与生成元数据。 |

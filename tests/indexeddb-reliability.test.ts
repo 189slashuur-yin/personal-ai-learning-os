@@ -10,7 +10,11 @@ import {
   deleteConversationSidecarMetadata,
   deleteConversationWorkspace,
 } from "@/core/services/conversation-workspace";
-import { AppDataStorage } from "@/infrastructure/storage/app-data-storage";
+import {
+  AppDataRestoreError,
+  AppDataStorage,
+  type AppDataBundle,
+} from "@/infrastructure/storage/app-data-storage";
 import {
   createStorageInstances,
   getStorageMode,
@@ -624,13 +628,97 @@ describe("IndexedDB storage reliability", () => {
       "conversation-versions": [],
     });
 
-    await storage.importData(bundle, Object.keys(bundle.data));
+    const result = await storage.importData(bundle, Object.keys(bundle.data));
     clearCaches();
     await preloadAll();
 
+    expect(result.verifiedIndexedDBRecords).toBe(3);
+    expect(result.backupIndexedDBRecords).toBe(0);
     expect(new IndexedDBConversationStorage().getById("restore-c1")).not.toBeNull();
     expect(new IndexedDBMessageStorage().getByConversationId("restore-c1")).toHaveLength(1);
     expect(new IndexedDBRoundStorage().getByConversationId("restore-c1")).toHaveLength(1);
+  });
+
+  it("App Data restore rejects invalid canonical references before mutation", async () => {
+    await replaceStores({
+      conversations: [conversation("keep-c1")],
+      messages: [],
+      rounds: [],
+      sources: [],
+      proposals: [],
+      "knowledge-cards": [],
+      "conversation-versions": [],
+    });
+    const invalidBundle: AppDataBundle = {
+      schemaVersion: 1,
+      exportedAt: now,
+      data: {},
+      indexedDB: {
+        conversations: [conversation("new-c1")],
+        messages: [message("orphan-m1", "missing-c1")],
+        rounds: [],
+        sources: [],
+        proposals: [],
+        knowledgeCards: [],
+        conversationVersions: [],
+      },
+    };
+
+    await expect(new AppDataStorage().importData(invalidBundle, [])).rejects.toThrow(
+      "references missing id missing-c1",
+    );
+    expect((await readAll<Conversation>("conversations")).map((item) => item.id)).toEqual([
+      "keep-c1",
+    ]);
+  });
+
+  it("App Data restore rolls back and verifies its pre-restore backup on failure", async () => {
+    await replaceStores({
+      conversations: [conversation("before-c1")],
+      messages: [message("before-m1", "before-c1")],
+      rounds: [],
+      sources: [],
+      proposals: [],
+      "knowledge-cards": [],
+      "conversation-versions": [],
+    });
+    window.localStorage.setItem(
+      "ai-learning-os.tags",
+      JSON.stringify([{ id: "before-tag", name: "Before" }]),
+    );
+    const bundle: AppDataBundle = {
+      schemaVersion: 1,
+      exportedAt: now,
+      data: {
+        "ai-learning-os.tags": [{ id: "after-tag", name: "After" }],
+      },
+      indexedDB: {
+        conversations: [conversation("after-c1")],
+        messages: [message("after-m1", "after-c1")],
+        rounds: [],
+        sources: [],
+        proposals: [],
+        knowledgeCards: [],
+        conversationVersions: [],
+      },
+    };
+    const storage = new AppDataStorage(async (batch) => {
+      await replaceStores(batch);
+      throw new Error("injected restore failure");
+    });
+
+    const restore = storage.importData(bundle, ["ai-learning-os.tags"]);
+    await expect(restore).rejects.toBeInstanceOf(AppDataRestoreError);
+    await expect(restore).rejects.toMatchObject({ rollbackSucceeded: true });
+    expect((await readAll<Conversation>("conversations")).map((item) => item.id)).toEqual([
+      "before-c1",
+    ]);
+    expect((await readAll<Message>("messages")).map((item) => item.id)).toEqual([
+      "before-m1",
+    ]);
+    expect(JSON.parse(window.localStorage.getItem("ai-learning-os.tags") ?? "null")).toEqual([
+      { id: "before-tag", name: "Before" },
+    ]);
   });
 
   it("deleteWhere removes matching records without rewriting survivors", async () => {

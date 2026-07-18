@@ -1,3 +1,69 @@
+# PALOS v1.6.5 — Stable Candidate Handoff
+
+## 2026-07-19 candidate closure
+
+本轮先把完整 v1.6.4 dirty worktree 固化为 `9ed8feb checkpoint: v1.6.4 known issues closure`，随后只完成用户批准的 Stable 收口。没有 push，没有创建最终 release commit，没有修改 IndexedDB schema，也没有迁移 Task、Workspace、Asset、AnalyzerRun、Tag 或其它 sidecar。
+
+### Storage Factory closure
+
+- `analysis-result`、`round-workspace`、`conversation-workspace-mode`、`workspace-manager`、`tag-manager`、Tasks 与 Today 中涉及七类 canonical entity 的读取/写入统一走 `storage-factory`。
+- 七类 canonical entity 仍为 Conversation、Message、Round、Source、Proposal、KnowledgeCard、ConversationVersion。
+- 新增 source-contract 回归，防止指定业务页面重新直接依赖 canonical `Browser*Storage` implementation。
+
+### App Data restore closure
+
+```text
+preview / import
+  → validate envelope, store keys, record IDs, duplicates and references
+  → drain pending IndexedDB writes
+  → backup selected LocalStorage keys + affected IndexedDB stores
+  → apply restore
+  → clear caches + preload
+  → verify LocalStorage content + IndexedDB ID sets
+  → success
+
+failure
+  → restore backup
+  → verify backup
+  → report verified rollback OR explicitly report unconfirmed data state
+```
+
+- Restore 不再仅凭 `replaceStores()` resolve 就报告成功。
+- UI success 文案包含实际验证数量与 pre-restore backup 数量。
+- Generic failure 不再宣称“原数据已回滚”；只有 `AppDataRestoreError.rollbackSucceeded=true` 的路径才携带 verified rollback 结论。
+- Backup 是本次操作内的内存快照；journal recovery 明确未实现。
+
+### Minimal Playwright E2E
+
+- 新增 `@playwright/test`、`playwright.config.ts` 与单条 desktop Chrome 串行测试。
+- 闭环：create Conversation → Existing TXT import → detail reload → Search → App Data export → delete → reload durability → App Data restore → Search。
+- E2E 首次执行发现 URL 直接进入 `inputMode=txt` 时 parser state 仍初始化为 ChatGPT；已最小修复为初始 mode 与 parser 一致。
+- 删除后 ConversationList 会立即更新，但同页 Conversation Explorer 的独立 React snapshot 要到 reload 才同步；E2E 以 delete → reload 验证 canonical durability，本轮未扩展到跨组件状态重构。
+
+### Verification
+
+```text
+npm run lint          passed
+npm run build         passed, 19 routes
+npm test -- --run     passed, 7 files / 187 tests
+npm run test:e2e      passed, 1 test
+git diff --check      passed
+```
+
+### Remaining risks
+
+- Restore 没有 durable journal；浏览器在 replace 与 verification 之间异常退出时不能自动恢复。
+- Playwright 当前使用系统 Chrome channel；没有安装仓库固定版本的 Chromium binary。
+- Conversation Explorer 删除后同页 snapshot 可能短暂陈旧，reload 后 canonical 状态正确。
+- ChatGPT import transaction fan-out 与 advanced cross-source semantic dedup 仍是 backlog。
+- 当前 v1.6.5 candidate 改动仍在工作区；最终 release commit 尚未创建。
+
+### Release recommendation
+
+自动门禁与完整 E2E 均通过后，建议进入一次人工 release review；若接受上述剩余风险，可创建独立 v1.6.5 release commit。按本轮要求不创建该 commit。
+
+---
+
 # PALOS v1.6.4 — Known Issues Closure / Existing TXT / Import Diagnostics
 
 ## 2026-07-16 work-in-progress checkpoint

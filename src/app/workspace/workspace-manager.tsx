@@ -3,16 +3,16 @@
 import { type FormEvent, useEffect, useMemo, useState } from "react";
 import { DEFAULT_WORKSPACE_ID, type Workspace } from "@/core/entities/workspace";
 import { WorkspaceService } from "@/core/services/workspace-service";
-import { BrowserConversationStorage } from "@/infrastructure/storage/browser-conversation-storage";
 import { BrowserTaskStorage } from "@/infrastructure/storage/browser-task-storage";
 import { BrowserWorkspaceStorage } from "@/infrastructure/storage/browser-workspace-storage";
+import { createConversationStorage } from "@/infrastructure/storage/storage-factory";
 
 type TreeItem = { workspace: Workspace; depth: number; conversationCount: number };
 
 function service() {
   return new WorkspaceService(
     new BrowserWorkspaceStorage(),
-    new BrowserConversationStorage(),
+    createConversationStorage(),
     new BrowserTaskStorage(),
   );
 }
@@ -53,7 +53,7 @@ export function WorkspaceManager() {
   function reload() {
     const nextWorkspaces = service().listWorkspaces();
     const counts = new Map<string, number>();
-    new BrowserConversationStorage().getAll().forEach((conversation) => {
+    createConversationStorage().getAll().forEach((conversation) => {
       const workspaceId = conversation.workspaceId ?? DEFAULT_WORKSPACE_ID;
       counts.set(workspaceId, (counts.get(workspaceId) ?? 0) + 1);
     });
@@ -109,7 +109,7 @@ export function WorkspaceManager() {
     reload();
   }
 
-  function exportWorkspaceBundle() { if (!workspaces) return; const conversations = new BrowserConversationStorage().getAll(); const bundle = { workspaces, conversations: conversations.filter((conversation) => workspaces.some((workspace) => workspace.id === conversation.workspaceId)), exportedAt: new Date().toISOString() }; const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: "application/json" }); const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = "palos-workspace-folder-bundle.json"; link.click(); URL.revokeObjectURL(link.href); }
+  function exportWorkspaceBundle() { if (!workspaces) return; const conversations = createConversationStorage().getAll(); const bundle = { workspaces, conversations: conversations.filter((conversation) => workspaces.some((workspace) => workspace.id === conversation.workspaceId)), exportedAt: new Date().toISOString() }; const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: "application/json" }); const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = "palos-workspace-folder-bundle.json"; link.click(); URL.revokeObjectURL(link.href); }
 
   if (!workspaces) return <p className="mt-10 text-sm text-zinc-500">正在读取 Workspace 树…</p>;
 

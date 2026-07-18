@@ -15,9 +15,11 @@ import {
   updateNoteDraft,
 } from "@/core/services/note-editing";
 import { BrowserAssetStorage } from "@/infrastructure/storage/browser-asset-storage";
-import { BrowserKnowledgeCardStorage } from "@/infrastructure/storage/browser-knowledge-card-storage";
-import { BrowserProposalStorage } from "@/infrastructure/storage/browser-proposal-storage";
-import { createRoundStorage } from "@/infrastructure/storage/storage-factory";
+import {
+  createKnowledgeCardStorage,
+  createProposalStorage,
+  createRoundStorage,
+} from "@/infrastructure/storage/storage-factory";
 
 function short(value: string, length = 96) {
   const normalized = value.replace(/\s+/g, " ").trim();
@@ -49,8 +51,8 @@ export function ConversationWorkspaceMode({ conversationId, onAnalyzeRound }: { 
     return () => window.clearTimeout(timer);
   }, [reload]);
 
-  const knowledge = new BrowserKnowledgeCardStorage().getAll();
-  const proposals = new BrowserProposalStorage().getAll();
+  const knowledge = createKnowledgeCardStorage().getAll();
+  const proposals = createProposalStorage().getAll();
   const assets = new BrowserAssetStorage().getAll();
   const selected = rounds.find((round) => round.id === selectedId) ?? null;
   const activeNoteEditor =
@@ -93,7 +95,10 @@ export function ConversationWorkspaceMode({ conversationId, onAnalyzeRound }: { 
   }
 
   function knowledgeService() {
-    return new RoundKnowledgeService(new BrowserKnowledgeCardStorage(), new BrowserProposalStorage());
+    return new RoundKnowledgeService(
+      createKnowledgeCardStorage(),
+      createProposalStorage(),
+    );
   }
 
   function createManualKnowledge() {
@@ -108,7 +113,9 @@ export function ConversationWorkspaceMode({ conversationId, onAnalyzeRound }: { 
 
   function createUpdateDraft() {
     if (!selected) return;
-    const linked = new BrowserKnowledgeCardStorage().getAll().filter((card) => card.sourceRoundId === selected.id);
+    const linked = createKnowledgeCardStorage()
+      .getAll()
+      .filter((card) => card.sourceRoundId === selected.id);
     if (!linked.length) return;
     const target = linked.length === 1 ? linked[0] : linked.find((card) => card.id === window.prompt(`输入要更新的 Knowledge ID：\n${linked.map((card) => `${card.id} · ${card.title}`).join("\n")}`));
     if (!target) return;

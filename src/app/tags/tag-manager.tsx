@@ -4,8 +4,8 @@ import { type FormEvent, useEffect, useMemo, useState } from "react";
 import type { KnowledgeCard } from "@/core/entities/knowledge-card";
 import type { Tag } from "@/core/entities/tag";
 import { createTag, updateTag } from "@/core/services/tag-management";
-import { BrowserKnowledgeCardStorage } from "@/infrastructure/storage/browser-knowledge-card-storage";
 import { BrowserTagStorage } from "@/infrastructure/storage/browser-tag-storage";
+import { createKnowledgeCardStorage } from "@/infrastructure/storage/storage-factory";
 
 type TagDraft = {
   name: string;
@@ -30,7 +30,7 @@ export function TagManager() {
   useEffect(() => {
     const timer = window.setTimeout(() => {
       setTags(new BrowserTagStorage().getAll());
-      setCards(new BrowserKnowledgeCardStorage().getAll());
+      setCards(createKnowledgeCardStorage().getAll());
     }, 0);
 
     return () => window.clearTimeout(timer);
@@ -118,7 +118,7 @@ export function TagManager() {
 
     if (!window.confirm(message)) return;
 
-    const cardStorage = new BrowserKnowledgeCardStorage();
+    const cardStorage = createKnowledgeCardStorage();
     const nextCards = cards.map((card) => {
       if (!card.tagIds.includes(tag.id)) return card;
       const nextCard = {

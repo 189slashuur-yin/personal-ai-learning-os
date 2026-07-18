@@ -2,11 +2,20 @@
 
 ## Current release context
 
-- Current Version：v1.6.4 work-in-progress
-- Current Focus：Import mode matrix / durable append / progress and error semantics / production diagnostics cleanup
-- Next Recommended Phase：完成 v1.6.4 minimal browser QA；自动门禁与浏览器验证均通过后再提交
+- Current Version：v1.6.5 Stable candidate
+- Current Focus：canonical Storage Factory / verified App Data restore / minimal Playwright E2E
+- Next Recommended Phase：release review；确认剩余风险后创建独立 release commit
 
 当前架构结论仍受单浏览器、本地优先与浏览器存储边界约束。PALOS 业务数据默认使用 IndexedDB；LocalStorage 保留为轻量配置、UI 偏好、schema/storage metadata 与旧数据迁移来源。v1.0 候选必须先完成范围和验收评审，不能从本文的演进 seam 推定为已批准实现。
+
+## v1.6.5 Stable candidate runtime delta
+
+- `analysis-result`、Round/Conversation Workspace、Workspace/Tag Manager、Tasks/Today 中的七类 canonical entity 统一通过 `storage-factory` 获取；Task、Workspace、Asset、AnalyzerRun、Tag 与其它 sidecar 继续使用原 adapter，不扩大迁移范围。
+- App Data restore 在任何写入前验证 envelope、IndexedDB store key、record ID、重复 ID 与已提供 canonical store 之间的引用；不改 schema。
+- Restore 在 drain pending writes 后备份所选 LocalStorage key 与将被替换的 IndexedDB stores；写入后 reload cache，并逐 store 验证 ID 集与 LocalStorage 内容。失败时恢复并验证备份；验证不完整时明确报告数据状态未确认。
+- Backup 是当前 restore 操作内的回滚快照，不是 durable journal；页面崩溃或浏览器异常退出后的 journal recovery 未实现。
+- Playwright 单条串行 E2E 使用独立浏览器上下文，覆盖 create Conversation、TXT append、reload、Search、App Data export、delete/reload 与 restore/Search。
+- URL 直接进入 `inputMode=txt` 时 parser 初始状态与 UI mode 对齐为 TXT，避免只在手工切换模式后才使用 TXT parser。
 
 ## v1.6.4 runtime delta
 

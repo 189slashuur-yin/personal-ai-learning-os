@@ -3,13 +3,17 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Round } from "@/core/entities/round";
 import { RoundService } from "@/core/services/round-service";
-import { createRoundStorage, createConversationStorage, createMessageStorage } from "@/infrastructure/storage/storage-factory";
-import { BrowserKnowledgeCardStorage } from "@/infrastructure/storage/browser-knowledge-card-storage";
+import {
+  createConversationStorage,
+  createConversationVersionStorage,
+  createKnowledgeCardStorage,
+  createMessageStorage,
+  createProposalStorage,
+  createRoundStorage,
+} from "@/infrastructure/storage/storage-factory";
 import { MessageToRoundMigrationService } from "@/core/services/message-to-round-migration";
-import { BrowserConversationVersionStorage } from "@/infrastructure/storage/browser-conversation-version-storage";
 import { ConversationVersionService } from "@/core/services/conversation-version-service";
 import { BrowserAppEventLogStorage } from "@/infrastructure/storage/browser-feedback-storage";
-import { BrowserProposalStorage } from "@/infrastructure/storage/browser-proposal-storage";
 import { BrowserAssetStorage } from "@/infrastructure/storage/browser-asset-storage";
 import { AssetService } from "@/core/services/asset-service";
 import { RoundKnowledgeService } from "@/core/services/round-knowledge-service";
@@ -53,12 +57,12 @@ export function RoundWorkspace({ conversationId, onAnalyzeRound }: RoundWorkspac
     const timer = window.setTimeout(() => {
       setRounds(createService().listByConversation(conversationId));
       const counts = new Map<string, number>();
-      new BrowserKnowledgeCardStorage().getAll().forEach((card) => {
+      createKnowledgeCardStorage().getAll().forEach((card) => {
         if (card.sourceRoundId) counts.set(card.sourceRoundId, (counts.get(card.sourceRoundId) ?? 0) + 1);
       });
       setKnowledgeCounts(counts);
-      setAllProposals(new BrowserProposalStorage().getAll());
-      setAllKnowledge(new BrowserKnowledgeCardStorage().getAll());
+      setAllProposals(createProposalStorage().getAll());
+      setAllKnowledge(createKnowledgeCardStorage().getAll());
       setAllAssets(new BrowserAssetStorage().getAll());
       const requestedRoundId = new URLSearchParams(window.location.search).get("round");
       if (requestedRoundId) {
@@ -95,7 +99,7 @@ export function RoundWorkspace({ conversationId, onAnalyzeRound }: RoundWorkspac
       new ConversationVersionService({
         conversations: createConversationStorage(),
         messages: createMessageStorage(),
-        versions: new BrowserConversationVersionStorage(),
+        versions: createConversationVersionStorage(),
       }).createSnapshot(conversationId, `自动恢复点 — ${label}`, `执行「${label}」操作前自动创建`);
       setAutoSnapshotNotice("已创建恢复点，可在版本恢复中撤回。");
     } catch {
@@ -260,7 +264,7 @@ export function RoundWorkspace({ conversationId, onAnalyzeRound }: RoundWorkspac
 
   function proposalDismiss(proposal: Proposal) {
     if (!window.confirm(`Dismiss Proposal「${proposal.title}」？此操作不可撤销。`)) return;
-    new BrowserProposalStorage().remove(proposal.id);
+    createProposalStorage().remove(proposal.id);
     setAllProposals((prev) => prev.filter((p) => p.id !== proposal.id));
   }
 
@@ -343,7 +347,10 @@ export function RoundWorkspace({ conversationId, onAnalyzeRound }: RoundWorkspac
     if (!title) return;
     const content = window.prompt("知识内容", round.summary || round.answer)?.trim();
     if (!content) return;
-    new RoundKnowledgeService(new BrowserKnowledgeCardStorage(), new BrowserProposalStorage()).createManual(round, title, content);
+    new RoundKnowledgeService(
+      createKnowledgeCardStorage(),
+      createProposalStorage(),
+    ).createManual(round, title, content);
     reload();
   }
 

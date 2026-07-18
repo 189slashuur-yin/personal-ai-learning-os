@@ -69,7 +69,9 @@ export function ImportWorkbench() {
     new URLSearchParams(searchParams.toString()),
   );
   const [mode, setMode] = useState<ImportInputMode>(initialPageState.inputMode);
-  const [parserId, setParserId] = useState<ConversationParserId>("chatgpt");
+  const [parserId, setParserId] = useState<ConversationParserId>(
+    initialPageState.inputMode === "txt" ? "txt" : "chatgpt",
+  );
   const [artifactName, setArtifactName] = useState("Pasted Conversation");
   const [rawText, setRawText] = useState("");
   const [title, setTitle] = useState("");

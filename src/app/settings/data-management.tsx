@@ -138,13 +138,13 @@ export function DataManagement() {
       );
       setCurrentMode(getStorageMode());
       setCopyStatus(
-        `已导入 ${result.importedLocalStorageKeys} 个 LocalStorage keys，恢复 ${result.importedIndexedDBStores} 个 IndexedDB stores / ${result.indexedDBRecords} 条业务记录。`,
+        `已导入并验证 ${result.verifiedLocalStorageKeys} 个 LocalStorage keys、${result.importedIndexedDBStores} 个 IndexedDB stores / ${result.verifiedIndexedDBRecords} 条业务记录。恢复前已备份 ${result.backupLocalStorageKeys} 个 LocalStorage keys / ${result.backupIndexedDBRecords} 条 IndexedDB 记录。`,
       );
     } catch (error) {
       setCopyStatus(
         error instanceof Error
           ? `导入失败：${error.message}`
-          : "导入失败，原数据已回滚，没有清空旧数据。",
+          : "导入失败，当前数据状态未确认。",
       );
     }
   }

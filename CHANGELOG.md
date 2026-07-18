@@ -2,7 +2,18 @@
 
 本文件记录当前仓库已经完成的 Sprint 与关键提交。日期使用仓库 commit date。
 
-当前口径：Runtime Version 为 v1.6.4 work-in-progress；Known Issues Closure 已实现，并通过 184 tests / lint / build checkpoint 与真实 Existing + TXT 浏览器闭环；未创建 commit。
+当前口径：Runtime Version 为 v1.6.5 Stable candidate；v1.6.4 Known Issues Closure 已保存为 checkpoint commit `9ed8feb`，candidate 改动尚未创建最终 release commit。
+
+## 2026-07-19 — v1.6.5 Stable Candidate
+
+- **Checkpoint**：将完整 v1.6.4 Known Issues Closure 固化为 `9ed8feb checkpoint: v1.6.4 known issues closure`；未 push。
+- **Storage Factory**：指定业务页面的七类 canonical entity 不再直接实例化 `Browser*Storage`；Task、Workspace、Asset、AnalyzerRun、Tag 与其它 sidecar 不迁移。
+- **Restore pre-validation**：App Data 在写入前校验 schema envelope、IndexedDB key、record ID、duplicate ID 与 canonical references。
+- **Backup / verification**：restore 在 pending-write barrier 后创建操作内备份；写入后验证 LocalStorage 内容及 IndexedDB ID 集；失败时恢复并验证备份，无法验证时不声称成功或已回滚。
+- **E2E**：新增最小 Playwright 测试，覆盖 create、TXT import、reload、search、export、delete/reload、restore、search。
+- **TXT URL state**：修复 URL 直达 `inputMode=txt` 时 parser 初始值仍为 ChatGPT 的问题。
+- **Tests**：Vitest 7 files / 187 tests；Playwright 1/1；lint/build/diff-check passed。
+- **Non-goals**：未改 IndexedDB schema，未实现 journal recovery、云同步、跨来源语义去重或 import transaction fan-out 优化。
 
 ## 2026-07-16 — v1.6.4 WIP: Known Issues Closure / Existing TXT / Import Diagnostics
 

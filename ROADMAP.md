@@ -4,13 +4,23 @@
 
 ## Current release
 
-- Current Version：v1.6.4 work-in-progress
-- Phase：Known Issues Closure / Import Reliability
-- Current Focus：Existing TXT append、完整 Import matrix、progress/error/quota state、production diagnostics cleanup
-- Automated Status：6 files / 184 tests；lint/build 已通过实现 checkpoint
-- Next Recommended Phase：在 disposable browser profile 执行真实 Existing + TXT 文件上传/刷新 smoke；通过后再创建 release commit
+- Current Version：v1.6.5 Stable candidate
+- Phase：Stable Closure / Release Candidate
+- Current Focus：Storage Factory、App Data verified restore、minimal Playwright E2E
+- Automated Status：7 Vitest files / 187 tests；Playwright 1/1；lint/build/diff-check passed
+- Next Recommended Phase：release review；确认剩余风险后再创建独立 release commit
 
-## v1.6.4 — Known Issues Closure（implemented, browser QA pending）
+## v1.6.5 — Stable candidate（implemented, release commit pending）
+
+- v1.6.4 dirty worktree 已由 checkpoint commit `9ed8feb` 保护；本轮不重写 v1.6.4、不新增产品能力。
+- 指定业务页面对 Conversation、Message、Round、Source、Proposal、KnowledgeCard、ConversationVersion 的访问已统一走 canonical storage factory。
+- Task、Workspace、Asset、AnalyzerRun、Tag 与其它 sidecar 保持原存储边界。
+- App Data restore 增加写前预校验、操作内备份、写后 ID/内容验证和可验证回滚；不实现 journal recovery。
+- Playwright 覆盖 create → TXT import → reload → search → export → delete/reload → restore → search。
+- E2E 修复了 URL 直达 TXT 模式时 parser 初始化仍为 ChatGPT 的 candidate blocker。
+- 当前只形成 candidate working tree；没有最终 release commit，也没有 push。
+
+## v1.6.4 — Known Issues Closure（completed, checkpointed）
 
 - New / Existing × ChatGPT Export / Paste Text / TXT File 六种组合已形成统一 Import mode matrix；Existing 始终只有一个 target selector。
 - Existing + TXT 复用 text/TXT parser pipeline，保存文件名与 Source metadata，只追加实际解析出的 Messages/Rounds；success 前完成 flush、cache reload 与 ID/reference/count verification。
