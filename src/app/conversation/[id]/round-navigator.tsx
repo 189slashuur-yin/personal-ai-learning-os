@@ -174,8 +174,8 @@ export function RoundNavigator({ conversationId }: RoundNavigatorProps) {
 
   return (
     <div
-      className={`shrink-0 transition-[width] duration-200 ${
-        expanded ? "w-64" : "w-11"
+      className={`relative shrink-0 transition-[width] duration-200 ${
+        expanded ? "w-11 sm:w-64" : "w-11"
       }`}
       data-testid="round-navigator"
     >
@@ -183,7 +183,7 @@ export function RoundNavigator({ conversationId }: RoundNavigatorProps) {
       <button
         aria-expanded={expanded}
         aria-label={expanded ? "折叠 Navigator" : "展开 Navigator"}
-        className="absolute -right-2.5 top-2 z-10 flex size-5 items-center justify-center rounded-full border border-zinc-200 bg-white text-[10px] text-zinc-500 shadow-sm hover:bg-zinc-50"
+        className="absolute -right-2.5 top-2 z-30 flex size-5 items-center justify-center rounded-full border border-zinc-200 bg-white text-[10px] text-zinc-500 shadow-sm hover:bg-zinc-50"
         onClick={() => setExpanded((current) => !current)}
         type="button"
       >
@@ -191,7 +191,7 @@ export function RoundNavigator({ conversationId }: RoundNavigatorProps) {
       </button>
 
       {expanded ? (
-        <div className="max-h-[calc(100vh-6rem)] overflow-hidden rounded-xl border border-zinc-200 bg-white">
+        <div className="absolute left-0 top-0 z-20 w-64 max-h-[calc(100vh-6rem)] overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-lg sm:static sm:w-auto sm:shadow-none">
           <div className="p-3">
             <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500">
               Round Navigator

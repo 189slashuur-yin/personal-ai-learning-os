@@ -2,9 +2,9 @@
 
 ## Current release context
 
-- Current Version：v1.7 implementation candidate
-- Current Focus：Personal AI Context Management Final Usability Correction
-- Next Recommended Phase：最终门禁与真实三轮浏览器 QA 已通过，可进入 v1.7 release QA
+- Current Version：v1.7 release candidate（final QA passed；commit pending）
+- Current Focus：Final Release QA、Data Semantics Audit 与 Minimal Closure
+- Next Recommended Phase：可创建单一 PALOS v1.7 release commit；当前不 commit、不 push
 
 当前架构结论仍受单浏览器、本地优先与浏览器存储边界约束。PALOS 业务数据默认使用 IndexedDB；LocalStorage 保留为轻量配置、UI 偏好、schema/storage metadata 与旧数据迁移来源。v1.0 候选必须先完成范围和验收评审，不能从本文的演进 seam 推定为已批准实现。
 
@@ -15,13 +15,15 @@
 - `RoundContextInheritanceService` 从当前 Round 之前由近到远查找“存在人工 Summary/Note 或 confirmed snapshot”的 Round，跳过空 Round；没有候选时回退 Conversation Overview。默认引用是只读投影，不写当前 Round snapshot；只有用户主动改选来源、关闭引用或使用高级 Override/Exclude 时才写既有配置。
 - `ConversationContextService` 集中执行 Context CRUD、字段归一化、变化比较与 Timeline 追加。每次有效更新复用 `ConversationVersion`，以 optional `kind=context` 和 `contextChanges` 保存历史；旧 Version 继续可读。
 - Next Actions 继续复用独立 Task，通过既有 Conversation SourceRef 关联；不新增 Calendar、Reminder、Habit、自动执行或 AI 自动建 Task。
-- Search 仍是运行时关键词 + subsequence fuzzy，不新增索引或持久化结构；相关度优先 Context、Summary、Conclusion、Knowledge、Round Note、Message。
+- Search 仍是运行时关键词 + subsequence fuzzy，不新增索引或持久化结构；Round Note 通过统一 parser 投影为 notes/nextActions/goal/decisions/pendingQuestions/legacyNote matched fields。
 - Context Export 是纯 Service DTO，格式为 `palos-context-export` v1.0，包含 Conversation、Context、Decision history、关联 Task 与 Round summary/context snapshot；不调用模型。
-- Final Usability Correction 不增加持久化字段：Round 默认三个字段分别映射 `Round.note` 的“我的备注”段、`Round.summary`、`Round.note` 的“下一步行动”段；目标、决定、遗留问题与旧自由 Note 仅在“更多记录”中出现。Conversation Overview 默认投影 `longTermBackground/currentState/nextActions`，旧 decisions/constraints 在折叠区兼容。
-- “继续这个主题”复用 Context Export DTO 生成纯文本，只读取 Conversation Context、最近 Rounds、Pending Questions 与关联 Task；不写 Storage、不调用 Provider。
-- autosave 使用 750ms 防抖，blur、Round 组件卸载/切换与 `beforeunload` 尽可能 flush；保存状态为未修改、等待保存、保存中、已保存、失败重试。每次按键不直接写 IndexedDB。
+- Final Usability Correction 不增加持久化字段：Round 默认三个字段分别映射 `Round.note` 的“我的备注”段、`Round.summary`、`Round.note` 的“下一步行动”段。`round-record.ts` 是唯一 serializer/parser，canonical note 带内部版本标记和 header-line 转义；纯文本、旧分段、`【补充备注】`、重复兼容段及未知旧文本可归一化 round-trip。
+- “继续这个主题”复用 Context Export DTO 和同一 Round parser 生成纯文本，分别输出“我的备注 / 本轮结论 / 下一步”，只读取 Conversation Context、最近 Rounds、Pending Questions 与关联 Task；不写 Storage、不调用 Provider。
+- autosave 使用 750ms 防抖和 per-controller revision/in-flight 串行；blur、折叠/切换和组件卸载主动 flush，`beforeunload` 仅 best-effort。IndexedDB optimistic cache update 后还必须等待 tracked transaction 成功才显示“已保存”；失败保留最新 draft 并显示 retry。每次按键不直接写 IndexedDB。
 - 页面级 Round Inspector 已移除；展开 Round 自身形成响应式局部双栏。高级 inheritance 的 `excludedFields` / `overrides` 数据继续可读写，但只放在“调整参考”的二级折叠区，不改变 `RoundContext` model。
-- Round 结论与 Conversation Overview 的 Knowledge 入口都先显示预览确认；现有 Knowledge 模型要求 `proposalId`，因此继续创建人工 Applied Proposal 作为 provenance 桥接，但 autosave 和 inheritance 都不调用该路径。
+- 默认历史投影显示“当前推荐参考”且不写数据；人工确认后读取并显示已固定 snapshot，不再用 live source 内容冒充历史快照。Round own record 与 inherited snapshot 始终独立。
+- Round 结论与 Conversation Overview 的 Knowledge 入口都先显示预览确认；现有 Knowledge 模型要求 `proposalId`，因此继续创建人工 Applied Proposal 作为 provenance 桥接。同一来源与规范化内容重复确认会复用已有卡；autosave 和 inheritance 都不调用该路径。
+- 390px 下展开 Navigator 使用覆盖层而不改变主网格宽度；1280px 保持内联双栏，Round 自身在窄屏保持上下布局。
 - 七个 canonical IndexedDB stores 和 schema 完全不变；新增字段均为 optional，Browser/IndexedDB adapter 对 v1.6.5 缺失值与异常形状安全归一化。
 
 ```text

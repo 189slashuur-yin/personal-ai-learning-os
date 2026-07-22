@@ -4,10 +4,10 @@ PALOS 是一个本地优先的个人 AI 上下文管理工作区。它保留可�
 
 ## Project Status
 
-- Current Version：v1.7 implementation candidate
+- Current Version：v1.7 release candidate（final QA passed；release commit pending）
 - Current Phase：Personal AI Context Management
-- Current Focus：v1.7 UX Refinement — Context Dashboard、Round 记录、inheritance 来源说明、Continue Context 与 Timeline 入口
-- Verification：8 个 Vitest 文件 / 195 tests；Playwright release gate 1/1；lint/build/diff-check passed；真实 PALOS 三轮 Demo 浏览器 QA 通过
+- Current Focus：v1.7 Final Release QA — data semantics、autosave reliability、minimal closure
+- Verification：9 个 Vitest 文件 / 213 tests；Playwright release gate 2/2；lint/build/diff-check passed；真实三轮浏览器 QA 与 1280/390px 可视复核通过
 
 ### Feature Matrix
 
@@ -17,11 +17,11 @@ PALOS 是一个本地优先的个人 AI 上下文管理工作区。它保留可�
 | Round | ✅ v1.7 | 持久化 Round、Round-first UI，以及复用 Summary / Note 的本轮目标、结论、决定、遗留问题和下一步记录。 |
 | Help | ✅ | 内置中文概念说明、推荐流程与 Ollama 使用边界。 |
 | Workspace | ✅ alpha | Workspace / Folder 多层树、排序、移动与安全回迁 Inbox/上级。 |
-| Search | ✅ v1.7 | 本地关键词 + fuzzy；优先 Context、Summary、Conclusion、Knowledge、Round Note、Message。 |
+| Search | ✅ v1.7 | 本地关键词 + fuzzy；Round 的“我的备注 / 下一步”等结构化字段可分别显示匹配来源。 |
 | Conversation Note | ✅ | Conversation 独立备注，可全文搜索。 |
 | Conversation Context | ✅ v1.7 | 顶部 Dashboard 展示人工维护的长期背景、当前状态、决策、约束与下一步；不依赖 Analyzer。 |
-| Round Context | ✅ v1.7 | 明确显示来源 Round 与核心继承字段；用户保留、删除、修改后人工确认 Snapshot。 |
-| Continue Context | ✅ v1.7 | 可复制 Conversation Context、最近 Rounds、Pending Questions 与 Next Actions；不调用 AI。 |
+| Round Context | ✅ v1.7 | 动态态显示“当前推荐参考”，人工确认后显示“已固定参考”；固定 Snapshot 不随来源变化。 |
+| Continue Context | ✅ v1.7 | 可复制 Conversation Context、最近 Rounds、Pending Questions 与 Next Actions，并区分备注/下一步；不调用 AI。 |
 | Context Timeline | ✅ v1.7 | 明显的 History / Timeline 入口，复用 ConversationVersion 追加变化，不覆盖历史。 |
 | Context Export | ✅ v1.7 | 稳定 `palos-context-export` JSON，包含 Conversation、Context、Decision history、Task 与 Round summary。 |
 | Assets | ✅ | Conversation 可登记本地文件 metadata/path；不保存文件内容。 |
@@ -50,6 +50,10 @@ Conversation Context → Decision / Task → 继续这个主题
         ↓
 可选 Analyze → Proposal → Review → Knowledge
 ```
+
+Round 自有记录与 inherited reference 是两条独立链路：我的备注和下一步以版本化、可逆分段保存在 `Round.note`，本轮结论保存在 `Round.summary`；动态推荐不写数据，用户确认后才固定既有 snapshot。Autosave 约 750ms 防抖，blur、折叠/切换和组件卸载会主动 flush；UI 只在 IndexedDB transaction 完成后显示“已保存”，失败可用最新 draft 重试。`beforeunload` 仅是 best-effort 补充，不是唯一可靠边界。
+
+Knowledge 仍必须人工预览确认；autosave 和 inheritance 不会创建 Proposal/Knowledge。同一来源与规范化内容的重复确认会复用已有 Knowledge，不做全局语义去重。Imported Round 默认不提供单轮破坏性或原始数据编辑入口；AI Provider、Agent、MCP、RAG、Embedding 与 Cloud Sync 不属于 v1.7。
 
 v0.9 draft 在当时的 LocalStorage 基线上增加统一 SearchDocument、具体文本片段检索、轻量 fuzzy、Conversation Note、Asset metadata、备份脚本和 Data Management 说明。当前 v1.7 仍使用七个 canonical IndexedDB business stores；该段只描述历史版本。
 

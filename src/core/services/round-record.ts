@@ -26,6 +26,8 @@ const noteSections = [
   ["legacyNote", "旧自由 Round Note"],
 ] as const;
 
+const canonicalRecordHeader = "PALOS Round Record v1";
+
 const compatibleLabels: Record<string, RoundNoteField> = {
   我的备注: "notes",
   补充备注: "notes",
@@ -37,6 +39,23 @@ const compatibleLabels: Record<string, RoundNoteField> = {
 };
 
 type RoundNoteField = (typeof noteSections)[number][0];
+
+function appendField(
+  record: RoundRecordDraft,
+  field: RoundNoteField,
+  value: string,
+) {
+  if (!value) return;
+  record[field] = [record[field], value].filter(Boolean).join("\n\n");
+}
+
+function encodeCanonicalValue(value: string) {
+  return value.replace(/^(?=\\*【[^】\r\n]+】[ \t]*$)/gm, "\\");
+}
+
+function decodeCanonicalValue(value: string) {
+  return value.replace(/^\\(?=\\*【[^】\r\n]+】[ \t]*$)/gm, "");
+}
 
 function emptyRoundRecord(conclusion = ""): RoundRecordDraft {
   return {
@@ -58,32 +77,52 @@ export function parseRoundRecord(round: Pick<Round, "note" | "summary">) {
     return record;
   }
 
-  const sectionPattern = /^【(我的备注|补充备注|本轮目标|新增决定|遗留问题|下一步行动|旧自由 Round Note)】\s*$/gm;
+  const sectionPattern = /^【([^】\r\n]+)】[ \t]*$/gm;
   const matches = [...note.matchAll(sectionPattern)];
+  const hasKnownSection = matches.some((match) =>
+    Boolean(compatibleLabels[match[1].trim()]),
+  );
 
-  if (!matches.length) {
+  if (!hasKnownSection) {
     record.legacyNote = note;
     return record;
   }
 
+  const isCanonical = matches.some(
+    (match) => match[1].trim() === canonicalRecordHeader,
+  );
+
   const preamble = note.slice(0, matches[0].index).trim();
 
+  appendField(record, "legacyNote", preamble);
+
   matches.forEach((match, index) => {
-    const field = compatibleLabels[match[1]];
+    const label = match[1].trim();
+    const field = compatibleLabels[label];
     const start = (match.index ?? 0) + match[0].length;
     const end = matches[index + 1]?.index ?? note.length;
-    const value = note.slice(start, end).trim();
+    const rawValue = note.slice(start, end).trim();
+
+    if (label === canonicalRecordHeader) {
+      appendField(record, "legacyNote", rawValue);
+      return;
+    }
 
     if (field) {
-      record[field] = value;
+      appendField(
+        record,
+        field,
+        isCanonical ? decodeCanonicalValue(rawValue) : rawValue,
+      );
+      return;
     }
-  });
 
-  if (preamble) {
-    record.legacyNote = [preamble, record.legacyNote]
-      .filter(Boolean)
-      .join("\n\n");
-  }
+    appendField(
+      record,
+      "legacyNote",
+      note.slice(match.index ?? 0, end).trim(),
+    );
+  });
 
   return record;
 }
@@ -99,12 +138,17 @@ export function serializeRoundRecord(
           notes: record.additionalNote,
           legacyNote: "",
         };
-  const note = noteSections
+  const sections = noteSections
     .flatMap(([field, label]) => {
       const value = normalizedRecord[field as RoundNoteField].trim();
-      return value ? [`【${label}】\n${value}`] : [];
+      return value
+        ? [`【${label}】\n${encodeCanonicalValue(value)}`]
+        : [];
     })
     .join("\n\n");
+  const note = sections
+    ? `【${canonicalRecordHeader}】\n\n${sections}`
+    : "";
 
   return {
     summary: normalizedRecord.conclusion.trim(),

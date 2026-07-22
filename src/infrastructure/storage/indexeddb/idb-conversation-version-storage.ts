@@ -24,8 +24,11 @@ export class IndexedDBConversationVersionStorage
 {
   save(version: ConversationVersion): void {
     const cache = getConversationVersionCache();
-    if (cache.some((v) => v.id === version.id)) return;
-    cache.push(version);
+    const existingIndex = cache.findIndex(
+      (candidate) => candidate.id === version.id,
+    );
+    if (existingIndex >= 0) cache[existingIndex] = version;
+    else cache.push(version);
     persistInBackground(
       "save conversation version",
       writeOne("conversation-versions", version),

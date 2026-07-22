@@ -17,6 +17,7 @@ import type { Tag } from "@/core/entities/tag";
 import type { Task } from "@/core/entities/task";
 import { DEFAULT_WORKSPACE_ID, type Workspace } from "@/core/entities/workspace";
 import { deriveQAPairs } from "@/core/services/qa-pair-service";
+import { parseRoundRecord } from "@/core/services/round-record";
 
 export type SearchIndexData = {
   workspaces: Workspace[];
@@ -48,7 +49,7 @@ function searchFieldPriority(
   if (document.entityType === "conversation" && field === "conclusion") return 500;
   if (document.entityType === "knowledge") return 450;
   if (document.entityType === "round" && field === "summary") return 425;
-  if (document.entityType === "round" && field === "note") return 400;
+  if (document.entityType === "round" && field.startsWith("record.")) return 400;
   if (document.entityType === "message" && field === "content") return 350;
   return 250;
 }
@@ -273,6 +274,7 @@ export class SearchIndexService {
       const conversation = conversationById.get(round.conversationId);
       const workspace = getWorkspace(round.conversationId);
       const contextSnapshot = round.context?.snapshot ?? {};
+      const record = parseRoundRecord(round);
       return {
         id: documentId("round", round.id),
         entityType: "round",
@@ -282,8 +284,13 @@ export class SearchIndexService {
         title: round.title || `${conversation?.title ?? "Conversation"} · Round ${round.order}`,
         body: [
           ...conversationContextFields.map((field) => contextSnapshot[field]),
-          round.summary,
-          round.note,
+          record.conclusion,
+          record.notes,
+          record.nextActions,
+          record.goal,
+          record.decisions,
+          record.pendingQuestions,
+          record.legacyNote,
           round.question,
           round.answer,
         ].filter(Boolean).join("\n"),
@@ -295,8 +302,13 @@ export class SearchIndexService {
           title: round.title,
           question: round.question,
           answer: round.answer,
-          note: round.note ?? "",
           summary: round.summary ?? "",
+          "record.notes": record.notes,
+          "record.nextActions": record.nextActions,
+          "record.goal": record.goal,
+          "record.decisions": record.decisions,
+          "record.pendingQuestions": record.pendingQuestions,
+          "record.legacyNote": record.legacyNote,
           "context.longTermBackground": contextSnapshot.longTermBackground ?? "",
           "context.currentState": contextSnapshot.currentState ?? "",
           "context.decisions": contextSnapshot.decisions ?? "",

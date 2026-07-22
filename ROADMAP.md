@@ -4,13 +4,13 @@
 
 ## Current release
 
-- Current Version：v1.7 implementation candidate
+- Current Version：v1.7 release candidate（final QA passed；commit pending）
 - Phase：Personal AI Context Management
-- Current Focus：v1.7 Final Usability Correction — inline Round record、autosave、passive reference、Knowledge boundary
-- Automated Status：9 Vitest files / 204 tests；Playwright 2/2；lint/build/diff-check passed
-- Next Recommended Phase：进入 v1.7 release QA；当前不创建 commit
+- Current Focus：v1.7 Final Release QA、Data Semantics Audit 与 Minimal Closure
+- Automated Status：9 Vitest files / 213 tests；Playwright 2/2；lint/build/diff-check passed
+- Next Recommended Phase：可创建单一 PALOS v1.7 release commit；当前不创建 commit、不 push
 
-## v1.7 — Personal AI Context Management（implemented, release review pending）
+## v1.7 — Personal AI Context Management（final QA passed, release commit pending）
 
 - Conversation 复用既有 Aggregate，新增人工可编辑 Context：长期背景、当前状态、决策记录、约束条件与下一步行动。
 - 既有 `note`、`summary`、`conclusion`、`pendingQuestions` 全部保留；Note 是自由长期备注，Summary 是压缩概览，Conclusion 是最终结论，Pending Questions 是未解决问题。
@@ -21,9 +21,11 @@
 - 新增稳定 `palos-context-export` v1.0 JSON；包含 Conversation、Context、Decision history、关联 Task 与 Round summary/context snapshot，不调用模型。
 - Rounds 后提供紧凑 Conversation Overview，默认三个字段自动保存；Conversation Note、Summary、Conclusion、Pending Questions 与旧 Context 字段继续安全读取。
 - 每个展开 Round 在卡片内以桌面双栏/窄屏上下布局直接展示“我的备注 / 本轮结论 / 下一步”；高级字段折叠，页面级 Inspector 和手动保存按钮移除。
-- Round 与 Overview 均为 750ms 防抖 autosave，blur/切换/卸载 flush，并显示保存状态与失败重试。
-- Knowledge 与 reference 完全分离，只能从结论或 Overview 经预览确认后人工创建；不会由 autosave/reference 自动生成 Proposal 或 Knowledge。
-- v1.7 当前 9 files / 204 tests 与 Playwright 2/2；旧 v1.6.5 数据缺少 optional Context 字段时继续读取和导出。
+- Round 与 Overview 均为 750ms、per-controller revision-aware autosave，blur/切换/卸载 flush；只有 IndexedDB transaction 成功后显示 saved，失败 retry 使用最新 draft。
+- Round Note 使用唯一版本化 serializer/parser；五类结构化字段和未知 legacy text 可逆保留，Search/Continue Topic 可区分备注与下一步。
+- 动态态是“当前推荐参考”且不写数据；人工确认后是“已固定参考”，固定 snapshot 与 Round own record 不被 live source 覆盖。
+- Knowledge 与 reference 完全分离，只能从结论或 Overview 经预览确认后人工创建；同来源+内容重复确认幂等，不会由 autosave/reference 自动生成 Proposal 或 Knowledge。
+- v1.7 当前 9 files / 213 tests 与 Playwright 2/2；旧 v1.6.5 数据缺少 optional Context 字段时继续读取和导出。
 - “PALOS开发迭代记录”真实 Demo 覆盖 6 Messages / 3 Rounds、Context、Task、Round Snapshot、继续文本与 Timeline；浏览器 QA 通过。
 - 未修改 IndexedDB schema、canonical store 集合、Provider、Analyzer/Review/Knowledge 边界。
 

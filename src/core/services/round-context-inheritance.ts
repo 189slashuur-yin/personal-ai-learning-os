@@ -129,14 +129,34 @@ export class RoundContextInheritanceService {
       return { kind: "none" };
     }
 
-    const eligibleSources = this.listEligibleSources(roundId);
-    const explicitSource = round.context?.sourceRoundId
-      ? eligibleSources.find(
-          (candidate) => candidate.id === round.context?.sourceRoundId,
-        )
-      : undefined;
-    const source = explicitSource ??
-      (round.context ? undefined : this.recommendSource(roundId));
+    if (round.context) {
+      const fixedSnapshot = normalizeConversationContext(
+        round.context.snapshot,
+      );
+      const fixedSource = round.context.sourceRoundId
+        ? this.rounds.getById(round.context.sourceRoundId)
+        : null;
+
+      if (
+        fixedSource &&
+        fixedSource.conversationId === round.conversationId &&
+        fixedSource.order < round.order
+      ) {
+        return {
+          kind: "round",
+          round: fixedSource,
+          context: fixedSnapshot,
+          conclusion: fixedSnapshot.currentState,
+          nextActions: fixedSnapshot.nextActions,
+        };
+      }
+
+      return hasConversationContext(fixedSnapshot)
+        ? { kind: "conversation", context: fixedSnapshot }
+        : { kind: "none" };
+    }
+
+    const source = this.recommendSource(roundId);
 
     if (source) {
       const record = parseRoundRecord(source);
@@ -151,9 +171,7 @@ export class RoundContextInheritanceService {
       };
     }
 
-    const overview = round.context?.snapshot
-      ? normalizeConversationContext(round.context.snapshot)
-      : getConversationOverviewContext(conversation);
+    const overview = getConversationOverviewContext(conversation);
 
     return hasConversationContext(overview)
       ? { kind: "conversation", context: overview }

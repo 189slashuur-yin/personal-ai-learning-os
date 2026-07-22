@@ -12,6 +12,7 @@ import {
   getConversationOverviewContext,
   normalizeConversationContext,
 } from "@/core/services/conversation-context-service";
+import { parseRoundRecord } from "@/core/services/round-record";
 import { isTaskLinkedToConversation } from "@/core/services/task-service";
 
 export const PALOS_CONTEXT_EXPORT_FORMAT = "palos-context-export";
@@ -82,12 +83,26 @@ export function createContinueContextText(
     ([field, label]) => `- ${label}：${textOrFallback(exported.context[field])}`,
   );
   const roundLines = recentRounds.length
-    ? recentRounds.flatMap((round) => [
-        `### Round ${round.order} · ${round.title}`,
-        `本轮结论：${textOrFallback(round.summary)}`,
-        `本轮记录：${textOrFallback(round.note)}`,
-        "",
-      ])
+    ? recentRounds.flatMap((round) => {
+        const record = parseRoundRecord(round);
+        const additionalRecord = [
+          record.goal ? `本轮目标：${record.goal}` : "",
+          record.decisions ? `新增决定：${record.decisions}` : "",
+          record.pendingQuestions
+            ? `遗留问题：${record.pendingQuestions}`
+            : "",
+          record.legacyNote ? `旧自由备注：${record.legacyNote}` : "",
+        ].filter(Boolean);
+
+        return [
+          `### Round ${round.order} · ${round.title}`,
+          `本轮结论：${textOrFallback(record.conclusion)}`,
+          `我的备注：${textOrFallback(record.notes)}`,
+          `下一步：${textOrFallback(record.nextActions)}`,
+          ...additionalRecord,
+          "",
+        ];
+      })
     : ["（暂无 Round）", ""];
   const taskLines = exported.tasks.length
     ? exported.tasks.map(

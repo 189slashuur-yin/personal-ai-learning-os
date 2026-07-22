@@ -1,5 +1,39 @@
 # PALOS v1.7 — Personal AI Context Management Handoff
 
+## 2026-07-23 Final Release QA / Data Semantics Closure
+
+本轮从干净的 `release/v1.7` / `fb032b4 checkpoint: PALOS v1.7 round-first usability candidate` 开始。Phase 0 基线为 clean，lint/build、9 files / 204 tests、Playwright 2/2 全部通过。本轮只修复审计确认的 release blocker/明显回归；没有改 IndexedDB schema、storage architecture、Aggregate 或 AI/Provider 范围，没有清理用户数据、commit 或 push。
+
+### Semantic and reliability closure
+
+- `Round.summary` 继续保存“本轮结论”；`Round.note` 通过唯一 `round-record.ts` 保存“我的备注 / 下一步 / 目标 / 决定 / 遗留问题 / 旧自由文本”。Canonical string 增加内部版本标记和 header-line 转义；纯文本、旧分段、`【补充备注】`、重复兼容段与未知 header 可 parse → edit one field → serialize 而不静默丢失。
+- Search 为 Round record 输出独立 matched fields；Continue Topic 分别输出“我的备注 / 本轮结论 / 下一步”，不再展示无法区分语义的整段 raw note。
+- `DebouncedAutosave` 现在支持 async save、revision 与 in-flight 串行。每个 Round/Overview controller 独立；blur、折叠/切换和卸载 flush；dispose 后不更新 UI。IndexedDB optimistic cache update 后等待 tracked transaction 成功才显示 saved，失败保留最新 draft，retry 重写最新值。`beforeunload` 仍只有 best-effort，不作为唯一保障。
+- 动态投影显示“当前推荐参考：Round X”且不写数据；人工确认后显示“已固定参考：Round X”并读取 confirmed snapshot。来源 Round 后改不会覆盖固定 snapshot，也不会改当前 Round own record。
+- 手工 Knowledge 对“相同 source + 规范化 content”做最小幂等复用；不做语义级全局去重。autosave/inheritance 仍不创建 Proposal/Knowledge，人工 Applied Proposal provenance 与 Conversation delete 后 Knowledge 保留规则不变。
+- 真实 390px 截图发现展开 Navigator 虽无 overflow 但会挤压主内容；小屏改为 overlay，桌面 inline 行为不变。
+
+### Tests and browser QA
+
+- Vitest：9 files / 213 tests passed。新增覆盖 serializer 六字段/未知 legacy、单字段编辑保真、两 Round 隔离、async response ordering、blur/unmount、failure/retry latest、动态推荐变化/固定 snapshot、Knowledge 幂等、Search/Continue 语义。
+- Playwright：2/2 passed。v1.7 闭环创建 6 Messages / 3 Rounds，验证快速输入→立即切换→reload、一次 intentional IndexedDB failure→failed→retry、Overview autosave、Continue Topic、Knowledge 重复确认、Imported Round 无破坏入口、1280/390 无 overflow、Navigator 无跳动、Conversation delete 后 Dashboard/Search/Review 无残留、Knowledge 按既有规则保留。
+- QA artifacts：`test-results/v17-inline-autosave-inline-f0027-ssively-and-stay-responsive-desktop-chrome/` 下保存 1280px/390px 截图与不含正文的 `qa-manifest.json`。intentional failure 是唯一预期错误注入；恢复后 unexpected Console error = 0。
+- 应用内 Browser 使用独立空 profile 做只读可视复核；没有读取或清理用户浏览器数据。可视检查直接促成了小屏 Navigator overlay 修复。
+
+### Final status and limits
+
+Final gate：lint passed；build passed（19 routes）；Vitest 213/213；Playwright 2/2；`git diff --check` passed。PALOS v1.7 的 Round-first release semantics 已闭合，建议创建单一 v1.7 release commit，但本轮按要求不 commit、不 push。
+
+Remaining non-blockers：`beforeunload` 不能保证异步 IndexedDB 完成，因此可靠路径仍是 debounce + blur/unmount flush；Conversation Context 与 Version 仍是两个既有 store 的非跨-store transaction；restore durable journal、固定 Playwright Chromium、cloud/AI/RAG/Agent 均不属于 v1.7。
+
+### Main changed files
+
+- Core：`round-record.ts`、`debounced-autosave.ts`、`round-context-inheritance.ts`、`round-knowledge-service.ts`、`context-export-service.ts`、`search-index-service.ts`
+- Infrastructure/UI：`indexeddb/database.ts`、两个 autosave panel、`round-context-panel.tsx`、`round-navigator.tsx`、`search-experience.tsx`
+- Tests/docs：两个 v1.7 Vitest 文件、v1.7 E2E、README / PROJECT / ARCHITECTURE / ROADMAP / CHANGELOG / QA Checklist / HANDOFF
+
+---
+
 ## 2026-07-22 Final Usability Correction closure
 
 本轮在既有 v1.7 dirty worktree 上原地收口，没有 reset / restore / stash / checkout，没有清浏览器数据、修改 IndexedDB schema、重写 Core Storage、接入新 Provider/RAG/Agent/Embedding，也没有创建 commit。版本仍为单一 **v1.7**。

@@ -2,24 +2,26 @@
 
 本文件记录当前仓库已经完成的 Sprint 与关键提交。日期使用仓库 commit date。
 
-当前口径：Runtime Version 为 v1.7 implementation candidate；基线为 v1.6.5 Stable，v1.7 改动未创建 commit。
+当前口径：Runtime Version 为 v1.7 release candidate；Final Release QA 已通过，release commit 尚未创建。
 
 ## 2026-07-19 — v1.7 Personal AI Context Management
 
 - **Product position**：PALOS 从 AI 对话归档收敛为 Personal AI Context Manager；关闭 Analyzer 后仍可 Import、整理 Context/Decision、维护 Task、Search 与 Export。
 - **Conversation Context**：在现有 Conversation 上增加长期背景、当前状态、决策记录、约束条件与下一步行动；保留 Note/Summary/Conclusion/Pending Questions 原语义。
 - **Final Usability Correction**：移除页面级 Round Inspector；每个展开 Round 自带响应式内容/记录双栏，窄屏改为上下排列，默认直接显示三个主要字段。
-- **Round record / autosave**：我的备注、本轮结论、下一步复用现有 Round Note/Summary；目标、决定、遗留问题、旧自由 Note 折叠兼容。750ms 防抖、blur/切换/卸载 flush，移除手动保存按钮。
-- **Passive reference**：自动跳过空 Round 并引用最近有效人工记录或 confirmed snapshot，无来源时回退 Conversation Overview；默认不写 Snapshot，不要求逐轮选择、逐字段调整或确认。
+- **Round record / serializer**：我的备注、本轮结论、下一步复用现有 Round Note/Summary；唯一 serializer/parser 增加版本标记与 header-line 转义，目标/决定/遗留问题及纯文本、旧分段、`【补充备注】`、未知 legacy text 可逆保留。
+- **Autosave correctness**：750ms per-controller debounce 增加 revision/in-flight 串行；blur/切换/卸载 flush，IndexedDB transaction 完成后才显示 saved，失败显示 error，retry 使用最新 draft；`beforeunload` 仅 best-effort。
+- **Passive reference**：自动跳过空 Round 并显示“当前推荐参考”；默认不写 Snapshot。人工确认后显示“已固定参考”并读取固定 snapshot，不用 live source 覆盖历史。
 - **Conversation Overview**：Rounds 后独立显示总备注/当前背景、当前总论、后续方向并 autosave；旧 decisions/constraints 在折叠区保留。
-- **Knowledge boundary**：Round 结论与 Overview 都提供“保存为 Knowledge”，但必须先预览确认；autosave/reference 不创建 Proposal 或 Knowledge。
-- **Continue Context**：新增“继续这个主题”，生成人工可查看、可复制的 Context + 最近 Rounds + Pending Questions + Next Actions 文本，不调用模型。
+- **Knowledge boundary**：Round 结论与 Overview 都必须先预览确认；同一来源与规范化内容重复确认复用既有 Knowledge；autosave/reference 不创建 Proposal 或 Knowledge。
+- **Continue Context / Search semantics**：“继续这个主题”和 Search 复用 Round parser，分别标识我的备注、下一步及其它字段，不把整个 `Round.note` 混为一种语义。
 - **Context Timeline**：复用 ConversationVersion 追加 `kind=context` 与字段变化；顶部提供明显的 History / Timeline 入口，历史值不覆盖。
 - **Task integration**：Conversation Context 内可人工创建、完成或重开关联 Task；没有自动创建、Calendar、Reminder 或 Habit。
 - **Search**：保持关键词 + fuzzy，相关度优先 Context、Summary、Conclusion、Knowledge、Round Note、Message。
 - **Context Export**：新增 `palos-context-export` v1.0 JSON，输出 Conversation、Context、Decision history、关联 Task 与 Round summary/context snapshot。
 - **Compatibility**：只增加 optional embedded fields；IndexedDB schema 与 7 个 canonical stores 不变；v1.6.5 数据继续可读。
-- **Tests**：v1.7 当前 9 files / 204 tests；Playwright release gate 2/2、lint/build/diff-check 全部通过；应用内浏览器完成三轮 autosave、reload、passive reference、来源切换、responsive、Knowledge count 与完整删除 QA，PALOS Console error 为 0。
+- **Responsive closure**：1280px 保持内联双栏；390px 为上下布局，Navigator 小屏展开改为覆盖层，不挤压主内容，document 无横向 overflow。
+- **Tests**：v1.7 当前 9 files / 213 tests；Playwright release gate 2/2、lint/build/diff-check 全部通过；三轮 QA 覆盖保存失败/retry、快速切换/reload、动态/固定参考、Knowledge 幂等、完整删除与 1280/390px 截图，unexpected Console error 为 0。
 - **Non-goals**：未实现 Agent、MCP、RAG、Embedding、Vector Database、云 Provider、Cloud Sync、Mobile、多用户或自动执行。
 
 ## 2026-07-19 — v1.6.5 Stable Candidate

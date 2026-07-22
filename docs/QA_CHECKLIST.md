@@ -9,7 +9,7 @@
 | V17-01 | 用 v1.6.5 数据打开无 `context` 字段的 Conversation。 | 页面正常加载；Context 为空；Note/Summary/Conclusion/Pending Questions 保留。 | 白屏、旧字段丢失或被自动写回。 | Compatibility |
 | V17-02 | 展开 Conversation Overview，填写总备注/当前背景、当前总论、后续方向，不点保存并等待后刷新。 | 750ms 防抖或 blur 后自动保存；reload 准确保留；旧 decisions/constraints 在折叠区仍可读。 | 仍需手动保存、每按键写入或字段丢失。 | Overview Autosave |
 | V17-03 | 清空当前 Context，先取消确认再执行。 | 取消时不变；确认后当前值清空但 Timeline 历史保留。 | 无确认、历史被删除。 | Context Delete |
-| V17-04 | Round 1 有记录、Round 2 为空，打开 Round 3。 | 自动显示“参考上下文：Round 1 的结论与下一步”；Round 3 三个自有字段仍为空且不写 snapshot。 | 选择空 Round 2、要求确认或复制污染 Round 3。 | Passive Reference |
+| V17-04 | Round 1 有记录、Round 2 为空，打开 Round 3。 | 显示“当前推荐参考：Round 1”；Round 3 三个自有字段仍为空且不写 snapshot。 | 选择空 Round 2、要求确认或复制污染 Round 3。 | Passive Reference |
 | V17-05 | Round 3 展开“调整参考”，改选另一有效 Round / Overview，再 reload。 | 主动选择写入既有配置并持久；Round Own Record 不变。 | 选择不保持或覆盖当前记录。 | Reference Override |
 | V17-06 | 在 Round 3 选择“本轮不参考历史”，并检查旧 Override/Exclude 折叠区。 | 默认行显示本轮不参考；旧高级数据兼容，普通态不展示复杂表单。 | 仍显示历史参考或旧配置丢失。 | Reference Exclude |
 | V17-07 | 在 Context 区域添加两个 Next Action，完成并重开其中一个。 | Task 带 Conversation SourceRef；Tasks 页面可见；没有 AI 自动创建。 | Task 未关联或出现自动创建。 | Task Integration |
@@ -27,6 +27,13 @@
 | V17-19 | 点击 Round 结论与 Overview 的“保存为 Knowledge”，分别取消与确认预览。 | 取消不写；确认后才创建带正确 Conversation/Round provenance 的 Knowledge。 | 无预览直接写、来源错误或自动写。 | Knowledge Confirmation |
 | V17-20 | 检查导入 Round 的可用操作。 | 不显示删除、合并、拆分、上下移动、Duplicate 或原始数据编辑；记录与参考仍可编辑。 | 出现单 Round 破坏性入口。 | Imported Immutability |
 | V17-21 | 在 1280px 与 390px 检查同一 Round。 | 桌面正文/记录约 62–70% / 30–38%；窄屏上下排列；document 无横向 overflow。 | 任一视口横向滚动、正文宽度为 0 或固定 Inspector。 | Responsive Layout |
+| V17-22 | 读取纯文本 note、旧分段 note、`【补充备注】`、重复兼容段和未知 header，编辑其中一个字段后 reload。 | notes/next action/goal/decisions/unresolved 与未知文本均保留；header-shaped 正文可逆。 | 任一旧文本静默丢失或字段串位。 | Record Serializer |
+| V17-23 | 快速连续输入并立即 blur、折叠/切换 Round 后 reload。 | 最后输入保留；旧异步响应不覆盖最新状态；不同 Round 不串位。 | 丢最后输入、串位或旧响应显示 saved。 | Autosave Revision |
+| V17-24 | 注入一次 Round IndexedDB write failure。 | UI 显示“保存失败，点击重试”，不显示 saved；retry 保存最新 draft，reload 保留。 | 误报 saved、retry 保存旧值。 | Autosave Failure |
+| V17-25 | Round 3 动态推荐 Round 1；补写 Round 2，再把 Round 3 固定到 Round 1，并修改 Round 1。 | 动态推荐变 Round 2；确认后显示“已固定参考：Round 1”；固定 snapshot 和 Round 3 own record 均不变。 | 动态/固定文案混淆或 snapshot 被 live source 覆盖。 | Reference Semantics |
+| V17-26 | 对相同来源与内容重复确认“保存为 Knowledge”。 | 首次数量 +1；再次提示已存在并保持数量不变；不同来源/内容仍可创建。 | 重复 manual Proposal/Knowledge。 | Knowledge Idempotency |
+| V17-27 | 生成 Continue Topic，并分别搜索只存在于“我的备注”和“下一步”的词。 | 继续文本与 matched field 分别标明两种语义。 | 显示统一 raw note 导致混淆。 | Search / Continue Semantics |
+| V17-28 | 390px 展开再折叠 sticky Navigator，记录 scrollY 与 document width。 | 展开使用覆盖层，不挤压主网格；无非用户触发纵跳或横向 overflow。 | 主内容被挤窄、页面跳动或横向滚动。 | Navigator Responsive |
 
 ## v1.1 — Long Conversation UX & Import Stabilization
 

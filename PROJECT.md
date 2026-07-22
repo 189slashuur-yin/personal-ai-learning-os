@@ -15,15 +15,17 @@ PALOS 面向需要与 AI 长期协作的个人用户。产品要解决的不是�
 
 ## 当前阶段
 
-截至 2026-07-19，运行时进入 v1.7 implementation candidate。v1.6.5 Stable 基线已通过 lint、187 项测试与 build；v1.7 在冻结架构内增加 Personal AI Context Management，不修改 IndexedDB schema，也不新增大型 Aggregate。
+截至 2026-07-23，v1.7 Final Release QA 已完成。v1.7 在冻结架构内提供 Round-first Personal AI Context Management，不修改 IndexedDB schema，也不新增大型 Aggregate。
 
-- Current Version：v1.7 implementation candidate
-- Current Focus：v1.7 Final Usability Correction — inline Round record、autosave、passive reference、Knowledge boundary
-- Next Recommended Phase：最终自动门禁与真实三轮浏览器 QA 已完成，可进入 v1.7 release QA；当前不创建 commit
+- Current Version：v1.7 release candidate（release commit pending）
+- Current Focus：v1.7 Final Release QA、Data Semantics Audit 与 Minimal Closure
+- Next Recommended Phase：可创建单一 PALOS v1.7 release commit；当前按要求不 commit、不 push
 
 v1.7 继续把 Conversation 作为 Aggregate Root、Round 作为最小整理单元、Task 作为独立行动实体、Knowledge 作为长期稳定信息。Context 是当前有效状态，不等于所有聊天，也不自动升级为 Knowledge。
 
-v1.7 Final Usability Correction 不扩展领域：每个 Round 卡片内直接显示“我的备注 / 本轮结论 / 下一步”，复用既有 Summary / Note 并防抖自动保存；历史信息默认只读引用最近有效 Round，不复制当前记录、不要求逐轮确认；Conversation Overview 独立保存三个紧凑字段；Knowledge 只在人工预览确认后创建。
+v1.7 Final Usability Correction 不扩展领域：每个 Round 卡片内直接显示“我的备注 / 本轮结论 / 下一步”。我的备注、下一步、目标、决定、遗留问题使用同一个版本化 serializer/parser 写入 `Round.note`，本轮结论继续写 `Round.summary`；纯文本、旧分段、`【补充备注】` 和未知旧文本均兼容且编辑单字段不会静默删除其它内容。
+
+每个 Round 拥有独立、revision-aware 的 750ms autosave controller；写入串行，blur、折叠/切换和卸载主动 flush，IndexedDB transaction 完成后才显示“已保存”，失败保留最新 draft 供 retry。动态态显示“当前推荐参考”，不写当前 Round；用户主动确认后显示“已固定参考”，固定 snapshot 与 Round 自有记录都不会被来源后续变化覆盖。Knowledge 只在人工预览确认后创建，同一来源与规范化内容的重复确认不重复建卡。
 
 ## v1.0 Phase2 product language
 

@@ -1,8 +1,12 @@
 import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ConversationVersionStorage } from "@/core/contracts/conversation-version-storage";
+import type { KnowledgeCardStorage } from "@/core/contracts/knowledge-card-storage";
+import type { ProposalStorage } from "@/core/contracts/proposal-storage";
 import type { Conversation } from "@/core/entities/conversation";
 import type { ConversationVersion } from "@/core/entities/conversation-version";
+import type { KnowledgeCard } from "@/core/entities/knowledge-card";
+import type { Proposal } from "@/core/entities/proposal";
 import type { Round } from "@/core/entities/round";
 import { ConversationContextService } from "@/core/services/conversation-context-service";
 import {
@@ -19,6 +23,7 @@ import {
   type RoundRecordDraft,
 } from "@/core/services/round-record";
 import { RoundService } from "@/core/services/round-service";
+import { RoundKnowledgeService } from "@/core/services/round-knowledge-service";
 import {
   InMemoryConversationStorage,
   InMemoryMessageStorage,
@@ -118,6 +123,59 @@ class InMemoryVersionStorage implements ConversationVersionStorage {
   removeByConversationId() {}
 }
 
+class InMemoryKnowledgeStorage implements KnowledgeCardStorage {
+  cards: KnowledgeCard[] = [];
+
+  save(card: KnowledgeCard) {
+    if (!this.cards.some((candidate) => candidate.proposalId === card.proposalId)) {
+      this.cards.push(structuredClone(card));
+    }
+  }
+
+  update(card: KnowledgeCard) {
+    const index = this.cards.findIndex((candidate) => candidate.id === card.id);
+    if (index >= 0) this.cards[index] = structuredClone(card);
+  }
+
+  getAll() { return structuredClone(this.cards); }
+  getFirst() { return this.getAll()[0] ?? null; }
+  getById(id: string) { return this.getAll().find((card) => card.id === id) ?? null; }
+  getByProposalId(proposalId: string) { return this.getAll().find((card) => card.proposalId === proposalId) ?? null; }
+  remove(id: string) { this.cards = this.cards.filter((card) => card.id !== id); }
+  removeByProposalIds(ids: string[]) { const values = new Set(ids); this.cards = this.cards.filter((card) => !values.has(card.proposalId)); }
+}
+
+class InMemoryProposalStorage implements ProposalStorage {
+  proposals: Proposal[] = [];
+
+  save(proposal: Proposal) {
+    if (!this.proposals.some((candidate) => candidate.id === proposal.id)) {
+      this.proposals.push(structuredClone(proposal));
+    }
+  }
+
+  saveFromMessages(proposal: Proposal) { this.save(proposal); }
+  saveCurrent(proposal: Proposal) { this.save(proposal); }
+  getCurrent() { return this.getAll()[0] ?? null; }
+  getAll() { return structuredClone(this.proposals); }
+  getById(id: string) { return this.getAll().find((proposal) => proposal.id === id) ?? null; }
+  getBySourceId(sourceId: string) { return this.getAll().find((proposal) => proposal.sourceId === sourceId) ?? null; }
+  getByConversationId(conversationId: string) { return this.getAll().filter((proposal) => proposal.conversationId === conversationId); }
+  remove(id: string) { this.proposals = this.proposals.filter((proposal) => proposal.id !== id); }
+  removeBySourceIds(ids: string[]) { const values = new Set(ids); this.proposals = this.proposals.filter((proposal) => !proposal.sourceId || !values.has(proposal.sourceId)); }
+  removeByConversationId(conversationId: string) { this.proposals = this.proposals.filter((proposal) => proposal.conversationId !== conversationId); }
+}
+
+function deferred<T = void>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
 afterEach(() => {
   vi.useRealTimers();
 });
@@ -135,7 +193,7 @@ describe("PALOS v1.7 final Round usability", () => {
     expect(roundWorkspaceSource).not.toContain(">本轮记录</button>");
   });
 
-  it("keeps two Round records isolated, debounces writes, and reloads exact values", () => {
+  it("keeps two Round records isolated, debounces writes, and reloads exact values", async () => {
     vi.useFakeTimers();
     const rounds = new InMemoryRoundStorage();
     rounds.save(round("round-1", 1));
@@ -166,7 +224,7 @@ describe("PALOS v1.7 final Round usability", () => {
     vi.advanceTimersByTime(749);
     expect(rounds.getById("round-1")?.summary).toBeUndefined();
 
-    vi.advanceTimersByTime(1);
+    await vi.advanceTimersByTimeAsync(1);
     const reloadedFirst = parseRoundRecord(rounds.getById("round-1")!);
     const reloadedSecond = parseRoundRecord(rounds.getById("round-2")!);
     expect(reloadedFirst).toMatchObject({
@@ -182,7 +240,7 @@ describe("PALOS v1.7 final Round usability", () => {
     expect(statuses).toEqual(["dirty", "saving", "saved"]);
   });
 
-  it("flushes pending autosave immediately on blur", () => {
+  it("flushes pending autosave immediately on blur", async () => {
     vi.useFakeTimers();
     let saved = "";
     const autosave = new DebouncedAutosave<string>((value) => {
@@ -191,11 +249,122 @@ describe("PALOS v1.7 final Round usability", () => {
 
     autosave.schedule("save on blur");
     expect(saved).toBe("");
-    autosave.flush();
+    await autosave.flush();
     expect(saved).toBe("save on blur");
     expect(roundRecordPanelSource).toContain(
       'onBlur={() => autosaveRef.current?.flush()}',
     );
+  });
+
+  it("serializes every record field, unknown legacy text, and header-shaped values reversibly", () => {
+    const original = record({
+      notes: "备注正文\n【看起来像分段】",
+      goal: "目标",
+      conclusion: "结论",
+      decisions: "决定",
+      pendingQuestions: "遗留",
+      nextActions: "下一步",
+      legacyNote: "旧文本\n【未知旧段】\n未知内容",
+    });
+
+    expect(parseRoundRecord(serializeRoundRecord(original))).toEqual(original);
+  });
+
+  it("preserves pure notes, old sections, duplicate additional notes, and unknown blocks when one field changes", () => {
+    const legacy = parseRoundRecord({
+      summary: "旧结论",
+      note: [
+        "未分段前言",
+        "【补充备注】",
+        "旧备注一",
+        "【我的备注】",
+        "旧备注二",
+        "【下一步行动】",
+        "旧下一步",
+        "【未知旧段】",
+        "不可丢的未知内容",
+        "【本轮目标】",
+        "旧目标",
+      ].join("\n"),
+    });
+
+    expect(legacy.notes).toBe("旧备注一\n\n旧备注二");
+    expect(legacy.legacyNote).toContain("未分段前言");
+    expect(legacy.legacyNote).toContain("【未知旧段】\n不可丢的未知内容");
+
+    const reloaded = parseRoundRecord(
+      serializeRoundRecord({ ...legacy, notes: "只修改备注" }),
+    );
+    expect(reloaded).toMatchObject({
+      notes: "只修改备注",
+      goal: "旧目标",
+      conclusion: "旧结论",
+      nextActions: "旧下一步",
+      legacyNote: legacy.legacyNote,
+    });
+    expect(parseRoundRecord({ note: "完全自由的旧 note", summary: "" }).legacyNote)
+      .toBe("完全自由的旧 note");
+  });
+
+  it("serializes async saves so an older response cannot report a newer draft as saved", async () => {
+    const firstSave = deferred();
+    const secondSave = deferred();
+    const savedValues: string[] = [];
+    const statuses: AutosaveStatus[] = [];
+    const autosave = new DebouncedAutosave<string>(async (value) => {
+      savedValues.push(value);
+      await (savedValues.length === 1 ? firstSave.promise : secondSave.promise);
+    }, (status) => statuses.push(status));
+
+    autosave.schedule("old draft");
+    const flush = autosave.flush();
+    await vi.waitFor(() => expect(savedValues).toEqual(["old draft"]));
+    autosave.schedule("latest draft");
+    firstSave.resolve();
+    await vi.waitFor(() =>
+      expect(savedValues).toEqual(["old draft", "latest draft"]),
+    );
+    expect(statuses.at(-1)).toBe("saving");
+    secondSave.resolve();
+    await flush;
+    expect(statuses.at(-1)).toBe("saved");
+    expect(statuses.filter((status) => status === "saved")).toHaveLength(1);
+  });
+
+  it("flushes safely on dispose and suppresses completion status after unmount", async () => {
+    const completion = deferred();
+    const statuses: AutosaveStatus[] = [];
+    let saved = "";
+    const autosave = new DebouncedAutosave<string>(async (value) => {
+      saved = value;
+      await completion.promise;
+    }, (status) => statuses.push(status));
+    autosave.schedule("unmount draft");
+    const disposing = autosave.dispose();
+    completion.resolve();
+    await disposing;
+    expect(saved).toBe("unmount draft");
+    expect(statuses).not.toContain("saved");
+  });
+
+  it("reports save failure and retries the latest draft without a false saved state", async () => {
+    const attempts: string[] = [];
+    const statuses: AutosaveStatus[] = [];
+    let shouldFail = true;
+    const autosave = new DebouncedAutosave<string>(async (value) => {
+      attempts.push(value);
+      if (shouldFail) throw new Error("forced save failure");
+    }, (status) => statuses.push(status));
+
+    autosave.schedule("first draft");
+    expect(await autosave.flush()).toBe(false);
+    expect(statuses.at(-1)).toBe("error");
+    expect(statuses).not.toContain("saved");
+    autosave.schedule("latest draft");
+    shouldFail = false;
+    expect(await autosave.retry()).toBe(true);
+    expect(attempts).toEqual(["first draft", "latest draft"]);
+    expect(statuses.at(-1)).toBe("saved");
   });
 
   it("skips an empty Round and passively references the nearest effective Round", () => {
@@ -249,6 +418,47 @@ describe("PALOS v1.7 final Round usability", () => {
       "自己的记录",
     );
   });
+
+  it("updates a dynamic recommendation but never mutates own records or a fixed snapshot", () => {
+    const conversations = new InMemoryConversationStorage();
+    const rounds = new InMemoryRoundStorage();
+    conversations.save(conversation());
+    rounds.save(round("round-1", 1, {
+      ...serializeRoundRecord(record({ conclusion: "Round 1 conclusion" })),
+    }));
+    rounds.save(round("round-2", 2));
+    rounds.save(round("round-3", 3, {
+      ...serializeRoundRecord(record({ notes: "Round 3 own note" })),
+    }));
+    const service = new RoundContextInheritanceService(conversations, rounds);
+
+    expect(service.recommendSource("round-3")?.id).toBe("round-1");
+    new RoundService(rounds).updateRound(
+      "round-2",
+      serializeRoundRecord(record({ nextActions: "Round 2 next" })),
+    );
+    expect(service.recommendSource("round-3")?.id).toBe("round-2");
+    expect(parseRoundRecord(rounds.getById("round-3")!).notes).toBe(
+      "Round 3 own note",
+    );
+
+    service.confirm("round-3", {
+      inheritanceMode: "inherit",
+      sourceRoundId: "round-1",
+    });
+    new RoundService(rounds).updateRound(
+      "round-1",
+      serializeRoundRecord(record({ conclusion: "changed later" })),
+    );
+    expect(service.getPassiveReference("round-3")).toMatchObject({
+      kind: "round",
+      round: { id: "round-1" },
+      conclusion: "Round 1 conclusion",
+    });
+    expect(rounds.getById("round-3")?.context?.snapshot?.currentState).toBe(
+      "Round 1 conclusion",
+    );
+  });
 });
 
 describe("PALOS v1.7 final Overview, Knowledge, and layout boundaries", () => {
@@ -296,11 +506,42 @@ describe("PALOS v1.7 final Overview, Knowledge, and layout boundaries", () => {
 
     expect(roundSaveFunction).toContain("window.confirm");
     expect(roundSaveFunction).toContain("if (!confirmed) return");
-    expect(roundSaveFunction).toContain(".createManual(");
+    expect(roundSaveFunction).toContain(".createManualWithResult(");
     expect(overviewSaveFunction).toContain("window.confirm");
     expect(overviewSaveFunction).toContain("if (!confirmed) return");
-    expect(overviewSaveFunction).toContain(".createConversationManual(");
+    expect(overviewSaveFunction).toContain(
+      ".createConversationManualWithResult(",
+    );
     expect(roundContextPanelSource).not.toContain("RoundKnowledgeService");
+  });
+
+  it("reuses manual Knowledge for the same source and normalized content", () => {
+    const knowledge = new InMemoryKnowledgeStorage();
+    const proposals = new InMemoryProposalStorage();
+    const service = new RoundKnowledgeService(knowledge, proposals);
+    const sourceRound = round("knowledge-round", 1);
+
+    const first = service.createManualWithResult(
+      sourceRound,
+      "Round conclusion",
+      "same content\r\n",
+    );
+    const second = service.createManualWithResult(
+      sourceRound,
+      "Renamed duplicate",
+      "same content\n",
+    );
+
+    expect(first.created).toBe(true);
+    expect(second).toEqual({ card: first.card, created: false });
+    expect(knowledge.getAll()).toHaveLength(1);
+    expect(proposals.getAll()).toHaveLength(1);
+  });
+
+  it("labels dynamic recommendations and fixed references explicitly", () => {
+    expect(roundContextPanelSource).toContain("当前推荐参考：Round");
+    expect(roundContextPanelSource).toContain("已固定参考：Round");
+    expect(roundContextPanelSource).not.toContain("参考上下文：Round");
   });
 
   it("hides all single-Round destructive and original-data editing actions", () => {

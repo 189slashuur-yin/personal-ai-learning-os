@@ -113,6 +113,27 @@ export function drainPendingWrites(): Promise<void> {
   });
 }
 
+/** Wait for every tracked write and surface transaction failures to callers. */
+export async function drainPendingWritesOrThrow(): Promise<void> {
+  const failures: unknown[] = [];
+
+  while (_pendingBgWrites.size > 0) {
+    const results = await Promise.allSettled([..._pendingBgWrites]);
+    failures.push(
+      ...results.flatMap((result) =>
+        result.status === "rejected" ? [result.reason] : [],
+      ),
+    );
+  }
+
+  if (failures.length > 0) {
+    const first = failures[0];
+    throw first instanceof Error
+      ? first
+      : new Error("IndexedDB background write failed.");
+  }
+}
+
 export function persistInBackground(
   operation: string,
   promise: Promise<void>,

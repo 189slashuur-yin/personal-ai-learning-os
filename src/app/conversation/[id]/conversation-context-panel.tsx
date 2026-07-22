@@ -33,7 +33,9 @@ import {
   createMessageStorage,
   createProposalStorage,
   createRoundStorage,
+  getStorageMode,
 } from "@/infrastructure/storage/storage-factory";
+import { drainPendingWritesOrThrow } from "@/infrastructure/storage/indexeddb/database";
 
 const contextPlaceholders: Record<ConversationContextField, string> = {
   longTermBackground: "长期目标、稳定偏好、项目背景…",
@@ -118,8 +120,9 @@ export function ConversationContextPanel({
   }, [conversation]);
 
   useEffect(() => {
+    let active = true;
     const autosave = new DebouncedAutosave<ConversationContext>(
-      (value) => {
+      async (value) => {
         const versionStorage = createConversationVersionStorage();
         const conversationStorage = createConversationStorage();
         const result = new ConversationContextService({
@@ -133,24 +136,47 @@ export function ConversationContextPanel({
           throw new Error("Conversation no longer exists");
         }
 
+        // A failed optimistic IndexedDB write leaves the cache updated. Retry
+        // must still enqueue the latest full draft even when there is no new
+        // semantic Context diff to snapshot.
+        if (!result) {
+          conversationStorage.save(storedConversation);
+          const latestContextVersion = versionStorage
+            .getByConversationId(conversation.id)
+            .filter((version) => version.kind === "context")
+            .sort((left, right) =>
+              right.createdAt.localeCompare(left.createdAt),
+            )[0];
+          if (latestContextVersion) versionStorage.save(latestContextVersion);
+        }
+
+        if (getStorageMode() === "indexedDB") {
+          await drainPendingWritesOrThrow();
+        }
+
         const savedConversation = result?.conversation ?? storedConversation;
         conversationRef.current = savedConversation;
-        onSavedRef.current(
-          savedConversation,
-          versionStorage.getByConversationId(conversation.id),
-        );
+        if (active) {
+          onSavedRef.current(
+            savedConversation,
+            versionStorage.getByConversationId(conversation.id),
+          );
+        }
       },
       setSaveStatus,
       750,
     );
     autosaveRef.current = autosave;
 
-    const flushBeforeUnload = () => autosave.flush();
+    const flushBeforeUnload = () => {
+      void autosave.flush();
+    };
     window.addEventListener("beforeunload", flushBeforeUnload);
 
     return () => {
+      active = false;
       window.removeEventListener("beforeunload", flushBeforeUnload);
-      autosave.dispose();
+      void autosave.dispose();
       if (autosaveRef.current === autosave) autosaveRef.current = null;
     };
   }, [conversation.id]);
@@ -186,8 +212,13 @@ export function ConversationContextPanel({
     autosaveRef.current?.schedule(next);
   }
 
-  function clearContext() {
-    autosaveRef.current?.flush();
+  async function clearContext() {
+    const flushed = await autosaveRef.current?.flush();
+
+    if (flushed === false) {
+      setNotice("Overview 尚未保存成功，请重试后再清空。");
+      return;
+    }
     if (
       !window.confirm(
         "清空当前 Conversation Context？当前值会被移除，但 Context Timeline 历史会保留。",
@@ -219,8 +250,13 @@ export function ConversationContextPanel({
     );
   }
 
-  function saveOverviewAsKnowledge() {
-    autosaveRef.current?.flush();
+  async function saveOverviewAsKnowledge() {
+    const flushed = await autosaveRef.current?.flush();
+
+    if (flushed === false) {
+      setNotice("Overview 尚未保存成功，请重试后再创建 Knowledge。");
+      return;
+    }
     const content = draftRef.current.currentState?.trim();
 
     if (!content) {
@@ -238,11 +274,19 @@ export function ConversationContextPanel({
 
     if (!confirmed) return;
 
-    new RoundKnowledgeService(
+    const result = new RoundKnowledgeService(
       createKnowledgeCardStorage(),
       createProposalStorage(),
-    ).createConversationManual(currentConversation, title, content);
-    setNotice("Conversation Overview 已保存为 Knowledge。");
+    ).createConversationManualWithResult(
+      currentConversation,
+      title,
+      content,
+    );
+    setNotice(
+      result.created
+        ? "Conversation Overview 已保存为 Knowledge。"
+        : "相同来源与内容的 Knowledge 已存在，未重复创建。",
+    );
   }
 
   function reloadTasks(service: TaskService) {
@@ -288,8 +332,13 @@ export function ConversationContextPanel({
     reloadTasks(service);
   }
 
-  function openContinueContext() {
-    autosaveRef.current?.flush();
+  async function openContinueContext() {
+    const flushed = await autosaveRef.current?.flush();
+
+    if (flushed === false) {
+      setCopyNotice("Overview 保存失败，无法生成最新继续文本。");
+      return;
+    }
     const exported = new ContextExportService({
       conversations: createConversationStorage(),
       rounds: createRoundStorage(),

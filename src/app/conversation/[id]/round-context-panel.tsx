@@ -48,11 +48,17 @@ export function RoundContextPanel({
 
   const referenceLabel =
     reference?.kind === "round"
-      ? `参考上下文：Round ${reference.round.order} 的结论与下一步`
+      ? round.context
+        ? `已固定参考：Round ${reference.round.order}`
+        : `当前推荐参考：Round ${reference.round.order}`
       : reference?.kind === "conversation"
-        ? "参考上下文：Conversation Overview"
+        ? round.context
+          ? "已固定参考：Conversation Overview"
+          : "当前推荐参考：Conversation Overview"
         : round.context?.inheritanceMode === "exclude"
           ? "本轮不参考历史"
+          : round.context?.sourceRoundId
+            ? "已固定参考：原 Round（来源不可用）"
           : "暂无历史参考";
 
   function applyReference(value: string) {

@@ -388,6 +388,55 @@ describe("PALOS v1.7 UX refinement", () => {
     expect(continueText).toContain("Context：完成Release QA");
   });
 
+  it("keeps Round notes and next actions distinct in Continue Topic and Search", () => {
+    const conversations = new InMemoryConversationStorage();
+    const rounds = new InMemoryRoundStorage();
+    const tasks = new InMemoryTaskStorage();
+    const versions = new InMemoryConversationVersionStorage();
+    const sourceConversation = conversation("semantic-round-record");
+    conversations.save(sourceConversation);
+    rounds.save(
+      round("semantic-round", sourceConversation.id, 1, {
+        ...serializeRoundRecord({
+          notes: "只属于备注的检索词",
+          goal: "",
+          conclusion: "语义结论",
+          decisions: "",
+          pendingQuestions: "",
+          nextActions: "只属于下一步的检索词",
+          legacyNote: "",
+        }),
+      }),
+    );
+
+    const exported = new ContextExportService({
+      conversations,
+      rounds,
+      tasks,
+      versions,
+    }).exportConversation(sourceConversation.id);
+    const continueText = createContinueContextText(exported!);
+    expect(continueText).toContain("我的备注：只属于备注的检索词");
+    expect(continueText).toContain("下一步：只属于下一步的检索词");
+
+    const search = new SearchIndexService({
+      workspaces: [],
+      conversations: [sourceConversation],
+      sources: [],
+      messages: [],
+      rounds: rounds.getAll(),
+      proposals: [],
+      knowledgeCards: [],
+      tasks: [],
+      tags: [],
+      assets: [],
+    });
+    expect(search.searchDocuments("只属于备注的检索词")[0].matchedFields)
+      .toContain("record.notes");
+    expect(search.searchDocuments("只属于下一步的检索词")[0].matchedFields)
+      .toContain("record.nextActions");
+  });
+
   it("stores the five-field Round record in existing Summary and Note fields", () => {
     const stored = serializeRoundRecord({
       goal: "重新确认产品定位",

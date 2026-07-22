@@ -131,6 +131,15 @@ function formatDate(timestamp: string) {
   }).format(date);
 }
 
+const matchedFieldLabels: Record<string, string> = {
+  "record.notes": "我的备注",
+  "record.nextActions": "下一步",
+  "record.goal": "本轮目标",
+  "record.decisions": "新增决定",
+  "record.pendingQuestions": "遗留问题",
+  "record.legacyNote": "旧自由 Round Note",
+};
+
 function ResultCard({ result, query }: { result: SearchDocumentMatch; query: string }) {
   return (
     <article
@@ -168,7 +177,11 @@ function ResultCard({ result, query }: { result: SearchDocumentMatch; query: str
             {result.tags?.map((tag) => <span key={tag}>#{tag}</span>)}
             {result.updatedAt ? <span>更新 · {formatDate(result.updatedAt)}</span> : null}
             {result.matchedFields.length ? (
-              <span>匹配字段 · {result.matchedFields.join("、")}</span>
+              <span>
+                匹配字段 · {result.matchedFields
+                  .map((field) => matchedFieldLabels[field] ?? field)
+                  .join("、")}
+              </span>
             ) : null}
           </div>
           {result.entityType === "round" && typeof result.metadata?.conversationId === "string" ? <Link className="mt-3 inline-block text-xs font-semibold text-sky-700" href={`/conversation/${result.metadata.conversationId}?mode=workspace&round=${encodeURIComponent(result.entityId)}#round-${result.entityId}`}>跳转到对应 Round →</Link> : null}

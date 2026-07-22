@@ -17,7 +17,9 @@ import {
   createKnowledgeCardStorage,
   createProposalStorage,
   createRoundStorage,
+  getStorageMode,
 } from "@/infrastructure/storage/storage-factory";
+import { drainPendingWritesOrThrow } from "@/infrastructure/storage/indexeddb/database";
 
 const primaryFields: Array<{
   field: "notes" | "conclusion" | "nextActions";
@@ -88,8 +90,9 @@ export function RoundRecordPanel({
   }, [round]);
 
   useEffect(() => {
+    let active = true;
     const autosave = new DebouncedAutosave<RoundRecordDraft>(
-      (value) => {
+      async (value) => {
         const serialized = serializeRoundRecord(value);
         const updated = new RoundService(createRoundStorage()).updateRound(
           round.id,
@@ -100,20 +103,27 @@ export function RoundRecordPanel({
           throw new Error("Round no longer exists");
         }
 
+        if (getStorageMode() === "indexedDB") {
+          await drainPendingWritesOrThrow();
+        }
+
         latestRoundRef.current = updated;
-        onSavedRef.current(updated);
+        if (active) onSavedRef.current(updated);
       },
       setStatus,
       750,
     );
     autosaveRef.current = autosave;
 
-    const flushBeforeUnload = () => autosave.flush();
+    const flushBeforeUnload = () => {
+      void autosave.flush();
+    };
     window.addEventListener("beforeunload", flushBeforeUnload);
 
     return () => {
+      active = false;
       window.removeEventListener("beforeunload", flushBeforeUnload);
-      autosave.dispose();
+      void autosave.dispose();
       if (autosaveRef.current === autosave) {
         autosaveRef.current = null;
       }
@@ -128,8 +138,14 @@ export function RoundRecordPanel({
     autosaveRef.current?.schedule(next);
   }
 
-  function saveConclusionAsKnowledge() {
-    autosaveRef.current?.flush();
+  async function saveConclusionAsKnowledge() {
+    const flushed = await autosaveRef.current?.flush();
+
+    if (flushed === false) {
+      setKnowledgeNotice("本轮记录尚未保存成功，请重试后再创建 Knowledge。");
+      return;
+    }
+
     const content = draftRef.current.conclusion.trim();
 
     if (!content) {
@@ -146,11 +162,15 @@ export function RoundRecordPanel({
 
     if (!confirmed) return;
 
-    new RoundKnowledgeService(
+    const result = new RoundKnowledgeService(
       createKnowledgeCardStorage(),
       createProposalStorage(),
-    ).createManual(storedRound, title, content);
-    setKnowledgeNotice("已保存为 Knowledge；不会影响本轮记录或参考来源。");
+    ).createManualWithResult(storedRound, title, content);
+    setKnowledgeNotice(
+      result.created
+        ? "已保存为 Knowledge；不会影响本轮记录或参考来源。"
+        : "相同来源与内容的 Knowledge 已存在，未重复创建。",
+    );
   }
 
   return (
