@@ -1,6 +1,7 @@
 import type { ConversationStorage } from "@/core/contracts/conversation-storage";
 import type { Conversation } from "@/core/entities/conversation";
 import { DEFAULT_WORKSPACE_ID } from "@/core/entities/workspace";
+import { normalizeStoredConversationContext } from "@/infrastructure/storage/context-normalization";
 import { getConversationCache, setConversationCache } from "./preload";
 import { deleteMany, deleteOne, persistInBackground, writeOne } from "./database";
 
@@ -14,6 +15,7 @@ function normalize(conversation: Conversation): Conversation {
     summary: conversation.summary?.trim() || undefined,
     conclusion: conversation.conclusion?.trim() || undefined,
     pendingQuestions: conversation.pendingQuestions?.trim() || undefined,
+    context: normalizeStoredConversationContext(conversation.context),
     externalSource:
       conversation.externalSource === "chatgpt"
         ? ("chatgpt" as const)

@@ -1,6 +1,7 @@
 import type { ConversationStorage } from "@/core/contracts/conversation-storage";
 import type { Conversation } from "@/core/entities/conversation";
 import { DEFAULT_WORKSPACE_ID } from "@/core/entities/workspace";
+import { normalizeStoredConversationContext } from "@/infrastructure/storage/context-normalization";
 
 const CONVERSATIONS_KEY = "ai-learning-os.conversations";
 
@@ -40,6 +41,7 @@ export class BrowserConversationStorage implements ConversationStorage {
         summary: conversation.summary?.trim() || undefined,
         conclusion: conversation.conclusion?.trim() || undefined,
         pendingQuestions: conversation.pendingQuestions?.trim() || undefined,
+        context: normalizeStoredConversationContext(conversation.context),
         externalSource:
           conversation.externalSource === "chatgpt"
             ? ("chatgpt" as const)

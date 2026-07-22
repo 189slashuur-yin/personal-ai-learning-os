@@ -1,4 +1,7 @@
-import type { Conversation } from "@/core/entities/conversation";
+import {
+  conversationContextFields,
+  type Conversation,
+} from "@/core/entities/conversation";
 import type { ImportedSource } from "@/core/entities/imported-source";
 import type { KnowledgeCard } from "@/core/entities/knowledge-card";
 import type { Message } from "@/core/entities/message";
@@ -34,6 +37,21 @@ type MatchCandidate = {
   mode: "exact" | "contains" | "fuzzy";
   score: number;
 };
+
+function searchFieldPriority(
+  document: SearchDocument,
+  field: string,
+): number {
+  if (field === "title") return 650;
+  if (field.startsWith("context.")) return 600;
+  if (document.entityType === "conversation" && field === "summary") return 550;
+  if (document.entityType === "conversation" && field === "conclusion") return 500;
+  if (document.entityType === "knowledge") return 450;
+  if (document.entityType === "round" && field === "summary") return 425;
+  if (document.entityType === "round" && field === "note") return 400;
+  if (document.entityType === "message" && field === "content") return 350;
+  return 250;
+}
 
 function normalize(value: string) {
   return value.trim().toLocaleLowerCase().replace(/\s+/g, " ");
@@ -153,6 +171,7 @@ export class SearchIndexService {
     const conversations: SearchDocument[] = this.data.conversations.map(
       (conversation) => {
         const workspace = getWorkspace(conversation.id);
+        const context = conversation.context ?? {};
         return {
           id: documentId("conversation", conversation.id),
           entityType: "conversation",
@@ -160,7 +179,13 @@ export class SearchIndexService {
           workspaceId: workspace.id,
           workspaceName: workspace.name,
           title: conversation.title,
-          body: [conversation.note, conversation.summary, conversation.conclusion, conversation.pendingQuestions].filter(Boolean).join("\n"),
+          body: [
+            ...conversationContextFields.map((field) => context[field]),
+            conversation.summary,
+            conversation.conclusion,
+            conversation.pendingQuestions,
+            conversation.note,
+          ].filter(Boolean).join("\n"),
           sourceLabel: conversation.sourceType,
           sourcePath: [workspacePath(workspace.id), conversation.title].filter(Boolean).join(" > "),
           updatedAt: conversation.updatedAt,
@@ -171,6 +196,11 @@ export class SearchIndexService {
             summary: conversation.summary ?? "",
             conclusion: conversation.conclusion ?? "",
             pendingQuestions: conversation.pendingQuestions ?? "",
+            "context.longTermBackground": context.longTermBackground ?? "",
+            "context.currentState": context.currentState ?? "",
+            "context.decisions": context.decisions ?? "",
+            "context.constraints": context.constraints ?? "",
+            "context.nextActions": context.nextActions ?? "",
             sourceType: conversation.sourceType,
             workspace: workspace.name ?? "",
           },
@@ -242,6 +272,7 @@ export class SearchIndexService {
     const rounds: SearchDocument[] = this.data.rounds.map((round) => {
       const conversation = conversationById.get(round.conversationId);
       const workspace = getWorkspace(round.conversationId);
+      const contextSnapshot = round.context?.snapshot ?? {};
       return {
         id: documentId("round", round.id),
         entityType: "round",
@@ -249,7 +280,13 @@ export class SearchIndexService {
         workspaceId: workspace.id,
         workspaceName: workspace.name,
         title: round.title || `${conversation?.title ?? "Conversation"} · Round ${round.order}`,
-        body: [round.question, round.answer, round.note, round.summary].filter(Boolean).join("\n"),
+        body: [
+          ...conversationContextFields.map((field) => contextSnapshot[field]),
+          round.summary,
+          round.note,
+          round.question,
+          round.answer,
+        ].filter(Boolean).join("\n"),
         sourceLabel: "Round",
         sourcePath: `${workspacePath(workspace.id)}${workspace.id ? " > " : ""}${conversation?.title ?? "Conversation"} > Round ${round.order}`,
         updatedAt: round.updatedAt,
@@ -260,6 +297,11 @@ export class SearchIndexService {
           answer: round.answer,
           note: round.note ?? "",
           summary: round.summary ?? "",
+          "context.longTermBackground": contextSnapshot.longTermBackground ?? "",
+          "context.currentState": contextSnapshot.currentState ?? "",
+          "context.decisions": contextSnapshot.decisions ?? "",
+          "context.constraints": contextSnapshot.constraints ?? "",
+          "context.nextActions": contextSnapshot.nextActions ?? "",
           conversation: conversation?.title ?? "",
           workspace: workspace.name ?? "",
         },
@@ -560,15 +602,16 @@ export class SearchIndexService {
                 : field === "content" || field === "question" || field === "answer"
                   ? 55
                   : 35;
+              const priority = searchFieldPriority(document, field) * 1_000;
               if (normalizedValue === normalizedQuery) {
-                return [{ field, value, mode: "exact" as const, score: fieldWeight + 55 }];
+                return [{ field, value, mode: "exact" as const, score: priority + fieldWeight + 55 }];
               }
               if (index >= 0) {
                 return [{
                   field,
                   value,
                   mode: "contains" as const,
-                  score: fieldWeight + Math.max(0, 20 - index),
+                  score: priority + fieldWeight + Math.max(0, 20 - index),
                 }];
               }
               if (isSubsequence(normalizedQuery, normalizedValue)) {
@@ -577,7 +620,7 @@ export class SearchIndexService {
                   field,
                   value,
                   mode: "fuzzy" as const,
-                  score: Math.round(fieldWeight * 0.35 + density * 20),
+                  score: priority + Math.round(fieldWeight * 0.35 + density * 20),
                 }];
               }
               return [];
@@ -595,7 +638,7 @@ export class SearchIndexService {
           ),
           matchedFields: matches.map((match) => match.field),
           matchMode: bestMatch?.mode ?? "contains",
-          score: matches.reduce((total, match) => total + match.score, 0),
+          score: (bestMatch?.score ?? 0) + Math.max(0, matches.length - 1),
         } satisfies SearchDocumentMatch;
       })
       .filter((document): document is SearchDocumentMatch => document !== null)

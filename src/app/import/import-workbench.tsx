@@ -320,7 +320,12 @@ export function ImportWorkbench() {
         conversations: convStorage,
         messages: msgStorage,
         versions: versionStorage,
-      }).createSnapshot(mergeTargetId, `自动恢复点 — Merge「${mergePreview.sourceTitle}」`, `合并来自「${mergePreview.sourceTitle}」的内容前自动创建`);
+      }).createSnapshot(
+        mergeTargetId,
+        `自动恢复点 — Merge「${mergePreview.sourceTitle}」`,
+        `合并来自「${mergePreview.sourceTitle}」的内容前自动创建`,
+        { kind: "automatic" },
+      );
 
       const sourceMessages = msgStorage.getByConversationId(mergeSourceId);
       const targetMessages = msgStorage.getByConversationId(mergeTargetId);

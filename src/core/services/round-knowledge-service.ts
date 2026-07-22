@@ -1,5 +1,6 @@
 import type { KnowledgeCardStorage } from "@/core/contracts/knowledge-card-storage";
 import type { ProposalStorage } from "@/core/contracts/proposal-storage";
+import type { Conversation } from "@/core/entities/conversation";
 import type { KnowledgeCard } from "@/core/entities/knowledge-card";
 import type { Proposal } from "@/core/entities/proposal";
 import type { Round } from "@/core/entities/round";
@@ -32,6 +33,55 @@ export class RoundKnowledgeService {
       sourceMessageCount: round.messageIds.length, sourceEvidenceExcerpt: proposal.sourceEvidence.excerpt,
       providerName: "Manual", tagIds: [], createdAt: timestamp, updatedAt: timestamp, status: "Active", previousContentSnapshots: [],
     };
+    this.proposals.save(proposal);
+    this.knowledge.save(card);
+    return card;
+  }
+
+  createConversationManual(
+    conversation: Conversation,
+    title: string,
+    content: string,
+  ) {
+    const timestamp = new Date().toISOString();
+    const normalizedTitle = title.trim() || `${conversation.title} · 总览`;
+    const normalizedContent = content.trim();
+    const proposal: Proposal = {
+      id: crypto.randomUUID(),
+      sourceType: "conversation",
+      conversationId: conversation.id,
+      title: normalizedTitle,
+      summary: normalizedContent,
+      sourceEvidence: {
+        sourceName: `Conversation Overview: ${conversation.title}`,
+        excerpt: normalizedContent.slice(0, 600),
+      },
+      generatedBy: "Demo Analyzer Generated",
+      providerId: "manual",
+      providerName: "Manual",
+      status: "Applied",
+      purpose: "knowledge-create",
+      createdAt: timestamp,
+    };
+    const card: KnowledgeCard = {
+      id: crypto.randomUUID(),
+      proposalId: proposal.id,
+      title: normalizedTitle,
+      content: normalizedContent,
+      summary: normalizedContent,
+      sourceFile: proposal.sourceEvidence.sourceName,
+      sourceConversationId: conversation.id,
+      sourceMessageIds: [],
+      sourceMessageCount: 0,
+      sourceEvidenceExcerpt: proposal.sourceEvidence.excerpt,
+      providerName: "Manual",
+      tagIds: [],
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      status: "Active",
+      previousContentSnapshots: [],
+    };
+
     this.proposals.save(proposal);
     this.knowledge.save(card);
     return card;

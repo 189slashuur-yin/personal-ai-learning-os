@@ -40,9 +40,9 @@ describe("PALOS v1.6.3 — Note editor state", () => {
     });
   });
 
-  it("keeps Conversation Summary and Conversation Note labels and interactions distinct", () => {
+  it("keeps Conversation Overview and Conversation Note labels and interactions distinct", () => {
     expect(conversationDetailSource).toContain(
-      "Conversation Summary / 对话总结",
+      "ConversationContextPanel",
     );
     expect(conversationDetailSource).toContain(
       "Conversation Note / 对话备注",

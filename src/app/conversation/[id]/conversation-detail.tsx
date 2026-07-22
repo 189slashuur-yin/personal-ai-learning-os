@@ -23,6 +23,7 @@ import { AnalyzerExecutionService } from "@/core/services/analyzer-execution";
 import { shouldShowAnalyzerFailureInjection } from "@/core/services/analyzer-diagnostics";
 import { ImportProfileService } from "@/core/services/import-profile-service";
 import { ConversationVersionService } from "@/core/services/conversation-version-service";
+import { ContextExportService } from "@/core/services/context-export-service";
 import { editMessage } from "@/core/services/message-editing";
 import { parseMessagesFromRawText } from "@/core/services/message-parser";
 import { PromptTemplateService } from "@/core/services/prompt-template-service";
@@ -62,6 +63,7 @@ import { ProposalWorkspace } from "./proposal-workspace";
 import { ConversationAssets } from "./conversation-assets";
 import { RoundWorkspace } from "./round-workspace";
 import { ConversationWorkspaceMode } from "./conversation-workspace-mode";
+import { ConversationContextPanel } from "./conversation-context-panel";
 import { RoundNavigator } from "./round-navigator";
 import { CapabilityBadges } from "@/app/capability-badges";
 
@@ -174,9 +176,6 @@ export function ConversationDetail({
   const [conversationNoteEditor, setConversationNoteEditor] = useState(
     createNoteEditorState(),
   );
-  const [summaryDraft, setSummaryDraft] = useState("");
-  const [conclusionDraft, setConclusionDraft] = useState("");
-  const [pendingQuestionsDraft, setPendingQuestionsDraft] = useState("");
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [selectedMessageIds, setSelectedMessageIds] = useState<Set<string>>(
     new Set(),
@@ -220,11 +219,6 @@ export function ConversationDetail({
   // P0-5: Raw Timeline toggle
   const [rawTimelineOpen, setRawTimelineOpen] = useState(false);
 
-  // K3: Summary undo/redo
-  const [summaryUndoStack, setSummaryUndoStack] = useState<string[]>([]);
-  const [summaryRedoStack, setSummaryRedoStack] = useState<string[]>([]);
-  const [summaryModified, setSummaryModified] = useState(false);
-  const [summaryLastSaved, setSummaryLastSaved] = useState<string | null>(null);
   const [providerDetails] = useState<{
     id: string;
     name: string;
@@ -401,9 +395,6 @@ export function ConversationDetail({
       setConversationNoteEditor(
         createNoteEditorState(openedConversation.note ?? ""),
       );
-      setSummaryDraft(openedConversation.summary ?? "");
-      setConclusionDraft(openedConversation.conclusion ?? "");
-      setPendingQuestionsDraft(openedConversation.pendingQuestions ?? "");
       setLastSavedAt(source?.updatedAt ?? null);
       setState({
         status: "ready",
@@ -538,7 +529,7 @@ export function ConversationDetail({
     );
   }
 
-  const { conversation, source, proposals, knowledgeCard, knowledgeCount, roundCount } = state;
+  const { conversation, source, proposals, knowledgeCard, roundCount } = state;
   const importProfileService = new ImportProfileService();
   const importProfile = conversation.importProfileId
     ? importProfileService.getById(conversation.importProfileId)
@@ -547,25 +538,6 @@ export function ConversationDetail({
     dateStyle: "medium",
     timeStyle: "short",
   }).format(new Date(conversation.updatedAt));
-  const hasOriginalContent = draft.trim().length > 0;
-  const activeFlowStep = !hasOriginalContent
-    ? 1
-    : knowledgeCount > 0
-      ? 7
-      : proposals.length > 0
-        ? 5
-        : selectedMessageIds.size > 0
-          ? 4
-          : 2;
-  const flowSteps = [
-    { label: "导入", href: "/import" },
-    { label: "浏览 Rounds", anchor: "section-rounds" },
-    { label: "写 Summary/Note", anchor: "section-info" },
-    { label: "可选 Analyze", anchor: "section-proposal" },
-    { label: "可选 Review", href: "/review" },
-    { label: "Knowledge", anchor: "section-knowledge" },
-    { label: "Search", href: "/search" },
-  ];
   const conversationNoteVisibility = getNoteEditorVisibility(
     conversationNoteEditor.mode,
   );
@@ -578,38 +550,6 @@ export function ConversationDetail({
     if (element) {
       element.scrollIntoView({ behavior: "smooth", block: "start" });
     }
-  }
-
-  // K3: Summary undo/redo
-  function pushSummaryUndo(value: string) {
-    setSummaryUndoStack((prev) => [...prev.slice(-19), value]);
-    setSummaryRedoStack([]);
-  }
-
-  function undoSummary() {
-    if (summaryUndoStack.length === 0) return;
-    const previous = summaryUndoStack[summaryUndoStack.length - 1];
-    setSummaryRedoStack((prev) => [...prev, summaryDraft]);
-    setSummaryUndoStack((prev) => prev.slice(0, -1));
-    setSummaryDraft(previous);
-    setSummaryModified(true);
-  }
-
-  function redoSummary() {
-    if (summaryRedoStack.length === 0) return;
-    const next = summaryRedoStack[summaryRedoStack.length - 1];
-    setSummaryUndoStack((prev) => [...prev, summaryDraft]);
-    setSummaryRedoStack((prev) => prev.slice(0, -1));
-    setSummaryDraft(next);
-    setSummaryModified(true);
-  }
-
-  function resetSummary() {
-    if (state.status !== "ready") return;
-    const original = state.conversation.summary ?? "";
-    pushSummaryUndo(original);
-    setSummaryDraft(original);
-    setSummaryModified(false);
   }
 
   async function runSourceAnalyzer(simulateFailure = false) {
@@ -666,31 +606,6 @@ export function ConversationDetail({
     setAnalyzerError(null);
     setAnalyzerSuccess(`已从 Round「${round.title}」生成整理建议。请在 Review 页面审核后确认加入 Knowledge。`);
     setState({ ...state, proposals: [result.proposal, ...state.proposals] });
-  }
-
-  async function runConversationSummaryAnalyzer() {
-    if (state.status !== "ready") return;
-    setAnalyzerSuccess(null);
-    setLatestAnalyzerRun({ id: "pending", conversationId: state.conversation.id, providerId: providerDetails.id, providerName: providerDetails.name, status: "running", startedAt: new Date().toISOString() });
-    const rounds = createRoundStorage().getByConversationId(state.conversation.id);
-    const timestamp = new Date().toISOString();
-    const summaryMessages: Message[] = rounds.flatMap((round, index) => [
-      ...(round.question ? [{ id: `summary-q-${round.id}`, conversationId: state.conversation.id, role: "user" as const, content: round.question, order: index * 2 + 1, createdAt: timestamp, updatedAt: timestamp }] : []),
-      ...(round.answer ? [{ id: `summary-a-${round.id}`, conversationId: state.conversation.id, role: "assistant" as const, content: round.answer, order: index * 2 + 2, createdAt: timestamp, updatedAt: timestamp }] : []),
-    ]);
-    const result = await createAnalyzerExecutionService(analyzeProviderId).runMessages(state.conversation.id, summaryMessages);
-    setLatestAnalyzerRun(result.run);
-    if (!result.proposal) {
-      setAnalyzerError(result.run.error?.message ?? "Conversation Summary Analyzer 运行失败。");
-      return;
-    }
-    const proposal: Proposal = { ...result.proposal, sourceType: "conversation", sourceMessageIds: rounds.flatMap((round) => round.messageIds), title: `Conversation Summary Draft · ${state.conversation.title}` };
-    const storage = createProposalStorage();
-    storage.save(proposal);
-    storage.saveCurrent(proposal);
-    setAnalyzerError(null);
-    setAnalyzerSuccess("已生成 Conversation Summary 整理建议。请在 Review 页面审核后确认加入 Knowledge。");
-    setState({ ...state, proposals: [proposal, ...state.proposals] });
   }
 
   function createTaskFromConversation() {
@@ -1073,6 +988,7 @@ export function ConversationDetail({
       state.conversation.id,
       snapshotName,
       snapshotDescription,
+      { kind: "manual" },
     );
 
     if (!version) {
@@ -1204,25 +1120,24 @@ export function ConversationDetail({
     setConversationNoteEditor(cancelNoteEditor(conversationNoteEditor));
   }
 
-  function saveConversationSummary() {
-    if (state.status !== "ready") return;
-    const nextConversation: Conversation = {
-      ...state.conversation,
-      summary: summaryDraft.trim() || undefined,
-      conclusion: conclusionDraft.trim() || undefined,
-      pendingQuestions: pendingQuestionsDraft.trim() || undefined,
-      updatedAt: new Date().toISOString(),
-    };
-    createConversationStorage().save(nextConversation);
-    setState({ ...state, conversation: nextConversation });
-  }
-
-  function exportConversation(format: "json" | "markdown") {
+  function exportConversation(format: "json" | "markdown" | "context") {
     if (state.status !== "ready") return;
     const rounds = createRoundStorage().getByConversationId(state.conversation.id);
-    const content = format === "json" ? JSON.stringify({ conversation: state.conversation, rounds, messages: state.messages }, null, 2) : `# ${state.conversation.title}\n\n${rounds.map((round) => `## Round ${round.order}: ${round.title}\n\n**Q:** ${round.question}\n\n**A:** ${round.answer}\n\n${round.summary ? `Summary: ${round.summary}\n` : ""}`).join("\n")}`;
-    const blob = new Blob([content], { type: format === "json" ? "application/json" : "text/markdown" });
-    const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = `${state.conversation.title}.${format === "json" ? "json" : "md"}`; link.click(); URL.revokeObjectURL(link.href);
+    const contextExport = format === "context"
+      ? new ContextExportService({
+          conversations: createConversationStorage(),
+          rounds: createRoundStorage(),
+          tasks: new BrowserTaskStorage(),
+          versions: createConversationVersionStorage(),
+        }).exportConversation(state.conversation.id)
+      : null;
+    const content = format === "context"
+      ? JSON.stringify(contextExport, null, 2)
+      : format === "json"
+        ? JSON.stringify({ conversation: state.conversation, rounds, messages: state.messages }, null, 2)
+        : `# ${state.conversation.title}\n\n${rounds.map((round) => `## Round ${round.order}: ${round.title}\n\n**Q:** ${round.question}\n\n**A:** ${round.answer}\n\n${round.summary ? `Summary: ${round.summary}\n` : ""}`).join("\n")}`;
+    const blob = new Blob([content], { type: format === "markdown" ? "text/markdown" : "application/json" });
+    const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = `${state.conversation.title}${format === "context" ? ".context.json" : format === "json" ? ".json" : ".md"}`; link.click(); URL.revokeObjectURL(link.href);
   }
 
   function handleTitleKeyDown(event: KeyboardEvent<HTMLInputElement>) {
@@ -1247,23 +1162,11 @@ export function ConversationDetail({
         </Link>
         <button
           className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs font-semibold text-zinc-600 hover:border-zinc-300 hover:text-zinc-950"
-          onClick={() => scrollToAnchor("section-rounds")}
-          type="button"
-        >
-          ↓ 当前 Rounds
-        </button>
-        <button
-          className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800 hover:border-amber-300 hover:bg-amber-100"
           onClick={() => scrollToAnchor("section-history")}
           type="button"
         >
-          🔄 History / 版本历史
+          History / 版本历史
         </button>
-      </div>
-
-      <div className="mt-6 rounded-xl border border-zinc-200 bg-white p-5 text-sm leading-7 text-zinc-700">
-        <p className="font-semibold text-zinc-900">📋 对话记录 · 版本管理</p>
-        <p className="mt-1">本页用于管理一个完整对话：导入原始记录 → 自动切成 Round → 手动写摘要/备注 → 必要时生成 AI 建议 → 可用版本恢复撤回整理操作。</p>
       </div>
 
       <header className="mt-8 border-b border-zinc-200 pb-8">
@@ -1332,6 +1235,7 @@ export function ConversationDetail({
                     <div className="flex flex-col gap-1">
                       <button className="rounded-lg px-3 py-2 text-left text-xs font-semibold text-zinc-700 hover:bg-zinc-50" onClick={() => { exportConversation("markdown"); setMoreMenuOpen(false); }} type="button">Export Markdown</button>
                       <button className="rounded-lg px-3 py-2 text-left text-xs font-semibold text-zinc-700 hover:bg-zinc-50" onClick={() => { exportConversation("json"); setMoreMenuOpen(false); }} type="button">Export JSON</button>
+                      <button className="rounded-lg px-3 py-2 text-left text-xs font-semibold text-zinc-700 hover:bg-zinc-50" onClick={() => { exportConversation("context"); setMoreMenuOpen(false); }} type="button">Export Context JSON</button>
                       <button className="rounded-lg px-3 py-2 text-left text-xs font-semibold text-zinc-700 hover:bg-zinc-50" onClick={() => { createTaskFromConversation(); setMoreMenuOpen(false); }} type="button">Create Task</button>
                       <Link className="rounded-lg px-3 py-2 text-left text-xs font-semibold text-zinc-700 hover:bg-zinc-50" href={`/search?q=${encodeURIComponent(conversation.title)}&workspaceId=${encodeURIComponent(conversation.workspaceId ?? DEFAULT_WORKSPACE_ID)}&type=conversation`} onClick={() => setMoreMenuOpen(false)}>搜索此 Conversation</Link>
                       <Link className="rounded-lg px-3 py-2 text-left text-xs font-semibold text-zinc-700 hover:bg-zinc-50" href={`/feedback?page=${encodeURIComponent(`/conversation/${conversation.id}`)}`} onClick={() => setMoreMenuOpen(false)}>记录反馈</Link>
@@ -1419,6 +1323,34 @@ export function ConversationDetail({
         </p>
       ) : null}
 
+      {/* Rounds — main content area */}
+      {state.messages.length > 0 && roundCount === 0 && detailMode === "classic" ? (
+        <div
+          className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-xs text-amber-800"
+          role="alert"
+        >
+          <span className="font-semibold">⚠️ Messages 已存在，但 Rounds 为空。</span>{" "}
+          可查看下方 Raw Timeline，或重新导入/后续再生成。
+        </div>
+      ) : null}
+
+      <div id="section-rounds">
+        {detailMode === "workspace" ? <ConversationWorkspaceMode conversationId={conversationId} onAnalyzeRound={runRoundAnalyzer} /> : <RoundWorkspace conversationId={conversationId} onAnalyzeRound={runRoundAnalyzer} />}
+      </div>
+
+      <ConversationContextPanel
+        conversation={conversation}
+        key={conversation.id}
+        onSaved={(nextConversation, versions) =>
+          setState({
+            ...state,
+            conversation: nextConversation,
+            versions,
+          })
+        }
+        versions={state.versions}
+      />
+
       {/* P0-5: Raw Timeline / 原始对话 — prominent entry point */}
       <section className="mt-6 rounded-xl border border-zinc-200 bg-white">
         <button
@@ -1474,78 +1406,13 @@ export function ConversationDetail({
         ) : null}
       </section>
 
-      <nav aria-label="Conversation 整理流程" className="mt-8 rounded-xl border border-sky-200 bg-sky-50 p-5">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <p className="text-sm font-semibold text-sky-950">推荐整理流程</p>
-            <p className="mt-1 text-xs text-sky-800">导入 → 浏览 Rounds → 写 Summary/Note → 可选 Analyze → 可选 Review → Knowledge → Search</p>
-          </div>
-          <Link className="text-xs font-semibold text-sky-900 underline" href="/help">查看操作手册</Link>
-        </div>
-        <ol className="mt-4 grid gap-2 sm:grid-cols-4 lg:grid-cols-7">
-          {flowSteps.map((step, index) => {
-            const stepNum = index + 1;
-            const active = stepNum === activeFlowStep;
-            const completed = stepNum < activeFlowStep;
-            const isLink = "href" in step;
-            const isAnchor = "anchor" in step;
-            const className = `rounded-lg border px-3 py-3 text-xs font-semibold cursor-pointer transition-colors ${active ? "border-sky-600 bg-white text-sky-950 shadow-sm ring-2 ring-sky-200" : completed ? "border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100" : "border-sky-100 bg-sky-100/60 text-sky-700 hover:bg-sky-200/60"}`;
-
-            if (isLink && step.href) {
-              return (
-                <li key={step.label}>
-                  <Link className={className} href={step.href}>
-                    <span className="block text-[10px] uppercase tracking-wider">Step {stepNum}</span>
-                    <span className="mt-1 block">{step.label} →</span>
-                  </Link>
-                </li>
-              );
-            }
-
-            if (isAnchor && step.anchor) {
-              return (
-                <li key={step.label}>
-                  <button
-                    className={className}
-                    onClick={() => scrollToAnchor(step.anchor!)}
-                    type="button"
-                  >
-                    <span className="block text-[10px] uppercase tracking-wider">Step {stepNum}</span>
-                    <span className="mt-1 block">{step.label} ↓</span>
-                  </button>
-                </li>
-              );
-            }
-
-            return (
-              <li className={className} key={step.label}>
-                <span className="block text-[10px] uppercase tracking-wider">Step {stepNum}</span>
-                <span className="mt-1 block">{step.label}</span>
-              </li>
-            );
-          })}
-        </ol>
-        <div className="mt-4 text-sm leading-6 text-sky-950">
-          {!hasOriginalContent ? (
-            <p>还没有原始内容。请先前往 <Link className="font-semibold underline" href="/import">Import</Link> 导入材料。</p>
-          ) : knowledgeCount > 0 ? (
-            <p>已有 Knowledge。你仍可继续从 Rounds 选择其他内容整理，或前往 <Link className="font-semibold underline" href="/search">Search</Link> 检索。</p>
-          ) : proposals.length > 0 ? (
-            <p>Proposal（AI 整理建议）已经生成。请前往 <Link className="font-semibold underline" href="/review">Review</Link> 人工审核。也可以跳过 Analyze，直接手动创建 Knowledge。</p>
-          ) : selectedMessageIds.size > 0 ? (
-            <p>已选择 {selectedMessageIds.size} 条 Messages。下一步点击「Analyze / 生成整理建议」（可选），或直接在 Round 中写 Summary/Note。</p>
-          ) : (
-            <p>浏览下方 Rounds，为每个 Round 写 Summary/Note。需要 AI 辅助时再点击 Analyze（可选）；没有 Proposal 也可以直接手动创建 Knowledge。</p>
-          )}
-        </div>
-      </nav>
-
       <section className="detail-section" id="section-info">
         <div className="detail-section-heading">
-          <p className="detail-kicker">01 · Context</p>
-          <h2 className="detail-title">Conversation 信息</h2>
+          <p className="detail-kicker">Conversation Info</p>
+          <h2 className="detail-title">基本信息</h2>
         </div>
-        <dl className="grid gap-4 rounded-xl border border-zinc-200 bg-white p-5 text-sm sm:grid-cols-3 lg:grid-cols-9">
+        <div>
+        <dl className="mt-4 grid gap-4 rounded-xl border border-zinc-200 bg-white p-5 text-sm sm:grid-cols-3 lg:grid-cols-9">
           <div>
             <dt className="text-zinc-500">Workspace</dt>
             <dd className="mt-1">
@@ -1628,43 +1495,12 @@ export function ConversationDetail({
             </dd>
           </div>
         </dl>
-
-        {/* Conversation Summary — part of Conversation Information */}
-        <div className="mt-4 rounded-xl border border-zinc-200 bg-white p-5">
-          <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
-            <div>
-              <h3 className="text-sm font-semibold text-zinc-900">Conversation Summary / 对话总结</h3>
-              <p className="mt-1 text-xs text-zinc-500">结构化记录从 Conversation 生成或整理出的结论。</p>
-            </div>
-            <div className="flex flex-wrap items-center gap-2 text-xs">
-              {summaryModified ? <span className="rounded-full bg-amber-100 px-2.5 py-1 font-semibold text-amber-800">● Modified</span> : summaryLastSaved ? <span className="rounded-full bg-emerald-100 px-2.5 py-1 font-semibold text-emerald-800">● Saved {summaryLastSaved}</span> : null}
-              {proposals.length > 0 ? <span className="rounded-full bg-sky-100 px-2.5 py-1 font-semibold text-sky-800">Proposal Available</span> : null}
-              {!summaryDraft.trim() && !conclusionDraft.trim() && !pendingQuestionsDraft.trim() ? <span className="rounded-full bg-zinc-100 px-2.5 py-1 font-semibold text-zinc-600">Draft</span> : null}
-            </div>
-          </div>
-          <div className="mb-3 flex flex-wrap items-center gap-2">
-            <button className="rounded-md border border-zinc-200 bg-white px-2.5 py-1.5 text-xs font-medium text-zinc-600 hover:bg-zinc-50 disabled:opacity-30" disabled={summaryUndoStack.length === 0} onClick={undoSummary} type="button" title="撤销">↩ Undo</button>
-            <button className="rounded-md border border-zinc-200 bg-white px-2.5 py-1.5 text-xs font-medium text-zinc-600 hover:bg-zinc-50 disabled:opacity-30" disabled={summaryRedoStack.length === 0} onClick={redoSummary} type="button" title="重做">↪ Redo</button>
-            <button className="rounded-md border border-zinc-200 bg-white px-2.5 py-1.5 text-xs font-medium text-zinc-600 hover:bg-zinc-50" onClick={resetSummary} type="button" title="重置为已保存版本">⟳ Reset</button>
-            <span className="text-xs text-zinc-400">| 结构化字段 · 点击“确认保存”</span>
-          </div>
-          <div className="grid gap-4 lg:grid-cols-3">
-            <label className="text-sm font-semibold">总结<textarea className="mt-2 min-h-28 w-full rounded-lg border border-zinc-200 p-3 font-normal" onChange={(event) => { pushSummaryUndo(event.target.value); setSummaryDraft(event.target.value); setSummaryModified(true); }} value={summaryDraft} /></label>
-            <label className="text-sm font-semibold">最终结论<textarea className="mt-2 min-h-28 w-full rounded-lg border border-zinc-200 p-3 font-normal" onChange={(event) => setConclusionDraft(event.target.value)} value={conclusionDraft} /></label>
-            <label className="text-sm font-semibold">待确认点<textarea className="mt-2 min-h-28 w-full rounded-lg border border-zinc-200 p-3 font-normal" onChange={(event) => setPendingQuestionsDraft(event.target.value)} value={pendingQuestionsDraft} /></label>
-          </div>
-          <div className="mt-4 flex flex-wrap gap-3">
-            <button className="rounded-lg bg-zinc-950 px-4 py-2.5 text-sm font-semibold text-white" onClick={() => { saveConversationSummary(); setSummaryModified(false); setSummaryLastSaved(new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })); }} type="button">确认保存</button>
-            <button className="rounded-lg border border-zinc-200 px-4 py-2.5 text-sm font-semibold" onClick={runConversationSummaryAnalyzer} type="button">可选：从所有 Rounds 生成 AI 整理建议</button>
-          </div>
-        </div>
-
         <div className="mt-4 rounded-xl border border-zinc-200 bg-white p-5">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <h3 className="text-sm font-semibold text-zinc-900">Conversation Note / 对话备注</h3>
               <p className="mt-1 text-xs text-zinc-500">
-                手动记录附属于此 Conversation 的私有上下文。
+                普通自由备注：记录临时想法、补充说明或私人备注；不作为长期 Context。
               </p>
             </div>
             {conversationNoteVisibility.showPreview ? (
@@ -1695,7 +1531,7 @@ export function ConversationDetail({
                     ),
                   )
                 }
-                placeholder="记录背景、后续整理方向或其它私有备注…"
+                placeholder="记录临时想法、补充说明或其它普通备注…"
                 value={conversationNoteEditor.draftValue}
               />
               <div className="mt-3 flex gap-2">
@@ -1720,6 +1556,7 @@ export function ConversationDetail({
               {conversationNoteEditor.savedValue || "暂无对话备注。"}
             </p>
           )}
+        </div>
         </div>
       </section>
 
@@ -1775,7 +1612,10 @@ export function ConversationDetail({
           {state.versions.length > 0 ? (
             <ol className="mt-4 space-y-3">
               {[...state.versions].reverse().map((version) => {
-                const isAuto = version.name.startsWith("自动恢复点");
+                const isContext = version.kind === "context";
+                const isAuto =
+                  version.kind === "automatic" ||
+                  version.name.startsWith("自动恢复点");
                 return (
                 <li
                   className="rounded-xl border border-zinc-200 bg-white p-4"
@@ -1787,8 +1627,8 @@ export function ConversationDetail({
                         <h3 className="font-semibold text-zinc-950">
                           {version.name}
                         </h3>
-                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${isAuto ? "bg-sky-100 text-sky-700" : "bg-amber-100 text-amber-700"}`}>
-                          {isAuto ? "Auto" : "Manual"}
+                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${isContext ? "bg-violet-100 text-violet-700" : isAuto ? "bg-sky-100 text-sky-700" : "bg-amber-100 text-amber-700"}`}>
+                          {isContext ? "Context" : isAuto ? "Auto" : "Manual"}
                         </span>
                       </div>
                       <p className="mt-1 text-xs text-zinc-500">
@@ -1872,27 +1712,8 @@ export function ConversationDetail({
       </section>
 
 
-      {/* v1.5.1: Compact warning near Rounds section when Messages exist but Rounds are missing */}
-      {state.messages.length > 0 && roundCount === 0 && detailMode === "classic" ? (
-        <div
-          className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-xs text-amber-800"
-          role="alert"
-        >
-          <span className="font-semibold">⚠️ Messages 已存在，但 Rounds 为空。</span>{" "}
-          可查看上方 Raw Timeline，或重新导入/后续再生成。
-        </div>
-      ) : null}
-
-      <div id="section-rounds">
-        {detailMode === "workspace" ? <ConversationWorkspaceMode conversationId={conversationId} onAnalyzeRound={runRoundAnalyzer} /> : <RoundWorkspace conversationId={conversationId} onAnalyzeRound={runRoundAnalyzer} />}
-      </div>
-
       <section className="detail-section">
         <div className="detail-section-heading">
-          <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-            <p className="font-semibold">⚠️ 高级功能区域 — 日常整理不需要进入此区域</p>
-            <p className="mt-1 text-xs">这是底层原始数据。日常阅读、整理、编辑请使用上方的 Rounds。仅在需要核对原始内容或修复数据时使用。</p>
-          </div>
           <p className="detail-kicker">06 · 高级 / 原始数据</p>
           <h2 className="detail-title">Message Timeline / Raw Data</h2>
           <p className="detail-description">

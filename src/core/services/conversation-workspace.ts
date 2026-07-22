@@ -173,6 +173,9 @@ export function duplicateConversationWorkspace(
     ...originalConversation,
     id: crypto.randomUUID(),
     title: `${originalConversation.title} Copy`,
+    context: originalConversation.context
+      ? { ...originalConversation.context }
+      : undefined,
     createdAt: timestamp,
     updatedAt: timestamp,
     lastOpenedAt: timestamp,
@@ -198,11 +201,12 @@ export function duplicateConversationWorkspace(
   storages.messages.saveMany(duplicatedMessages);
 
   const roundIdMap = new Map<string, string>();
-  const duplicatedRounds = storages.rounds
-    ?.getByConversationId(conversationId)
-    .map((round) => {
-      const duplicatedRoundId = crypto.randomUUID();
-      roundIdMap.set(round.id, duplicatedRoundId);
+  const originalRounds = storages.rounds?.getByConversationId(conversationId);
+  originalRounds?.forEach((round) => {
+    roundIdMap.set(round.id, crypto.randomUUID());
+  });
+  const duplicatedRounds = originalRounds?.map((round) => {
+      const duplicatedRoundId = roundIdMap.get(round.id) as string;
       return {
         ...round,
         id: duplicatedRoundId,
@@ -211,6 +215,23 @@ export function duplicateConversationWorkspace(
           const duplicatedMessageId = messageIdMap.get(messageId);
           return duplicatedMessageId ? [duplicatedMessageId] : [];
         }),
+        context: round.context
+          ? {
+              ...round.context,
+              sourceRoundId: round.context.sourceRoundId
+                ? roundIdMap.get(round.context.sourceRoundId)
+                : undefined,
+              excludedFields: round.context.excludedFields
+                ? [...round.context.excludedFields]
+                : undefined,
+              overrides: round.context.overrides
+                ? { ...round.context.overrides }
+                : undefined,
+              snapshot: round.context.snapshot
+                ? { ...round.context.snapshot }
+                : undefined,
+            }
+          : undefined,
         createdAt: timestamp,
         updatedAt: timestamp,
       };

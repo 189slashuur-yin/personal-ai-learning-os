@@ -11,6 +11,21 @@ export const conversationSourceTypes = [
 
 export type ConversationSourceType = (typeof conversationSourceTypes)[number];
 
+export const conversationContextFields = [
+  "longTermBackground",
+  "currentState",
+  "decisions",
+  "constraints",
+  "nextActions",
+] as const;
+
+export type ConversationContextField =
+  (typeof conversationContextFields)[number];
+
+export type ConversationContext = Partial<
+  Record<ConversationContextField, string>
+>;
+
 export type Conversation = {
   id: string;
   title: string;
@@ -25,6 +40,7 @@ export type Conversation = {
   summary?: string;
   conclusion?: string;
   pendingQuestions?: string;
+  context?: ConversationContext;
   externalSource?: "chatgpt";
   externalConversationId?: string;
   importedAt?: string;

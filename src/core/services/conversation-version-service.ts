@@ -1,7 +1,11 @@
 import type { ConversationStorage } from "@/core/contracts/conversation-storage";
 import type { ConversationVersionStorage } from "@/core/contracts/conversation-version-storage";
 import type { MessageStorage } from "@/core/contracts/message-storage";
-import type { ConversationVersion } from "@/core/entities/conversation-version";
+import type {
+  ConversationContextChange,
+  ConversationVersion,
+  ConversationVersionKind,
+} from "@/core/entities/conversation-version";
 import type { Conversation } from "@/core/entities/conversation";
 import type { Message } from "@/core/entities/message";
 
@@ -17,6 +21,18 @@ export type RestoredConversationSnapshot = {
   version: ConversationVersion;
 };
 
+export type CreateConversationSnapshotOptions = {
+  kind?: ConversationVersionKind;
+  contextChanges?: ConversationContextChange[];
+};
+
+function cloneConversation(conversation: Conversation): Conversation {
+  return {
+    ...conversation,
+    context: conversation.context ? { ...conversation.context } : undefined,
+  };
+}
+
 export class ConversationVersionService {
   constructor(private readonly storages: ConversationVersionStorages) {}
 
@@ -24,6 +40,7 @@ export class ConversationVersionService {
     conversationId: string,
     name: string,
     description: string,
+    options: CreateConversationSnapshotOptions = {},
   ): ConversationVersion | null {
     const conversation = this.storages.conversations.getById(conversationId);
     const normalizedName = name.trim();
@@ -47,9 +64,11 @@ export class ConversationVersionService {
       sourceVersion,
       messageCount: messages.length,
       snapshotData: {
-        conversation: { ...conversation },
+        conversation: cloneConversation(conversation),
         messages: messages.map((message) => ({ ...message })),
       },
+      kind: options.kind,
+      contextChanges: options.contextChanges?.map((change) => ({ ...change })),
     };
 
     this.storages.versions.save(version);
@@ -72,7 +91,7 @@ export class ConversationVersionService {
 
     const timestamp = new Date().toISOString();
     const restoredConversation: Conversation = {
-      ...version.snapshotData.conversation,
+      ...cloneConversation(version.snapshotData.conversation),
       id: currentConversation.id,
       updatedAt: timestamp,
       lastOpenedAt: timestamp,

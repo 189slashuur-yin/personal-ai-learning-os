@@ -297,7 +297,7 @@ export function SearchExperience({
           <input checked={advancedMode} onChange={(event) => { setAdvancedMode(event.target.checked); if (!event.target.checked && typeFilter === "message") setTypeFilter("all"); }} type="checkbox" />
           高级模式：包含 Raw Message
         </label>
-        <p className="mt-2 text-xs text-zinc-500">Fuzzy 是字符子序列匹配，不是语义搜索、Embedding 或 RAG。</p>
+        <p className="mt-2 text-xs text-zinc-500">排序优先 Context → Summary → Conclusion → Knowledge → Round Note → Message。Fuzzy 是字符子序列匹配，不是语义搜索、Embedding 或 RAG。</p>
         {query || hasFilters ? (
           <button
             className="mt-4 rounded-lg px-3 py-2 text-sm font-medium text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900"

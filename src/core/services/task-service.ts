@@ -59,6 +59,16 @@ function dueDateKey(dueDate?: string) {
   return dateOnlyMatch?.[1];
 }
 
+export function isTaskLinkedToConversation(
+  task: Task,
+  conversationId: string,
+) {
+  return (
+    task.sourceRef?.type === "conversation" &&
+    task.sourceRef.entityId === conversationId
+  );
+}
+
 export class TaskService {
   constructor(
     private readonly tasks: TaskStorage,
@@ -201,6 +211,12 @@ export class TaskService {
   listByStatus(status: TaskStatus) {
     const validStatus = this.requireStatus(status);
     return this.listTasks().filter((task) => task.status === validStatus);
+  }
+
+  listByConversation(conversationId: string) {
+    return this.listTasks().filter((task) =>
+      isTaskLinkedToConversation(task, conversationId),
+    );
   }
 
   listToday(referenceDate = new Date()) {

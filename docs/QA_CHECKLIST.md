@@ -1,6 +1,32 @@
 # Manual QA Checklist
 
-本清单包含 v1.1、v1.0 Phase1/Phase2 与既有版本回归。它是手工验收基线，不代表测试已经执行，不包含自动化测试。完整 Phase2 执行计划见 `docs/qa/V10-MANUAL-QA-PLAN.md`。
+本清单包含 v1.7、v1.1、v1.0 Phase1/Phase2 与既有版本回归。它是手工验收基线，不代表测试已经执行。完整 Phase2 执行计划见 `docs/qa/V10-MANUAL-QA-PLAN.md`。
+
+## v1.7 — Personal AI Context Management
+
+| ID | 操作 | 预期结果 | 阻塞条件 | 模块 |
+| --- | --- | --- | --- | --- |
+| V17-01 | 用 v1.6.5 数据打开无 `context` 字段的 Conversation。 | 页面正常加载；Context 为空；Note/Summary/Conclusion/Pending Questions 保留。 | 白屏、旧字段丢失或被自动写回。 | Compatibility |
+| V17-02 | 展开 Conversation Overview，填写总备注/当前背景、当前总论、后续方向，不点保存并等待后刷新。 | 750ms 防抖或 blur 后自动保存；reload 准确保留；旧 decisions/constraints 在折叠区仍可读。 | 仍需手动保存、每按键写入或字段丢失。 | Overview Autosave |
+| V17-03 | 清空当前 Context，先取消确认再执行。 | 取消时不变；确认后当前值清空但 Timeline 历史保留。 | 无确认、历史被删除。 | Context Delete |
+| V17-04 | Round 1 有记录、Round 2 为空，打开 Round 3。 | 自动显示“参考上下文：Round 1 的结论与下一步”；Round 3 三个自有字段仍为空且不写 snapshot。 | 选择空 Round 2、要求确认或复制污染 Round 3。 | Passive Reference |
+| V17-05 | Round 3 展开“调整参考”，改选另一有效 Round / Overview，再 reload。 | 主动选择写入既有配置并持久；Round Own Record 不变。 | 选择不保持或覆盖当前记录。 | Reference Override |
+| V17-06 | 在 Round 3 选择“本轮不参考历史”，并检查旧 Override/Exclude 折叠区。 | 默认行显示本轮不参考；旧高级数据兼容，普通态不展示复杂表单。 | 仍显示历史参考或旧配置丢失。 | Reference Exclude |
+| V17-07 | 在 Context 区域添加两个 Next Action，完成并重开其中一个。 | Task 带 Conversation SourceRef；Tasks 页面可见；没有 AI 自动创建。 | Task 未关联或出现自动创建。 | Task Integration |
+| V17-08 | 用同一关键词分别写入 Context、Summary、Conclusion、Knowledge、Round Note、Message 后搜索。 | 仍为关键词 + fuzzy；优先级按上述顺序，Raw Message 仍需高级模式。 | 排序错误或引入语义/RAG。 | Search |
+| V17-09 | 从 More 菜单导出 Context JSON。 | `format=palos-context-export`、`version=1.0`，包含 Conversation、Context、decision history、关联 Task、Round summary/context。 | 导出缺字段、调用模型或无法 JSON 解析。 | Context Export |
+| V17-10 | 回归 Import → Conversation → Round → Proposal → Review → Knowledge，以及 App Data Export/Restore。 | 旧主流程与引用完整性不回归；IndexedDB schema 未变化。 | 数据丢失、引用失效或绕过 Review。 | Regression |
+| V17-11 | 打开含至少三个 Round 的 Conversation。 | 每个展开 Round 内直接显示 User/Assistant、原文展开与右侧本轮记录；不存在页面级 Inspector。 | 必须点击“本轮记录”或记录脱离对应 Round。 | Inline Round Layout |
+| V17-12 | 查看“不同内容写在哪里”并分别编辑五类 Conversation 记录。 | Note=普通备注、Summary=对话摘要、Conclusion=当前结论、Pending Questions=未解决问题、Context=长期维护状态。 | 字段说明混用或 Context 替代其它字段。 | Content Guidance |
+| V17-13 | 在 Round 1/2 直接填写我的备注、本轮结论、下一步，不点保存并 reload。 | 两轮记录独立、autosave 准确；目标/决定/遗留问题/旧 Note 只在“更多记录”。 | 串位、丢失、默认五个以上输入框或仍有保存按钮。 | Round Record Autosave |
+| V17-14 | Round 2 为空时查看 Round 3，再填写 Round 2 并复查。 | 先引用 Round 1，Round 2 有效后自动改为最近 Round 2；默认不写当前 snapshot。 | 空 Round 阻断、要求逐轮确认或来源错误。 | Passive Reference UX |
+| V17-15 | 点击“继续这个主题”并复制文本。 | 包含 Conversation Overview、最近有效 Rounds、Pending Questions 与 Next Actions；明确人工数据、No AI。 | 缺核心段落、调用模型或无法复制。 | Continue Context |
+| V17-16 | 点击 Context Dashboard 的 History / Timeline。 | 显示修改时间以及当前状态、决策、约束、下一步等字段的 previous/next；旧值保留。 | 入口隐藏、字段或时间缺失。 | Timeline UX |
+| V17-17 | 用真实导入创建 6 Messages / 3 Rounds，分别填写两轮记录并整页刷新。 | 两轮记录准确、Round 3 自有字段空、最近有效参考正确、Overview 持久。 | 使用空 Conversation 冒充 QA，或 reload 后数据丢失。 | Real-use Demo |
+| V17-18 | 编辑 Round/Overview 记录但不点击“保存为 Knowledge”。 | Knowledge/Proposal 数量不变。 | autosave 或 inheritance 自动创建 Proposal/Knowledge。 | Knowledge Boundary |
+| V17-19 | 点击 Round 结论与 Overview 的“保存为 Knowledge”，分别取消与确认预览。 | 取消不写；确认后才创建带正确 Conversation/Round provenance 的 Knowledge。 | 无预览直接写、来源错误或自动写。 | Knowledge Confirmation |
+| V17-20 | 检查导入 Round 的可用操作。 | 不显示删除、合并、拆分、上下移动、Duplicate 或原始数据编辑；记录与参考仍可编辑。 | 出现单 Round 破坏性入口。 | Imported Immutability |
+| V17-21 | 在 1280px 与 390px 检查同一 Round。 | 桌面正文/记录约 62–70% / 30–38%；窄屏上下排列；document 无横向 overflow。 | 任一视口横向滚动、正文宽度为 0 或固定 Inspector。 | Responsive Layout |
 
 ## v1.1 — Long Conversation UX & Import Stabilization
 

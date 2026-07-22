@@ -1,5 +1,6 @@
 import type { RoundStorage } from "@/core/contracts/round-storage";
 import type { Round } from "@/core/entities/round";
+import { normalizeStoredRoundContext } from "@/infrastructure/storage/context-normalization";
 
 const ROUNDS_KEY = "ai-learning-os.rounds";
 
@@ -12,6 +13,7 @@ function normalizeRound(round: Round): Round {
     messageIds: Array.isArray(round.messageIds) ? round.messageIds : [],
     note: round.note?.trim() || undefined,
     summary: round.summary?.trim() || undefined,
+    context: normalizeStoredRoundContext(round.context),
     updatedAt: round.updatedAt ?? round.createdAt,
   };
 }

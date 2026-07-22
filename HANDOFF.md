@@ -1,3 +1,200 @@
+# PALOS v1.7 — Personal AI Context Management Handoff
+
+## 2026-07-22 Final Usability Correction closure
+
+本轮在既有 v1.7 dirty worktree 上原地收口，没有 reset / restore / stash / checkout，没有清浏览器数据、修改 IndexedDB schema、重写 Core Storage、接入新 Provider/RAG/Agent/Embedding，也没有创建 commit。版本仍为单一 **v1.7**。
+
+### Root cause and inline layout
+
+- 旧实现把 `RoundRecordPanel` 与 `RoundContextPanel` 挂在页面级固定 `320px` Inspector，Round 内容在另一个网格列。固定栏、嵌套控件最小宽度与选中态共享面板共同压缩正文，并让记录脱离来源 Round，形成横向滚动风险和大片空白。
+- 页面级 Inspector 与黄色“本轮记录”入口已移除。每个展开 Round 自己包含内容/记录双栏：1280px 实测正文 62.7%、记录 37.3%；390px 为上下排列。两种视口的 document overflow 均为 false。
+- 真实浏览器首次检查还发现 `detail-section` 自身已有“标题 + 内容”两列，而 Round 列表缺少内容 wrapper，导致卡片误入 224px 标题列、内层正文宽度为 0。已补 `round-workspace-content` 的 `min-width: 0` 容器，并完整复验。
+
+### Round Own Record and autosave
+
+- 默认直接显示三个字段：我的备注、本轮结论、下一步。分别复用 `Round.note` 的结构化备注段、`Round.summary`、`Round.note` 的下一步段。
+- “更多记录”才显示本轮目标、新增决定、遗留问题与旧自由 Round Note；旧 `【补充备注】` 和未分段 Note 均继续兼容读取，没有迁移或删除旧数据。
+- `DebouncedAutosave` 统一 750ms 防抖；输入变更只排队，停止后才持久化。blur、Round 折叠/搜索隐藏/模式切换导致的组件卸载，以及 `beforeunload` 会 flush pending value。
+- 状态覆盖未修改、等待保存、保存中、已保存、保存失败点击重试；默认不再显示“保存本轮记录”。
+
+### Passive inherited reference
+
+- 新增纯函数 `findMostRecentEffectiveRound`：只查当前 Round 前序兄弟，从近到远选择存在人工 Summary/Note 或 confirmed snapshot 的 Round，并跳过空 Round。
+- 默认引用只是只读投影，不写当前 Round context/snapshot，不复制到三个记录字段，不改来源 Round，也不改 Conversation Overview。无有效 Round 时回退 Overview；两者均空时显示“暂无历史参考”。
+- 普通态只显示“参考上下文：Round X 的结论与下一步”。用户展开“调整参考”后才可改选 Round、Overview、自动选择或本轮不参考；只有这些主动操作与高级 Override/Exclude 才写既有 inheritance 配置。
+- 旧 sourceRoundId、confirmed snapshot、excludedFields、overrides 继续读取；高级字段控制留在二级折叠区，不再作为逐轮必经步骤。
+
+### Conversation Overview and Knowledge boundary
+
+- Rounds 后保留独立 Conversation Overview，默认只显示总备注/当前背景、当前总论、后续方向，映射既有 `longTermBackground/currentState/nextActions`；旧 decisions/constraints 在“更多总览”中兼容。
+- Overview 使用同一 autosave/blur/unload 机制，不由 Round 自动覆盖。“继续这个主题”只读取人工 Overview、最近有效 Rounds、Pending Questions 与 Next Actions。
+- Round 结论与 Overview 各有“保存为 Knowledge”次级动作，均先展示确认预览，确认后才创建。autosave 和 passive reference 不调用 Proposal/Knowledge 路径。
+- 现有 `KnowledgeCard.proposalId` 仍为必填，因此人工创建继续生成一个 `Applied` manual provenance Proposal；本轮没有扩大数据模型或绕过来源关系。
+
+### Imported Round immutability
+
+- 当前没有可靠、无 schema 变更的 per-Round origin 判定，因此按保守规则隐藏所有单 Round 删除、合并、拆分、上下移动、Duplicate 与原始 Question/Answer/Message binding 编辑入口。
+- 用户仍可编辑人工 Round Record 与参考来源；整个 Conversation 的既有显式删除与 canonical cascade 保持不变。
+
+### Tests and real browser QA
+
+- 新增 `tests/v17-final-usability.test.ts` 9 项，覆盖三字段直显、Round 隔离、debounce、blur flush、reload、跳过空 Round、reference 不污染当前记录、主动关闭 reference、Overview autosave、Knowledge 显式确认边界、imported immutability 与 responsive source contract。
+- 新增 `tests/e2e/v17-inline-autosave.spec.ts`：真实创建 6 Messages / 3 Rounds，分别保存 Round 1/2、reload、Round 3 最近有效引用/自身空值、改选来源持久化、Overview autosave、desktop/narrow grid、无横向 overflow、Knowledge 数量不变和 Conversation 删除。
+- 测试机已有非本任务的 IPv6 `*:3000` 监听，导致 Playwright 自启动的 IPv4 `127.0.0.1:3000` 偶发路由冲突；`playwright.config.ts` 仅把测试 server/baseURL 隔离到 `127.0.0.1:3100`。标准 `npm run test:e2e` 随后稳定 2/2，不改变应用默认运行端口。
+- 应用内浏览器另建 `PALOS v1.7 Final Browser QA 2026-07-22`，完成相同三轮闭环。Round 3 在 Round 2 为空时引用 Round 1，Round 2 保存后自动改为引用 Round 2；改选 Round 1 后 reload 仍保持，Round 3 三个自有字段始终为空。
+- Overview reload 后三个字段准确；Knowledge 仍为 0；删除临时 Conversation 后 Dashboard 无标题、Search 为 no-results、Review 无标题，PALOS Console error = 0。临时 Conversation 已通过 UI 删除，没有清理其他浏览器数据。
+
+### Final verification and release recommendation
+
+```text
+npm run lint          passed
+npm run build         passed, 19 routes
+npm test -- --run     passed, 9 files / 204 tests
+npm run test:e2e      passed, 2/2
+git diff --check      passed
+```
+
+当前可以进入 **v1.7 release QA**。这只表示 Final Usability Correction 达到 release QA 输入标准，不代表已创建 release commit；本轮明确未 commit、未 push。
+
+### Main files
+
+- UI：`round-workspace.tsx`、`conversation-workspace-mode.tsx`、`round-record-panel.tsx`、`round-context-panel.tsx`、`conversation-context-panel.tsx`、`conversation-detail.tsx`
+- Core：`debounced-autosave.ts`、`round-record.ts`、`round-context-inheritance.ts`、`conversation-context-service.ts`、`context-export-service.ts`、`round-knowledge-service.ts`
+- Tests：`tests/v17-final-usability.test.ts`、`tests/v17-context-management.test.ts`、`tests/e2e/v17-inline-autosave.spec.ts`、`playwright.config.ts`
+- Docs：PROJECT、ARCHITECTURE、ROADMAP、CHANGELOG、QA Checklist、HANDOFF
+
+---
+
+## 2026-07-19 UX Refinement closure
+
+本轮只完成 v1.7 既有能力的 UX Refinement，没有新增领域、Entity、canonical store 或 IndexedDB schema，也没有接入 AI、RAG、Agent、Embedding、云 Provider 或 API Key。PALOS 继续定位为 **Personal AI Context Manager**；主流程调整为 AI 对话 / Import → Conversation → Round → 本轮记录 → Context → Decision / Task → 未来继续。
+
+### Conversation Dashboard and content guidance
+
+- Conversation 标题下方直接展示 Context Dashboard，首屏包含长期目标、当前状态、已确认决策、约束条件与下一步行动。
+- Dashboard 提供“编辑长期 Context”“继续这个主题”“History / Timeline”三个明确入口；Context 编辑默认只在空 Context 时展开。
+- “不同内容写在哪里”明确说明：Conversation Note 是普通备注，Summary 是对话摘要，Conclusion 是当前结论，Pending Questions 是未解决问题，Context 是长期维护状态。
+- 原 Note / Summary / Conclusion / Pending Questions 与 `Conversation.context` 数据职责保持不变。
+
+### Round record and inheritance UX
+
+- 每个 Round 卡片增加“本轮记录”入口；五项字段为本轮目标、本轮结论、新增决定、遗留问题、下一步行动。
+- 本轮结论继续写入 `Round.summary`；其余四项以人类可读分段写入 `Round.note`。旧自由 Round Note 作为“补充备注”兼容保留，没有新增字段或 Entity。
+- Round 标题并入既有 Edit 表单，替代不稳定的 prompt-only 重命名路径；Question、Answer、Note 与 Message binding 仍使用同一个保存动作。
+- inheritance 明确显示“Round 之间不是自动 AI 记忆”、来源 Round X，以及当前状态、决策、约束三个核心继承字段。
+- “保留 / 删除 / 修改”继续分别映射 retained inherited value、`excludedFields` 与 `overrides`；确认前只预览，点击确认后才保存既有 Context Snapshot。
+
+### Continue Context and Timeline
+
+- “继续这个主题”基于现有 Context Export DTO 生成可编辑、可复制的纯文本，包含 Conversation Context、最近 3 个 Rounds、Pending Questions 与 Next Actions。
+- 文本明确标记为人工维护数据，不包含 AI 推断；不写 Storage、不调用 Analyzer / Provider。
+- Context Dashboard 的 History / Timeline 展示修改时间及字段 previous/next，继续复用 `ConversationVersion[kind=context]`。
+
+### Real-use Demo and browser QA
+
+- 通过真实 Import 创建并保留 `PALOS开发迭代记录`：6 Messages / 3 Rounds / 1 Source，而不是空 Conversation。
+- Conversation Context：长期目标 `开发个人AI上下文管理工具`；当前状态 `v1.7 UX优化`；决策 `暂缓RAG和Agent`；下一步 `完成Release QA`；另记录本轮 scope 约束与一个关联 Task。
+- Round 依次命名为 `重新定义PALOS路线`、`实现Context`、`优化UI`，三轮都填写五项本轮记录并在 reload 后保持。
+- Round 1 从 Conversation Context 确认 Snapshot；Round 2 以 Round 1 为来源，真实执行当前状态=修改、决策=保留、约束=删除；Round 3 正确推荐 Round 2。
+- 浏览器验证继续文本包含 Context、三个 Rounds、Pending Questions、Context Next Action 与关联 Task，复制成功；Timeline 展示五项 Context 变化。
+- 真实视觉检查发现 320px Inspector 中继承摘要被三列布局挤压，已改为纵向堆叠；首次 prompt rename 检查暴露浏览器不支持 prompt，已由 Edit 内联标题字段修复。
+
+### Verification and release recommendation
+
+```text
+npm run lint          passed
+npm run build         passed, 19 routes
+npm test -- --run     passed, 8 files / 195 tests
+git diff --check      passed
+```
+
+新增回归覆盖真实 PALOS 三轮 Continue Context 文本与五项 Round 记录在既有 Summary / Note 中的序列化兼容。应用内浏览器在修复前记录到一条 `prompt() is not supported`，因此把 Round 标题改进既有 Edit 表单；修复后 reload、三轮编辑、inheritance、继续文本、Timeline 与视觉复查期间，检查点没有新增 PALOS Console error。最后一次额外新 tab 重开被浏览器表面策略拒绝，未绕过；既有 tab 已多次 reload 验证持久化。Demo 数据保留供 release QA 继续检查。
+
+当前可以进入 **v1.7 release QA**。这表示 implementation 与 UX refinement 已达到 release QA 输入标准，不代表已经完成最终 release review 或创建 release commit。本轮按要求不 commit、不 push。
+
+### Main UX refinement files
+
+- Conversation：`src/app/conversation/[id]/conversation-detail.tsx`、`conversation-context-panel.tsx`
+- Round：`round-workspace.tsx`、`conversation-workspace-mode.tsx`、`round-record-panel.tsx`、`round-context-panel.tsx`
+- Pure formatting：`src/core/services/context-export-service.ts`、`round-record.ts`
+- Tests / docs：`tests/v17-context-management.test.ts`、`src/app/help/page.tsx`、README / PROJECT / ARCHITECTURE / ROADMAP / CHANGELOG / QA Checklist / HANDOFF
+
+---
+
+## 2026-07-19 implementation candidate
+
+本轮从干净的 `release/v1.6.5` 基线开始。Phase 0 的 lint、187 项测试与 build 全部通过；`v1.6.5` 标签指向稳定发布提交，当前 HEAD 另含 release baseline 文档。v1.7 没有创建 commit、没有修改 IndexedDB schema、没有新增 canonical store 或大型 Aggregate，也没有扩展 Provider、Agent、RAG、Embedding、MCP、Cloud Sync、Mobile 或多人协作。
+
+### Product position
+
+PALOS v1.7 的定位是 **Personal AI Context Manager**：Conversation 保存人与 AI 的原始协作过程，Context 表达当前仍然有效的背景/状态/决策/约束，Knowledge 只保存人工确认且适合长期复用的信息。Analyzer / Provider 关闭时，Import、Context、Decision、Task、Search 与 Export 仍然可用。
+
+### Context model and reused fields
+
+- 保留 `Conversation.note`：自由、长期项目备注，不与结构化 Context 合并。
+- 保留 `summary`：Conversation 的压缩概览。
+- 保留 `conclusion`：当前最终结论。
+- 保留 `pendingQuestions`：仍未解决的问题。
+- 新增 optional embedded `Conversation.context`：`longTermBackground`、`currentState`、`decisions`、`constraints`、`nextActions`。
+- `Round.note` 继续表示本轮新增的人工备注；`Round.summary` 继续表示本轮客观摘要。
+- 新增 optional embedded `Round.context`，保存 inheritance mode、sourceRoundId、excluded fields、overrides、confirmed snapshot 与 confirmedAt。Round 仍不是 Aggregate Root。
+
+### Round Context inheritance
+
+- 默认只推荐同一 Conversation 内最近、早于当前 Round、且有有效 Context Snapshot 的 Round；没有候选时使用 Conversation Context。
+- 用户可选择来源 Round、逐字段 Override、逐字段 Exclude，或取消整轮继承。
+- Preview 不写 Storage；只有点击“确认本轮 Context Snapshot”才保存。
+- 取消继承后只保留用户本轮 Override，不自动删除 Round Note。
+- Conversation 复制会重映射 Round Context 的 `sourceRoundId`；Split 出来的新 Round 不自动复制已确认 Context。
+
+### Context Timeline
+
+- 复用现有 ConversationVersion/Snapshot；没有创建 Event 系统。
+- `ConversationVersion` 增加 optional `kind` 与 `contextChanges`。每次有效 Context CRUD 追加 `kind=context` 的不可覆盖记录，包含 previous/next value。
+- 手动与自动恢复点现在可选标记 `manual` / `automatic`，旧 Version 缺失 kind 时继续按原逻辑读取。
+- Timeline 在 Conversation Context 区域展示“什么时候改变了什么”；清空当前 Context 也保留历史。
+
+### Task, Search, and Export
+
+- Conversation 内 Next Actions 复用现有 Task + Conversation SourceRef；用户可创建、完成、重开。AI 不会自动创建 Task。
+- Search 仍是运行时关键词 + subsequence fuzzy；匹配优先级为 Context → Summary → Conclusion → Knowledge → Round Note → Message。Raw Message 仍只在高级模式出现。
+- `ContextExportService` 输出稳定 `palos-context-export` v1.0 JSON：Conversation、Context、Decision current/history、关联 Task、Round summary/note/context snapshot。导出不调用模型。
+
+### Compatibility and storage
+
+- canonical IndexedDB stores 仍为 7 个：`conversations`、`messages`、`rounds`、`sources`、`proposals`、`knowledge-cards`、`conversation-versions`。
+- Browser/IndexedDB Conversation 与 Round adapter 对新增 optional context 字段集中归一化；v1.6.5 记录缺失字段时返回空 Context，不回写、不清空旧数据。
+- App Data Export/Restore 的 JSON 记录结构继续兼容；没有 storage rewrite 或 schema migration。
+
+### Main files
+
+- Entity：`src/core/entities/conversation.ts`、`round.ts`、`conversation-version.ts`
+- Service：`conversation-context-service.ts`、`round-context-inheritance.ts`、`context-export-service.ts`、Search/Task/Version/Workspace 相关最小扩展
+- Infrastructure：`context-normalization.ts` 与四个 Conversation/Round Browser/IndexedDB adapters
+- UI：`conversation-context-panel.tsx`、`round-context-panel.tsx`，以及 Conversation Detail / Classic / Workspace Mode 集成
+- Tests：`tests/v17-context-management.test.ts`
+- Docs：README、PROJECT、ARCHITECTURE、ROADMAP、CHANGELOG、QA Checklist、Help、HANDOFF
+
+### Automated tests
+
+- 新增 6 项：Context CRUD + Timeline、v1.6.5 export compatibility、Round inheritance、Override/Exclude、inheritance cancel、Context Export、Search priority（部分行为在同一用例组合验证）。
+- 当前全量结果：8 files / 193 tests passed。
+- 最终 `npm run lint` passed；`npm run build` passed（19 routes）；`npm test -- --run` passed（8 files / 193 tests）；`git diff --check` passed。
+- `npm run test:e2e` 首次在沙箱内因 `listen EPERM 127.0.0.1:3000` 无法启动；获准在本地测试环境重跑后发现 Search placeholder 稳定 selector 回归。恢复原 placeholder 合约后再次重跑，Playwright 1/1 passed（create → TXT import → reload → search → export → delete/reload → restore → search）。
+
+### Manual QA and remaining limits
+
+- `docs/QA_CHECKLIST.md` 新增 V17-01–V17-10；本轮尚未执行浏览器人工 QA，因此当前是 implementation candidate，不标记正式 release-ready。
+- Context Timeline 与 Context 当前态跨 Conversation/Version 两个现有 store 写入，沿用当前非跨 store 事务边界。
+- Context field 是人工维护的文本，不是自动 Memory、知识图谱或语义状态机。
+- Context Export v1.0 是未来 LLM/Agent/RAG 的输入准备，本轮没有调用或启用这些能力。
+
+### Next recommendation
+
+先执行 V17-01–V17-10 浏览器 QA，重点验证旧 v1.6.5 数据、Round 推荐/取消继承、Timeline history、Task linkage、Search order、Context JSON 与 App Data restore。自动与人工门禁通过后可进入单一 v1.7 release review；不拆 v1.7.1/v1.7.2。本轮按要求不创建 commit。
+
+---
+
 # PALOS v1.6.5 — Stable Candidate Handoff
 
 ## 2026-07-19 candidate closure

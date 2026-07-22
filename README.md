@@ -1,24 +1,29 @@
-# Personal AI Learning OS
+# PALOS — Personal AI Context Manager
 
-Personal AI Learning OS 是一个本地优先的个人学习与知识整理工作区。它把聊天记录或 TXT 文本保留为可追溯来源，将内容整理成待审核的 Proposal，再由用户确认并沉淀为 KnowledgeCard。
+PALOS 是一个本地优先的个人 AI 上下文管理工作区。它保留可追溯的 AI 对话原始过程，同时帮助用户人工维护当前上下文、决策、约束和下一步行动；Analyzer 关闭时，导入、整理、Task、Search 与 Export 仍可完整使用。
 
 ## Project Status
 
-- Current Version：v1.6.5 Stable candidate
-- Current Phase：Storage Factory / App Data Restore / E2E closure
-- Current Focus：固化 v1.6.4 Known Issues Closure，不增加新功能
-- Verification：7 个 Vitest 文件 / 187 tests；Playwright 1 个完整 create/import/reload/search/export/delete/restore 闭环；lint/build/diff-check passed
+- Current Version：v1.7 implementation candidate
+- Current Phase：Personal AI Context Management
+- Current Focus：v1.7 UX Refinement — Context Dashboard、Round 记录、inheritance 来源说明、Continue Context 与 Timeline 入口
+- Verification：8 个 Vitest 文件 / 195 tests；Playwright release gate 1/1；lint/build/diff-check passed；真实 PALOS 三轮 Demo 浏览器 QA 通过
 
 ### Feature Matrix
 
 | Feature | Status | Notes |
 | --- | --- | --- |
 | Conversation | ✅ | 创建、编辑、复制、删除、Message Timeline 与 Q&A Pair 派生视图。 |
-| Round | ✅ alpha | 持久化 Round、旧 Message 预检迁移、Round-first UI 与合并/拆分/排序/绑定。 |
+| Round | ✅ v1.7 | 持久化 Round、Round-first UI，以及复用 Summary / Note 的本轮目标、结论、决定、遗留问题和下一步记录。 |
 | Help | ✅ | 内置中文概念说明、推荐流程与 Ollama 使用边界。 |
 | Workspace | ✅ alpha | Workspace / Folder 多层树、排序、移动与安全回迁 Inbox/上级。 |
-| Search | ✅ | 九类 SearchDocument 的本地全文、片段定位与轻量模糊搜索。 |
+| Search | ✅ v1.7 | 本地关键词 + fuzzy；优先 Context、Summary、Conclusion、Knowledge、Round Note、Message。 |
 | Conversation Note | ✅ | Conversation 独立备注，可全文搜索。 |
+| Conversation Context | ✅ v1.7 | 顶部 Dashboard 展示人工维护的长期背景、当前状态、决策、约束与下一步；不依赖 Analyzer。 |
+| Round Context | ✅ v1.7 | 明确显示来源 Round 与核心继承字段；用户保留、删除、修改后人工确认 Snapshot。 |
+| Continue Context | ✅ v1.7 | 可复制 Conversation Context、最近 Rounds、Pending Questions 与 Next Actions；不调用 AI。 |
+| Context Timeline | ✅ v1.7 | 明显的 History / Timeline 入口，复用 ConversationVersion 追加变化，不覆盖历史。 |
+| Context Export | ✅ v1.7 | 稳定 `palos-context-export` JSON，包含 Conversation、Context、Decision history、Task 与 Round summary。 |
 | Assets | ✅ | Conversation 可登记本地文件 metadata/path；不保存文件内容。 |
 | Backup | ✅ | 文档与项目内 data/ 的时间戳目录备份脚本。 |
 | Knowledge | ✅ | Review 后生成、编辑、归档与来源追溯。 |
@@ -37,16 +42,16 @@ Personal AI Learning OS 是一个本地优先的个人学习与知识整理工�
 | Task Search | ✅ | Task 关键词、Workspace、status、priority 与 type 筛选。 |
 
 ```text
-Import / Conversation
+AI 对话 / Import
         ↓
-Source → Messages → Rounds
+Conversation → Round → 本轮记录
+        ↓          ↘ 人工确认的 Context Snapshot
+Conversation Context → Decision / Task → 继续这个主题
         ↓
-Q&A Pair → Analyze → Proposal → Review
-        ↓
-KnowledgeCard + Tags
+可选 Analyze → Proposal → Review → Knowledge
 ```
 
-v0.9 draft 在当时的 LocalStorage 基线上增加统一 SearchDocument、具体文本片段检索、轻量 fuzzy、Conversation Note、Asset metadata、备份脚本和 Data Management 说明。当前 v1.6.x 已将七个 canonical business stores 迁到 IndexedDB；该段只描述历史版本。
+v0.9 draft 在当时的 LocalStorage 基线上增加统一 SearchDocument、具体文本片段检索、轻量 fuzzy、Conversation Note、Asset metadata、备份脚本和 Data Management 说明。当前 v1.7 仍使用七个 canonical IndexedDB business stores；该段只描述历史版本。
 
 v1.0 Phase2 已把 Phase1 的 Conversation/Round 基线扩展为 Second Brain Workspace。当前 ChatGPT 导入仅支持官方 Export zip 解压后的 `conversations.json` 文本消息；同一 ChatGPT source 优先按 `externalConversationId` / `externalMessageId` 识别，后续更新只追加新 identity。Existing append 不用纯 content hash 做跨 source 全局去重，避免误删不同来源的合法同内容 Message。
 
@@ -67,6 +72,11 @@ Import target 与 input source 各只有一个选择区。切换 New/Existing �
 - 导入结果展示来源、Message / Unknown 数量；Conversation Detail 保留 Import Profile 信息。
 - 按中英文发言标记解析 Messages，保护三反引号代码块，并从选中 Messages 进入现有 Analyzer / Review / Knowledge 流程。
 - 创建、重命名、编辑、自动保存、复制和级联删除 Conversation。
+- 在 Conversation 内人工编辑长期背景、当前状态、决策记录、约束条件与下一步行动，并查看保留旧值的 Context Timeline。
+- Conversation 首屏提供 Context Dashboard，并明确区分普通 Note、Summary、Conclusion、Pending Questions 与长期 Context。
+- 每个 Round 提供本轮记录入口，支持本轮目标、结论、新增决定、遗留问题与下一步行动；复用已有 Summary / Note。
+- 为 Round 选择历史 Context 来源，逐字段保留、删除、修改，或取消继承；只有人工确认后才保存 Context Snapshot。
+- 生成并复制“继续这个主题”文本，包含 Context、最近 Rounds、Pending Questions 与 Next Actions，不调用 AI。
 - 将原始文本解析为 Message 时间线，选择多条 Message 生成 Proposal。
 - 从 Messages 派生 Q&A Pair，支持搜索、排序、展开、折叠与按 Pair 选择 Analyze；不新增持久化结构。
 - Conversation 顶部提供原始内容 → Messages → Q&A Pair → Analyze → Review → Knowledge 动态流程引导。
@@ -79,6 +89,7 @@ Import target 与 input source 各只有一个选择区。切换 New/Existing �
 - Today 展示 Overdue、Today、Upcoming、Inbox 与 Completed Today，支持 Workspace 筛选、Quick Capture、完成与重开。
 - Tasks 支持日期视图、Workspace、Priority、Type、标题/描述搜索，以及完成、重开、归档、恢复和删除。
 - Knowledge Detail、Conversation Detail 与 Message Timeline 可显式创建带来源快照的 Task；来源删除后 Task 仍可读取。
+- Conversation Context 内可直接创建、完成或重开轻量 Next Action Task；不增加 Calendar、Reminder 或 Habit。
 - Search 支持 Task title、description 与 SourceRef 快照，并按 Workspace、status、priority、type 筛选。
 - Provider Settings、Provider Registry 和 Analyzer Provider Contract。
 - Analyzer Prompt 默认模板、结构化输出校验、运行状态、错误与可恢复重试。
@@ -174,6 +185,7 @@ node scripts/backup-local-data.mjs --target "/Users/xxx/Library/Mobile Documents
 - 模块化单体：`Entity → Contract ← BrowserStorage`，由 Service 编排业务，Page 负责交互。
 - 页面不得直接调用 LocalStorage；所有 key、序列化和兼容逻辑集中在 `src/infrastructure/storage`。
 - IndexedDB 的 7 个 canonical stores 为 `conversations`、`messages`、`rounds`、`sources`、`proposals`、`knowledge-cards`、`conversation-versions`。
+- v1.7 只给现有 Conversation、Round、ConversationVersion 增加兼容可选字段；没有修改 IndexedDB schema 或新增 canonical store。
 - LocalStorage 只保留 lightweight config、UI preference、storage/schema metadata、legacy migration 数据与 sidecars；其中 `current-source`、`current-proposal` 是选择指针，不是 canonical entity。
 - Bulk diagnostics 默认隐藏且只保留 bounded memory buffer；设置 `NEXT_PUBLIC_PALOS_DIAGNOSTICS=1` 才显示 Copy Diagnostics 并输出 `[PALOS BULK DIAG]` console。Analyzer failure injection 使用独立的 `NEXT_PUBLIC_PALOS_ANALYZER_DIAGNOSTICS=1`。
 - 当前没有账号、云同步、服务端数据库、云端 AI 调用或多人协作；唯一真实模型调用是用户显式启用的本地 Ollama。

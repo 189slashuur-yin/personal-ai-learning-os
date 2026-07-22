@@ -2,7 +2,7 @@
 
 ## 产品目标
 
-Personal AI Learning OS 面向希望长期整理 AI 对话与学习材料的个人用户。产品要解决的不是“再做一个聊天客户端”，而是把分散的原始内容变成可审核、可追溯、可维护的个人知识。
+PALOS 面向需要与 AI 长期协作的个人用户。产品要解决的不是“再做一个聊天客户端”，而是同时保留对话原始过程、维护当前有效上下文，并把真正长期稳定的信息沉淀为可追溯 Knowledge。
 
 核心原则：
 
@@ -11,21 +11,26 @@ Personal AI Learning OS 面向希望长期整理 AI 对话与学习材料的个�
 - **Human in the loop**：分析结果先成为 Proposal，用户审核后才能沉淀为 KnowledgeCard。
 - **Replaceable boundaries**：存储和分析能力通过 Contract 隔离，为以后替换实现保留空间。
 - **Small, complete increments**：按 Sprint 完成端到端闭环，不为未确认需求提前扩张架构。
+- **Useful without AI**：关闭 Analyzer / Provider 后，Import、Context、Decision、Task、Search 与 Export 仍然可用。
 
 ## 当前阶段
 
-截至 2026-07-19，运行时进入 v1.6.5 Stable candidate。v1.6.4 Known Issues Closure 已由 checkpoint commit `9ed8feb` 保护；本轮只收口 canonical Storage Factory、App Data restore 安全链和最小 Playwright E2E，没有新增产品功能或修改 IndexedDB schema。
+截至 2026-07-19，运行时进入 v1.7 implementation candidate。v1.6.5 Stable 基线已通过 lint、187 项测试与 build；v1.7 在冻结架构内增加 Personal AI Context Management，不修改 IndexedDB schema，也不新增大型 Aggregate。
 
-- Current Version：v1.6.5 Stable candidate
-- Current Focus：Storage Factory / App Data Restore / E2E closure
-- Next Recommended Phase：完成 release review 后创建独立 release commit；当前不 push、不标记正式 release
+- Current Version：v1.7 implementation candidate
+- Current Focus：v1.7 Final Usability Correction — inline Round record、autosave、passive reference、Knowledge boundary
+- Next Recommended Phase：最终自动门禁与真实三轮浏览器 QA 已完成，可进入 v1.7 release QA；当前不创建 commit
 
-当前候选已通过自动质量门禁和 Playwright 浏览器闭环。Restore backup 只保证当前进程内失败回滚；异常退出后的 journal recovery 尚未实现，因此仍保持 candidate 状态。
+v1.7 继续把 Conversation 作为 Aggregate Root、Round 作为最小整理单元、Task 作为独立行动实体、Knowledge 作为长期稳定信息。Context 是当前有效状态，不等于所有聊天，也不自动升级为 Knowledge。
+
+v1.7 Final Usability Correction 不扩展领域：每个 Round 卡片内直接显示“我的备注 / 本轮结论 / 下一步”，复用既有 Summary / Note 并防抖自动保存；历史信息默认只读引用最近有效 Round，不复制当前记录、不要求逐轮确认；Conversation Overview 独立保存三个紧凑字段；Knowledge 只在人工预览确认后创建。
 
 ## v1.0 Phase2 product language
 
 - Conversation = 可长期追加的长对话线程。
 - Round = 一轮问答，也是最小整理单位。
+- Context = 用户人工维护的当前有效背景、状态、决策、约束与下一步方向。
+- Context Snapshot = 某一 Round 人工确认后当时有效的上下文；可继承、覆盖或排除。
 - Proposal = AI 整理建议 / 草稿；必须人工确认。
 - Knowledge = 已确认知识，可从同一 Round 持续沉淀多条。
 - Workspace / Folder = Conversation 的多层组织树；删除节点不删除 Conversation。
@@ -33,6 +38,8 @@ Personal AI Learning OS 面向希望长期整理 AI 对话与学习材料的个�
 - Task / Today = 可选行动项，不是 Second Brain 主流程。
 - ChatGPT Import = 仅支持 zip 解压后的 `conversations.json` 最小文本导入；不支持附件、图片、tool call、canvas、voice 或 shared link。
 - 重复 ChatGPT 导入复用已有 Conversation，只追加新 Message；旧 Rounds 不自动覆盖。
+
+v1.7 的信息边界：Conversation 保存“讨论过什么”，Context 表达“现在什么仍然有效”，Knowledge 只保存“值得长期复用且已人工确认的稳定信息”。短期价格讨论、临时尝试和未确认判断不会仅因出现在 Context 或 Conversation 中自动成为 Knowledge。
 
 ## v1.0 Phase1 implementation baseline
 
