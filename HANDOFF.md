@@ -1,3 +1,37 @@
+# PALOS v1.8 — ChatGPT Share Snapshot Design Handoff
+
+## 2026-07-25 design proposal
+
+本轮基于干净的 `feat/v1.8-share-snapshot` / `e55e677 release: PALOS v1.7 round-first context management` 只完成设计审查，没有写产品代码、修改 IndexedDB schema、创建 store、接入 Provider、commit 或 push。
+
+### Architecture conclusion
+
+- Conversation 继续作为 Aggregate Root；Message / Round 继续承载 canonical transcript，Knowledge 继续是人工确认后的独立 Aggregate。
+- 一次已确认的 Share Snapshot 建议复用现有 Source store，使用 optional metadata 保存 parser version、SHA-256 transcript hash、message manifest、前序 Snapshot Source ID 和 capture time；MVP 不新增第 8 个 canonical store。
+- `ConversationVersion` 是 PALOS 本地恢复点，只包含 Conversation + Messages，不适合作为外部 Share Snapshot 历史。
+- 当前 Export append 已有 `externalConversationId / externalMessageId / contentHash` seam，但不能处理分享文本缺少稳定 ID、中间编辑、截短、重排或 Assistant-only suffix 扩展最后 unanswered Round。
+- local enrichment 明确定义为 Conversation / Round 的人工记录、Context、Task、Proposal、Knowledge 和 Tags；Snapshot 更新不得覆盖或自动重算这些内容。
+
+### Compliance decision
+
+- OpenAI 官方 Shared Links FAQ 说明普通分享链接是持链接可见的 Snapshot，只有分享者主动更新后才包含后续完成消息；Enterprise link 还可能受 workspace 权限限制。
+- OpenAI 当前 Terms of Use 明确限制自动或程序化提取数据或 Output。没有官方 Share Link Import / Delta API、明确许可或专项合规批准前，v1.8 不实现 URL fetch、DOM scraping、internal API、登录模拟、cookies 读取或 polling。
+- MVP 改为：用户主动提供 URL → PALOS 严格校验、mask、hash → 用户在普通浏览器打开 → 用户手动粘贴可见文本 → PALOS 本地 parser/hash/message diff → preview → explicit confirm。
+
+### MVP update semantics
+
+- 相同 transcript hash：no change，零 canonical 写入。
+- 旧 Message 序列是新序列的精确前缀：safe append；只写新 Snapshot Source、新 Messages、新 Rounds，或保留 enrichment 地扩展最后 unanswered Round。
+- 中间编辑、缩短、重排、role change 或 parser ambiguity：conflict preview，现有 Conversation 零改动。
+- 这里的 incremental 是本地持久化增量；没有官方 delta API 时不承诺网络 delta。
+
+### Design artifact and next gate
+
+- 完整设计：[PALOS v1.8 ChatGPT Share Snapshot Design](./docs/design/PALOS-v1.8-ChatGPT-Share-Snapshot.md)
+- 实施前需产品负责人确认：接受 manual capture MVP、完整 URL 默认不保存、conflict 不覆盖、历史 Snapshot 保留，以及 URL fetch 作为独立 compliance gate。
+
+---
+
 # PALOS v1.7 — Personal AI Context Management Handoff
 
 ## 2026-07-23 Final Release QA / Data Semantics Closure
