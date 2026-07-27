@@ -186,6 +186,10 @@ class AtomicFakeDatabase {
   constructor(
     private readonly stores: Map<string, StoreData>,
     private readonly shouldFailReadwrite: () => boolean,
+    private readonly onTransaction: (
+      storeNames: readonly string[],
+      mode: IDBTransactionMode,
+    ) => void,
   ) {}
 
   createObjectStore(name: string): IDBObjectStore {
@@ -198,6 +202,7 @@ class AtomicFakeDatabase {
     mode: IDBTransactionMode = "readonly",
   ): IDBTransaction {
     const names = Array.isArray(storeNames) ? storeNames : [storeNames];
+    this.onTransaction(names, mode);
     return new AtomicFakeTransaction(
       this.stores,
       names,
@@ -213,6 +218,10 @@ class AtomicFakeDatabase {
 
 class AtomicFakeIndexedDB {
   readonly stores = new Map<string, StoreData>();
+  readonly transactions: Array<{
+    storeNames: readonly string[];
+    mode: IDBTransactionMode;
+  }> = [];
   failReadwriteTransactions = 0;
 
   open(): IDBOpenDBRequest {
@@ -221,6 +230,8 @@ class AtomicFakeIndexedDB {
       if (this.failReadwriteTransactions === 0) return false;
       this.failReadwriteTransactions -= 1;
       return true;
+    }, (storeNames, mode) => {
+      this.transactions.push({ storeNames: [...storeNames], mode });
     }) as unknown as IDBDatabase;
     queueMicrotask(() => {
       request.result = database;
@@ -394,6 +405,71 @@ function appendPlan(): ShareSnapshotCanonicalPlan {
         updatedAt: later,
       }),
     ],
+  };
+}
+
+function assistantExtensionFixture(): {
+  storedSource: ImportedSource;
+  storedMessages: Message[];
+  storedRounds: Round[];
+  plan: ShareSnapshotCanonicalPlan;
+} {
+  const storedSource = source(3, {
+    content: "User:\nA\n\nAssistant:\nB\n\nUser:\nC",
+  });
+  const storedMessages = [
+    message("message-a", "A", 0),
+    message("message-b", "B", 1),
+    message("message-c", "C", 2),
+  ];
+  const storedRounds = [
+    round("round-existing", ["message-a", "message-b"], 1, {
+      question: "A",
+      answer: "B",
+    }),
+    round("round-tail", ["message-c"], 2, {
+      title: "Preserved title",
+      question: "C",
+      answer: "",
+      note: "preserved note",
+      summary: "preserved summary",
+      context: {
+        inheritanceMode: "inherit",
+        snapshot: { currentState: "preserved context" },
+        confirmedAt: now,
+      },
+    }),
+  ];
+  return {
+    storedSource,
+    storedMessages,
+    storedRounds,
+    plan: {
+      conversation: conversation({ updatedAt: later }),
+      source: source(4, {
+        id: "share-source-2",
+        content:
+          "User:\nA\n\nAssistant:\nB\n\nUser:\nC\n\nAssistant:\nD",
+        importedAt: later,
+        updatedAt: later,
+        shareSnapshot: metadata(4, later, 2, sourceId),
+      }),
+      messages: [
+        message("message-d", "D", 3, {
+          createdAt: later,
+          updatedAt: later,
+          sourceId: "share-source-2",
+        }),
+      ],
+      rounds: [
+        {
+          ...storedRounds[1],
+          answer: "D",
+          messageIds: ["message-c", "message-d"],
+          updatedAt: later,
+        },
+      ],
+    },
   };
 }
 
@@ -793,6 +869,46 @@ describe("Share Snapshot canonical operation", () => {
     ]);
   });
 
+  it("keeps initial Assistant-only Round derivation outside append semantics", async () => {
+    const preparation = await prepareChatGPTShareSnapshot({
+      shareUrl: "https://chatgpt.com/share/12345678-abcd",
+      snapshot: {
+        kind: "pasted-text",
+        content: "Assistant:\nInitial assistant context",
+      },
+      capturedAt: now,
+      target: {
+        kind: "new",
+        conversation: conversation(),
+      },
+      createId(kind) {
+        return `assistant-initial-${kind}`;
+      },
+    });
+
+    expect(preparation).toMatchObject({
+      status: "new",
+      canonicalPlan: {
+        rounds: [
+          {
+            id: "assistant-initial-round",
+            question: "",
+            answer: "Initial assistant context",
+          },
+        ],
+      },
+    });
+    const result = await executeShareSnapshotCanonicalOperation(
+      preparation.canonicalPlan!,
+    );
+
+    expect(result.verification).toMatchObject({
+      messageCount: 1,
+      roundCount: 1,
+      pendingWriteCount: 0,
+    });
+  });
+
   it("accepts the pure service append plan through durable verification", async () => {
     await seedShareWorkspace();
     const [storedConversation] = await readAll<Conversation>("conversations");
@@ -934,6 +1050,7 @@ describe("Share Snapshot canonical operation", () => {
         ],
       },
     });
+    fakeIndexedDB.transactions.length = 0;
     const result = await executeShareSnapshotCanonicalOperation(
       preparation.canonicalPlan!,
     );
@@ -942,8 +1059,22 @@ describe("Share Snapshot canonical operation", () => {
       messageCount: 4,
       roundCount: 2,
       sourceMessageCount: 4,
+      sourceMetadataVerified: true,
+      sourceLineageVerified: true,
+      messageOwnershipVerified: true,
+      referencesVerified: true,
+      immutableRecordsPreserved: true,
+      roundExtensionPreserved: true,
       pendingWriteCount: 0,
     });
+    expect(
+      fakeIndexedDB.transactions.filter(({ mode }) => mode === "readwrite"),
+    ).toEqual([
+      {
+        storeNames: ["conversations", "sources", "messages", "rounds"],
+        mode: "readwrite",
+      },
+    ]);
     expect(
       (await readAll<Round>("rounds")).find(
         ({ id }) => id === tailRound.id,
@@ -959,6 +1090,16 @@ describe("Share Snapshot canonical operation", () => {
         ({ id }) => id === sourceId,
       ),
     ).toEqual(storedSource);
+    expect(await readAll<ImportedSource>("sources")).toHaveLength(2);
+    expect(
+      (await readAll<ImportedSource>("sources")).find(
+        ({ id }) => id === "delta-source",
+      )?.shareSnapshot,
+    ).toMatchObject({
+      previousSnapshotSourceId: sourceId,
+      snapshotSequence: 2,
+      snapshotMessageCount: 4,
+    });
   });
 
   it("drains pending writes, appends canonically, reloads, and preserves enrichment", async () => {
@@ -1052,10 +1193,166 @@ describe("Share Snapshot canonical operation", () => {
 
     await expect(
       executeShareSnapshotCanonicalOperation(invalidPlan),
-    ).rejects.toThrow("missing sourceOrdinal 2");
+    ).rejects.toThrow("does not continue canonical order and sourceOrdinal");
 
     expect(await readAll<Message>("messages")).toEqual(oldMessages);
     expect(await readAll<Round>("rounds")).toHaveLength(1);
+    expect(getPendingWriteCount()).toBe(0);
+  });
+
+  it("rejects a plan that would rewrite an existing Message provenance", async () => {
+    const { oldMessages } = await seedShareWorkspace();
+    const originalSources = await readAll<ImportedSource>("sources");
+    const plan = appendPlan();
+    const invalidPlan: ShareSnapshotCanonicalPlan = {
+      ...plan,
+      messages: [
+        { ...plan.messages[0], id: "message-a" },
+        plan.messages[1],
+      ],
+    };
+
+    await expect(
+      executeShareSnapshotCanonicalOperation(invalidPlan),
+    ).rejects.toThrow("cannot rewrite existing Message message-a");
+
+    expect(await readAll<Message>("messages")).toEqual(oldMessages);
+    expect(await readAll<ImportedSource>("sources")).toEqual(originalSources);
+  });
+
+  it("rejects duplicate Snapshot heads before the transaction", async () => {
+    const { oldMessages, oldRound } = await seedShareWorkspace();
+    const originalSources = await readAll<ImportedSource>("sources");
+    const plan = appendPlan();
+    const invalidPlan: ShareSnapshotCanonicalPlan = {
+      ...plan,
+      source: {
+        ...plan.source,
+        shareSnapshot: metadata(4, later, 1),
+      },
+    };
+
+    await expect(
+      executeShareSnapshotCanonicalOperation(invalidPlan),
+    ).rejects.toThrow("would create a duplicate head");
+
+    expect(await readAll<ImportedSource>("sources")).toEqual(originalSources);
+    expect(await readAll<Message>("messages")).toEqual(oldMessages);
+    expect(await readAll<Round>("rounds")).toEqual([oldRound]);
+  });
+
+  it("rejects an incorrect sequence or missing previous Snapshot Source", async () => {
+    const { oldMessages } = await seedShareWorkspace();
+    const plan = appendPlan();
+    const wrongSequence: ShareSnapshotCanonicalPlan = {
+      ...plan,
+      source: {
+        ...plan.source,
+        shareSnapshot: metadata(4, later, 3, sourceId),
+      },
+    };
+    const missingPrevious: ShareSnapshotCanonicalPlan = {
+      ...plan,
+      source: {
+        ...plan.source,
+        shareSnapshot: metadata(4, later, 2, "missing-source"),
+      },
+    };
+
+    await expect(
+      executeShareSnapshotCanonicalOperation(wrongSequence),
+    ).rejects.toThrow("expected 2");
+    await expect(
+      executeShareSnapshotCanonicalOperation(missingPrevious),
+    ).rejects.toThrow("previous source missing-source does not exist");
+
+    expect(await readAll<Message>("messages")).toEqual(oldMessages);
+    expect(await readAll<ImportedSource>("sources")).toHaveLength(1);
+  });
+
+  it("rejects a Round extension that changes preserved context fields", async () => {
+    const fixture = assistantExtensionFixture();
+    await replaceStores({
+      conversations: [conversation()],
+      sources: [fixture.storedSource],
+      messages: fixture.storedMessages,
+      rounds: fixture.storedRounds,
+    });
+    const originalRounds = await readAll<Round>("rounds");
+    const invalidPlan: ShareSnapshotCanonicalPlan = {
+      ...fixture.plan,
+      rounds: fixture.plan.rounds.map((candidate) => ({
+        ...candidate,
+        note: "rewritten note",
+        summary: "rewritten summary",
+        context: {
+          inheritanceMode: "exclude",
+        },
+      })),
+    };
+
+    await expect(
+      executeShareSnapshotCanonicalOperation(invalidPlan),
+    ).rejects.toThrow("changed preserved fields");
+
+    expect(await readAll<Round>("rounds")).toEqual(originalRounds);
+    expect(await readAll<Message>("messages")).toEqual(
+      fixture.storedMessages,
+    );
+    expect(await readAll<ImportedSource>("sources")).toEqual([
+      fixture.storedSource,
+    ]);
+  });
+
+  it("rejects a Round extension whose persisted tail baseline has changed", async () => {
+    const fixture = assistantExtensionFixture();
+    const changedRounds = fixture.storedRounds.map((candidate) =>
+      candidate.id === "round-tail"
+        ? { ...candidate, question: "Locally changed question" }
+        : candidate,
+    );
+    await replaceStores({
+      conversations: [conversation()],
+      sources: [fixture.storedSource],
+      messages: fixture.storedMessages,
+      rounds: changedRounds,
+    });
+
+    await expect(
+      executeShareSnapshotCanonicalOperation(fixture.plan),
+    ).rejects.toThrow("baseline does not match the canonical tail");
+
+    expect(await readAll<Round>("rounds")).toEqual(changedRounds);
+    expect(await readAll<Message>("messages")).toEqual(
+      fixture.storedMessages,
+    );
+  });
+
+  it("rolls back Source, Message, Round extension, and Conversation on abort", async () => {
+    const fixture = assistantExtensionFixture();
+    const storedConversation = conversation();
+    await replaceStores({
+      conversations: [storedConversation],
+      sources: [fixture.storedSource],
+      messages: fixture.storedMessages,
+      rounds: fixture.storedRounds,
+    });
+    fakeIndexedDB.failReadwriteTransactions = 1;
+
+    await expect(
+      executeShareSnapshotCanonicalOperation(fixture.plan),
+    ).rejects.toThrow("forced transaction failure");
+
+    expect(await readAll<Conversation>("conversations")).toEqual([
+      storedConversation,
+    ]);
+    expect(await readAll<ImportedSource>("sources")).toEqual([
+      fixture.storedSource,
+    ]);
+    expect(await readAll<Message>("messages")).toEqual(
+      fixture.storedMessages,
+    );
+    expect(await readAll<Round>("rounds")).toEqual(fixture.storedRounds);
     expect(getPendingWriteCount()).toBe(0);
   });
 

@@ -198,10 +198,11 @@ describe("PALOS v1.6.4 — invalid TXT", () => {
 });
 
 describe("PALOS v1.6.4 — mode and URL state", () => {
-  it("supports one distinct input section for ChatGPT, Paste, and TXT", () => {
+  it("supports one distinct input section for ChatGPT, Paste, TXT, and Share Snapshot", () => {
     expect(deriveActiveImportSection("json")).toBe("chatgpt-export");
     expect(deriveActiveImportSection("paste")).toBe("paste-text");
     expect(deriveActiveImportSection("txt")).toBe("txt-file");
+    expect(deriveActiveImportSection("share")).toBe("share-snapshot");
   });
 
   it("Existing → New removes stale target params", () => {

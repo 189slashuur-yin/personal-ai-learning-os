@@ -4,11 +4,19 @@
 
 ## Current release
 
-- Current Version：v1.7 release candidate（final QA passed；commit pending）
-- Phase：Personal AI Context Management
-- Current Focus：v1.7 Final Release QA、Data Semantics Audit 与 Minimal Closure
-- Automated Status：9 Vitest files / 213 tests；Playwright 2/2；lint/build/diff-check passed
-- Next Recommended Phase：可创建单一 PALOS v1.7 release commit；当前不创建 commit、不 push
+- Current Version：v1.8 work in progress
+- Phase：Immutable ChatGPT Share Snapshot
+- Current Focus：Phase 2E user workflow integration
+- Automated Status：18 Vitest files / 302 tests；Playwright 2/2；lint/build/diff-check passed
+- Next Recommended Phase：Phase 2E checkpoint 已提交；产品验收后再进入已延期 lifecycle hardening；当前不 push
+
+## v1.8 — Immutable ChatGPT Share Snapshot（Phase 2E integrated）
+
+- ImportedSource 承载 immutable Snapshot history；resourceHash 作为持久 identity，raw share URL/share token 不进入 canonical data。
+- assistant-only delta projector、hardened canonical writer、reload verification 与 legacy metadata pure migration helper 已完成。
+- ImportWorkbench 在既有 target selector 旁新增第四个 Share Snapshot input mode；只处理 uploaded saved HTML / pasted rendered text，不 fetch chatgpt.com，不访问 cookie/session。
+- UI 已连接 parser → comparator → preview → explicit confirm → canonical writer；same/blocked 零写入，append 显示 Message delta、Round extend/create impact 与 preserved fields。
+- 不新增 ShareResourceBinding/store，不修改 IndexedDB schema、Copy/Merge/Restore、Search 或 rendering virtualization。
 
 ## v1.7 — Personal AI Context Management（final QA passed, release commit pending）
 
@@ -49,7 +57,7 @@
 
 ## v1.6.4 — Known Issues Closure（completed, checkpointed）
 
-- New / Existing × ChatGPT Export / Paste Text / TXT File 六种组合已形成统一 Import mode matrix；Existing 始终只有一个 target selector。
+- New / Existing × ChatGPT Export / Paste Text / TXT File / ChatGPT Share Snapshot 形成统一 Import mode matrix；Existing 始终只有一个 target selector。
 - Existing + TXT 复用 text/TXT parser pipeline，保存文件名与 Source metadata，只追加实际解析出的 Messages/Rounds；success 前完成 flush、cache reload 与 ID/reference/count verification。
 - Import phase/counters 覆盖 parsing、preview、confirm、importing、flushing、verifying、success、failed、quota-stopped；批量进度按 Conversation 节流。
 - Quota 超阈值改为 warning + explicit confirmation，不再通过 disabled button 形成不可达确认路径；quota stop 报告 durable success 与未处理数量。

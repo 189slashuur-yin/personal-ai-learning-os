@@ -2,11 +2,21 @@
 
 ## Current release context
 
-- Current Version：v1.7 release candidate（final QA passed；commit pending）
-- Current Focus：Final Release QA、Data Semantics Audit 与 Minimal Closure
-- Next Recommended Phase：可创建单一 PALOS v1.7 release commit；当前不 commit、不 push
+- Current Version：v1.8 work in progress
+- Current Focus：Phase 2E Share Snapshot user workflow integration
+- Next Recommended Phase：保留当前 commit 历史，产品验收后再进入已延期的 lifecycle hardening；当前不 push
 
 当前架构结论仍受单浏览器、本地优先与浏览器存储边界约束。PALOS 业务数据默认使用 IndexedDB；LocalStorage 保留为轻量配置、UI 偏好、schema/storage metadata 与旧数据迁移来源。v1.0 候选必须先完成范围和验收评审，不能从本文的演进 seam 推定为已批准实现。
+
+## v1.8 Phase 2E Share Snapshot workflow delta
+
+- Import UI 仍是 target 与 input source 两个正交轴；input source 新增第四个 `ChatGPT Share Snapshot`，复用原有 New / Existing selector，不增加第二个 target selector。
+- Share mode 只接受用户上传的 saved HTML 或粘贴的 rendered text。严格 ChatGPT share URL 仅存在于 React capture state 与一次 workflow request 中，用于规范化和 SHA-256 resourceHash；不持久化 raw URL/share token，不访问 chatgpt.com，不读取 cookie/session。
+- UI 只调用公开 `ChatGPTShareSnapshotWorkflow.preview()` / `confirm()`；parser、comparator、delta projector 与 canonical plan 仍封装在 workflow 内。UI 不读取 private plan，也不直接调用 canonical operation。
+- resourceHash history 仍是真实 owner authority。New / Existing selector 是用户意图 guard：resolved target 与选择不一致时 preview 明确阻止 confirm，不静默重定向写入。
+- preview 显示 new/append/same/blocked、existing/snapshot/new Message counts、Round extend/create/total impact，以及 Conversation、Message provenance 和 Round enrichment preservation。
+- 输入、target、Workspace、标题或 content kind 改变都会丢弃旧 preview/workflow instance；异步 preview/file read 使用 revision guard，不能用 stale baseline confirm。
+- confirm 仅在 IndexedDB authoritative state 已加载、preview confirmable、baseline 与 target intent 均有效时启用；写入仍由 hardened canonical writer 的单事务与 reload verification 完成。LocalStorage debug mode 不执行 Share Snapshot canonical write。
 
 ## v1.7 Context Management delta
 
@@ -46,7 +56,7 @@ Conversation
 
 ## v1.6.4 runtime delta
 
-- Import UI 是两个正交选择：target 为 New / Existing，input source 为 ChatGPT Export / Paste Text / TXT File，共六种有效组合；每种组合只渲染一个输入区，Existing 只渲染一个 target selector。
+- 当时的 Import UI 是两个正交选择：target 为 New / Existing，input source 为 ChatGPT Export / Paste Text / TXT File，共六种组合；v1.8 Phase 2E 在同一 input source 轴增加第四种 Share Snapshot mode，Existing 仍只渲染一个 target selector。
 - Paste/TXT 复用 `ImportParserPipeline` 与 `ImportService`；Existing + TXT 不进入 structured ChatGPT parser。TXT 必须是可解码 UTF-8、非空且包含可解析角色标签。
 - `ImportService` 生成 canonical Message/Round IDs 后返回实际 ID 集；IndexedDB success 需经过 flush → clear caches → preload → Conversation/Source/Message/Round count、ownership 与 Round.messageIds verification。
 - Import phase 明确为 idle、parsing、preview-ready、confirming、importing、flushing、verifying、success、failed、quota-stopped；批量 UI 每 10 个 Conversation 更新一次 React progress，不逐 Message setState。

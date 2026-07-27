@@ -6,8 +6,12 @@ import { describe, expect, it } from "vitest";
 // ============================================================================
 
 /** Returns which import section is active based on input mode. */
-function deriveActiveImportSection(inputMode: string): "chatgpt-export" | "manual-text" {
-  return inputMode === "json" ? "chatgpt-export" : "manual-text";
+function deriveActiveImportSection(
+  inputMode: string,
+): "chatgpt-export" | "manual-text" | "share-snapshot" {
+  if (inputMode === "json") return "chatgpt-export";
+  if (inputMode === "share") return "share-snapshot";
+  return "manual-text";
 }
 
 /** Build query-string search params for the /import page. */
@@ -28,13 +32,18 @@ function buildImportPageQuery(params: {
 /** Parse /import page state from URL search params. */
 function parseImportPageQuery(searchParams: URLSearchParams): {
   importPath: "new" | "existing";
-  inputMode: "paste" | "txt" | "json";
+  inputMode: "paste" | "txt" | "json" | "share";
   existingTargetId: string;
 } {
   const urlImportPath = searchParams.get("importPath") as "new" | "existing" | null;
   return {
     importPath: urlImportPath || "new",
-    inputMode: (searchParams.get("inputMode") as "paste" | "txt" | "json") || "paste",
+    inputMode:
+      (searchParams.get("inputMode") as
+        | "paste"
+        | "txt"
+        | "json"
+        | "share") || "paste",
     existingTargetId: searchParams.get("existingTargetId") ?? "",
   };
 }
@@ -62,13 +71,19 @@ describe("Import page conditional rendering (Goal C)", () => {
     expect(deriveActiveImportSection("txt")).toBe("manual-text");
   });
 
-  it("never shows both sections simultaneously", () => {
-    const modes = ["json", "paste", "txt"];
+  it("Share Snapshot → show its dedicated section only", () => {
+    expect(deriveActiveImportSection("share")).toBe("share-snapshot");
+  });
+
+  it("never shows multiple sections simultaneously", () => {
+    const modes = ["json", "paste", "txt", "share"];
     for (const mode of modes) {
       const section = deriveActiveImportSection(mode);
-      // Each mode maps to exactly one section and never both
-      expect(section === "chatgpt-export" || section === "manual-text").toBe(true);
-      expect(section === "chatgpt-export" && section === "manual-text").toBe(false);
+      expect([
+        "chatgpt-export",
+        "manual-text",
+        "share-snapshot",
+      ]).toContain(section);
     }
   });
 });
@@ -152,6 +167,19 @@ describe("Import target stability across mode switches (Goal B)", () => {
     });
     expect(afterSwitch.get("existingTargetId")).toBe("target-42");
     expect(afterSelect.get("existingTargetId")).toBe("target-42");
+  });
+
+  it("switching to Share Snapshot keeps the existing target", () => {
+    const afterSwitch = buildImportPageQuery({
+      importPath: "existing",
+      inputMode: "share",
+      existingTargetId: "target-42",
+    });
+    expect(parseImportPageQuery(afterSwitch)).toEqual({
+      importPath: "existing",
+      inputMode: "share",
+      existingTargetId: "target-42",
+    });
   });
 });
 

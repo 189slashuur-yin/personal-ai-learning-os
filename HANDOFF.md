@@ -1,5 +1,124 @@
 # PALOS v1.8 — ChatGPT Share Snapshot Design Handoff
 
+## 2026-07-27 Phase 2E user workflow integration
+
+本轮在已完成的 immutable Snapshot history、resourceHash identity、assistant-only delta projector、canonical writer hardening 与 legacy migration 上增加产品入口。范围只包含 ImportWorkbench 第四种 input mode 与对应测试/文档；没有修改 Snapshot model、IndexedDB schema/version/store、Copy/Merge/Restore、Search 或 rendering virtualization。最终按要求创建 `feat: integrate share snapshot import UI` commit，不 push，也不 squash 或改写前序 commit。
+
+### ImportWorkbench integration
+
+- `ImportInputMode` 新增 `share`，仍复用页面唯一的 New / Existing target selector；没有在 Share panel 内新增 Conversation selector。
+- Share panel 接受两种本地内容：UTF-8 saved HTML upload 或 rendered text paste。严格 ChatGPT share URL 只在 component capture state 与一次 workflow request 中存在，用于 normalization/resourceHash；没有 fetch、XHR、cookie/session access、console/log persistence 或 URL retention。
+- IndexedDB caches ready 后，UI 创建 process-local `ChatGPTShareSnapshotWorkflow`，依次调用公开 preview 与 explicit confirm；writer 使用既有 `IndexedDBShareSnapshotCanonicalWriter`。UI 不访问 canonical plan，也不直接调用 Phase 2B operation。
+- resourceHash resolution 继续决定实际 owner。已有 New / Existing selector 作为 intent guard：未匹配、resolved owner 不同或 target 未选择时只显示错误并禁用 confirm，不静默写入其它 Conversation。
+- Share 输入、内容类型、URL、title、Workspace 或 target 改变时清除 prepared preview 和 workflow instance；异步 HTML read/preview 通过 revision guard 丢弃 stale completion。
+
+### Preview and confirmation
+
+- preview card 显示 NEW / APPEND / SAME / BLOCKED、existing/snapshot/new Message counts、Round extend/create/total impact，以及 append 时明确保留的 Conversation fields、Message ID/sourceId/sourceOrdinal 与 Round ID/enrichment。
+- SAME 明确显示 zero writes；blocked/invalid/ambiguous 或 target mismatch 不提供 confirm。new/append 只有在 baseline、target intent 与 IndexedDB readiness 全部有效时才可显式确认。
+- confirm 后仍由 hardened writer 完成单事务 canonical write、cache reload 与 verification。成功报告不包含 URL/share token；component 随即清除 URL 与 raw input state。
+
+### Tests and verification
+
+- 新增 UI integration tests，覆盖第四 mode URL round-trip与 target preservation、input/target/content stale cleanup、append/same/blocked preview rendering、assistant tail Round impact、preserved fields、target ownership mismatch、preview 零写入、explicit confirm 后才调用 writer，以及 fetch spy / source contract 证明无 chatgpt.com network 或 credential access。
+- 既有 import page state 与 v1.6.4 mode tests 扩展到第四 mode。
+- Final gate：`npm run lint` passed；`npm run build` passed（19 routes）；`npm test -- --run` passed（18 files / 302 tests）；`npm run test:e2e` passed（Playwright 2/2）；`git diff --check` passed。E2E 首次在受限 sandbox 内因无法监听 `127.0.0.1:3100` 返回 EPERM，允许本地测试 server 后按原命令重跑通过；不是产品代码失败。
+
+### Remaining risks / next boundary
+
+- v1.8 canonical writer 只支持首次 Snapshot 创建新 Conversation；因此 Existing + 尚无 resourceHash history 会在 UI fail closed，不能把 share identity 附着到任意已有 Conversation。扩大该语义需要单独 domain decision，不应在 UI 层绕过。
+- preview registry 与 raw URL/content 都是 component/process-local；页面 reload 后必须重新输入并 preview。没有 durable capture draft 或 confirmation journal。
+- 本轮没有新增 Share Snapshot 专用浏览器 E2E；既有完整 Playwright 2/2 通过，unit/integration 覆盖真实 pure workflow 边界。最终产品验收仍建议手工检查 saved HTML file picker、target switch 与 reload 后 Conversation 内容。
+
+### Main Phase 2E files
+
+- UI：`src/app/import/chatgpt-share-snapshot-import.tsx`、`import-workbench.tsx`、`page.tsx`
+- State：`src/core/services/import-page-state.ts`
+- Tests：`tests/chatgpt-share-snapshot-ui.test.ts`、`tests/import-page-state.test.ts`、`tests/v164-known-issues.test.ts`
+- Docs：`PROJECT.md`、`ARCHITECTURE.md`、`ROADMAP.md`、`HANDOFF.md`
+
+---
+
+## 2026-07-27 v1.8 compatibility hardening
+
+本轮在已验证但尚未提交的 Phase 2C-3C worktree 上继续，只加固 legacy mutable Share Snapshot metadata 的显式迁移兼容。没有修改 UI、Copy/Merge/Restore、Search、IndexedDB schema/version/store、canonical writer、Snapshot History、Delta Projector 或 Message provenance；没有自动迁移、commit 或 push。
+
+### Explicit pure migration boundary
+
+- `migrateLegacyMutableShareSnapshotSource()` 现在显式接收 Source、canonical Messages 与 Source collection，返回 `migrated | noop | blocked`。它不访问 Storage、不写 IndexedDB、不修改输入对象，只在全部校验成功后返回同 ID Source 的新 metadata 投影。
+- legacy schema v1 的 `shareId + normalizedShareUrl` 只在调用期间用于 canonical normalization 与 SHA-256 resourceHash；成功结果使用 schema v2、`snapshotSequence=1`，省略 `previousSnapshotSourceId`，并完全移除 URL/share token 字段。
+- Source ID、content/name/timestamps 与所有 Messages 保持原值；helper 不返回 Message write plan，也不改 Message ID、sourceId 或 sourceOrdinal。无法证明历史时直接 blocked，不把其它 Source 猜成 previous Snapshot。
+- 已是有效 immutable metadata 的 Source 返回 noop；不会重复迁移或改写 sequence/history。
+
+### Runtime validation
+
+- legacy metadata 必须包含有效 normalized ChatGPT Share URL，URL 规范化结果必须与存储值完全一致，且 path share ID 必须与 legacy `shareId` 相同。
+- 只支持 `sha256-json-role-content-v1`；metadata count/timestamp/parser/input kind/hash 必须有效，Source 必须具有 owning Conversation。
+- canonical Messages 必须按 order 连续、sourceOrdinal 从 0 绝对连续、ID 唯一，并继续归属于原 legacy Source；任何 provenance 缺失/变化都会 blocked，不自动修补。
+- Source.content 会重新经过 Share parser；role/content/count 与 canonical Messages 必须逐 ordinal 一致，重新计算的 transcript hash 也必须等于 legacy snapshotHash。
+- migration 前会 transiently hash Source collection 中的 v1/v2 resource identity；同 resourceHash 出现在其它 Conversation 时返回 `resource-hash-collision`。同 Conversation 已存在其它 Snapshot 时返回 history conflict，而不是伪造 lineage。
+- blocked result 只有 reason/error，不包含可写 Source；输入 Source/Messages/collection 保持 byte-for-byte 可比较的原状态。
+
+### Tests and verification
+
+- 新增独立 migration tests，覆盖成功迁移、already migrated no-op、Source/Message ID 与 provenance preservation、invalid metadata、unsupported algorithm、invalid URL/shareId、missing ownership、broken sourceOrdinal、transcript/provenance divergence、cross-Conversation collision，以及 blocked 后 canonical input untouched。
+- 原 history resolver tests 恢复为只验证 history；legacy migration coverage 移入专用文件。
+- Final gate：`npm run lint` passed；`npm run build` passed（19 routes）；`npm test -- --run` passed（17 files / 292 tests）；`git diff --check` passed。按本阶段要求未运行 E2E。
+
+### Remaining risks / next boundary
+
+- 本阶段提供显式 pure migration plan，不自动持久化；未来若增加 migration command，仍需单独定义 freshness、单 Source transaction、reload verification 与用户触发边界。
+- malformed legacy records 只会 blocked，不进行启发式修复；这保留 provenance，但需要未来诊断/人工处理流程。
+
+### Main compatibility files
+
+- Core：`src/core/services/chatgpt-share-snapshot-migration.ts`
+- Tests：`tests/chatgpt-share-snapshot-migration.test.ts`、`tests/chatgpt-share-snapshot-history.test.ts`
+- Docs：`HANDOFF.md`
+
+---
+
+## 2026-07-27 Phase 2C-3C canonical writer hardening
+
+本轮从 clean checkpoint `fc21e4e feat: add share snapshot delta projector` 继续，只加固 immutable Share Snapshot canonical write path。没有修改 UI、Copy/Merge/Restore、Search、IndexedDB schema/version/store、Snapshot History Core、Delta Projector 或全局 Round derivation；没有 commit / push。
+
+### Pre-transaction immutable plan validation
+
+- canonical operation 在写入前用一个四-store readonly transaction 读取 authoritative Conversation/Source/Message/Round state；pending writes 仍先 drain，校验失败时不调用 `putStores()`。
+- incoming Source 必须是从未持久化的新 immutable Snapshot Source；metadata/resourceHash/capturedAt/timestamps 有效，`previousSnapshotSourceId` 必须存在并等于当前唯一 head，`snapshotSequence` 必须精确加一。初始 Snapshot 必须 sequence 1 且不能为已有 resource 创建第二个 head。
+- current 与 expected Source chain 都通过纯 history resolver；跨 Conversation resource、missing previous、multiple heads、cycle、ownership mismatch 或 sequence gap 全部 fail closed。
+- plan Messages 必须使用全新 ID、统一指向 incoming Snapshot Source、归属目标 Conversation，并同时连续扩展 Message.order 与 absolute sourceOrdinal。既有 Message ID 即使 owner 相同也禁止 upsert，因此不能改写历史 sourceId/provenance。
+- append Conversation write 会从 persisted record 只复制并更新 `updatedAt`，避免 storage adapter 的 default workspace normalization 被误写回；title/note/context/其它字段变化会拒绝。
+- plan 中现有 Round ID 只允许出现一次且必须是 canonical tail extension。writer 重新推导 persisted tail baseline，要求 membership/question/answer 一致；只允许 answer/messageIds/updatedAt 改变，title/order/question/note/summary/context/createdAt 必须保持。
+- Assistant prefix 必须完整、按顺序且只归属被扩展 Round；真正的新 Rounds 必须使用新 ID、连续 order，并只引用未用于 extension 的 suffix Messages。每条 appended Message 必须且只能归属一个 Round，禁止 orphan 或交叉重复引用。
+
+### Atomic write and reload verification
+
+- 写入仍只调用一次既有 `putStores()`，单个 readwrite transaction 精确包含 conversations、sources、messages、rounds；不使用 replaceStores、clear、单 Message transaction 或单 Round transaction。
+- batch 只包含 sanitized Conversation update、新 Snapshot Source、suffix Messages、被扩展 Round 和真正的新 Rounds；previous Snapshot Sources、既有 Messages 与其它 Rounds 不进入 batch。
+- reload 后继续核对四个完整 store，并重新验证 Source chain/metadata、Message ownership/sourceId/sourceOrdinal、全 Round references 与 pending writes。新增显式 verification flags：`messageOwnershipVerified`、`immutableRecordsPreserved`、`roundExtensionPreserved`。
+- previous Snapshot Sources 必须与写前对象完全相等；Round extension 必须与 plan 完全相等，同时再次确认除 answer/messageIds/updatedAt 外的字段未变化。
+
+### Tests and verification
+
+- IndexedDB integration 新增/增强覆盖：append 创建第二个 immutable Source、旧 Source 不变、assistant extension 保持 Round ID/context、四 store 单次 readwrite transaction、existing Message rewrite 拒绝、duplicate head 拒绝、wrong sequence/missing previous 拒绝、Round enrichment/baseline divergence 拒绝、extension transaction abort 四 store 回滚，以及 initial Assistant-only 的既有 derivation 行为不受 append policy 影响。
+- 既有 authoritative writer baseline test 继续验证 durable stale state 返回 stale、零 canonical write；成功路径继续通过 reload verification。
+- Final gate：`npm run lint` passed；`npm run build` passed（19 routes）；`npm test -- --run` passed（16 files / 284 tests）；`git diff --check` passed。按本阶段要求未运行 E2E。
+
+### Remaining risks / next boundary
+
+- writer adapter 的 authoritative fingerprint read 与 canonical operation 的 validation/readwrite transaction 之间仍是两个阶段；operation 会重新验证 domain invariants，但极窄的跨 tab TOCTOU 仍不能被 `putStores()` 的现有 API 完全关闭。
+- readwrite commit 后若 cache preload/reload verification 失败，仍没有 durable recovery journal 或 compensating rollback；transaction abort 本身已验证原子回滚。
+- field-level Round extension policy 目前属于 Share Snapshot canonical operation，不改变其它 Round storage/save 路径。
+
+### Main Phase 2C-3C files
+
+- Infrastructure：`src/infrastructure/storage/indexeddb/share-snapshot-operation.ts`
+- Tests：`tests/share-snapshot-persistence.test.ts`
+- Docs：`HANDOFF.md`
+
+---
+
 ## 2026-07-27 Phase 2C-3B assistant-only delta projector
 
 本轮从 clean checkpoint `ad36c0a feat: implement v1.8 immutable share snapshot core` 继续，只实现 immutable Share Snapshot append 的 Round delta projection。没有修改 UI、Copy/Merge/Restore、IndexedDB schema/version/store、`ShareResourceBinding`、全局 `deriveRoundDrafts()` 语义或 Phase 2C-3A Snapshot History Core；没有 commit / push。

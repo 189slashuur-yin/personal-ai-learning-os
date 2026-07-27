@@ -1,5 +1,5 @@
 export type ImportTargetMode = "new" | "existing";
-export type ImportInputMode = "json" | "paste" | "txt";
+export type ImportInputMode = "json" | "paste" | "txt" | "share";
 
 export type ImportPageState = {
   importPath: ImportTargetMode;
@@ -12,7 +12,12 @@ function isImportPath(value: string | null): value is ImportTargetMode {
 }
 
 function isInputMode(value: string | null): value is ImportInputMode {
-  return value === "json" || value === "paste" || value === "txt";
+  return (
+    value === "json" ||
+    value === "paste" ||
+    value === "txt" ||
+    value === "share"
+  );
 }
 
 export function parseImportPageState(searchParams: URLSearchParams): ImportPageState {
@@ -52,9 +57,10 @@ export function buildImportPageSearch(
 
 export function deriveActiveImportSection(
   inputMode: ImportInputMode,
-): "chatgpt-export" | "paste-text" | "txt-file" {
+): "chatgpt-export" | "paste-text" | "txt-file" | "share-snapshot" {
   if (inputMode === "json") return "chatgpt-export";
   if (inputMode === "txt") return "txt-file";
+  if (inputMode === "share") return "share-snapshot";
   return "paste-text";
 }
 

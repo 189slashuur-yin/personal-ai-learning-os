@@ -35,6 +35,7 @@ import {
   type ChatGPTExportImportCallbacks,
 } from "./chatgpt-export-import";
 import type { ChatGPTConversationPreview } from "@/core/services/chatgpt-export-import";
+import { ChatGPTShareSnapshotImport } from "./chatgpt-share-snapshot-import";
 import {
   getStorageMode,
   ensureIndexedDBLoaded,
@@ -670,7 +671,13 @@ export function ImportWorkbench() {
         <p className="text-sm font-semibold text-zinc-800">
           当前模式：{importPath === "new" ? "新建 Conversation" : "导入到已有 Conversation"}
           {" / "}
-          {mode === "json" ? "ChatGPT Export" : mode === "txt" ? "TXT 文件" : "手动文本"}
+          {mode === "json"
+            ? "ChatGPT Export"
+            : mode === "txt"
+              ? "TXT 文件"
+              : mode === "share"
+                ? "ChatGPT Share Snapshot"
+                : "手动文本"}
         </p>
         {importPath === "existing" ? (
           <p className="mt-1 text-sm text-zinc-600">
@@ -715,11 +722,12 @@ export function ImportWorkbench() {
           </span>
         </button>
       </div>
-      <div className="mt-6 grid gap-4 md:grid-cols-3">
+      <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         {([
           ["json", "ChatGPT Export", "导入官方 Export zip 解压后的 conversations.json / conversations-*.json"],
           ["paste", "Paste Text", "粘贴多轮问答文本"],
           ["txt", "TXT File", "选择 UTF-8 编码的 .txt 文件"],
+          ["share", "ChatGPT Share Snapshot", "用 saved HTML 或 rendered text 在本地捕获不可变快照"],
         ] as const).map(([value, label, description]) => (
           <button
             className={`rounded-xl border p-5 text-left ${mode === value ? "border-zinc-900 bg-zinc-950 text-white" : value === "json" ? "border-emerald-300 bg-emerald-50 text-zinc-900 hover:border-emerald-400" : "border-zinc-200 bg-white text-zinc-900"}`}
@@ -776,6 +784,28 @@ export function ImportWorkbench() {
           sharedState={chatGptSharedState}
           callbacks={chatGptCallbacks}
           targetConversationId={existingTargetId}
+        />
+      ) : mode === "share" ? (
+        <ChatGPTShareSnapshotImport
+          existingConversations={existingConversations}
+          existingTargetId={existingTargetId}
+          idbReady={idbReady}
+          importPath={importPath}
+          onCompleted={(conversationId, resultMode) => {
+            if (resultMode === "new") {
+              lastCreatedIdRef.current = conversationId;
+            }
+            void loadExistingData();
+            if (resultMode === "new") {
+              router.push(`/conversation/${conversationId}?imported=rounds`);
+            }
+          }}
+          onTitleChange={setTitle}
+          onWorkspaceChange={setWorkspaceId}
+          storageMode={storageMode}
+          title={title}
+          workspaceId={workspaceId}
+          workspaces={workspaces}
         />
       ) : (
         <>
@@ -859,7 +889,7 @@ export function ImportWorkbench() {
                   : "请先选择目标 Conversation"}
             </button>
             <p className="text-xs leading-5 text-zinc-500">确认前不会写入 Conversation、Message 或 Round。</p>
-            <p className="text-xs leading-5 text-zinc-500">ChatGPT shared link 与浏览器插件入口为未来保留；本版本不实现抓取网页或读取浏览器历史。</p>
+            <p className="text-xs leading-5 text-zinc-500">此文本导入区不会处理 ChatGPT share identity；如需 immutable Snapshot history，请使用上方第四个 Share Snapshot mode。所有模式都不会抓取网页或读取浏览器历史。</p>
           </div>
         </div>
         </>

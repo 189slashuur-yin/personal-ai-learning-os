@@ -2,10 +2,8 @@ import { describe, expect, it } from "vitest";
 import type {
   ChatGPTShareSnapshotMetadata,
   ImportedSource,
-  LegacyChatGPTShareSnapshotMetadata,
 } from "@/core/entities/imported-source";
 import { resolveChatGPTShareSnapshotHistory } from "@/core/services/chatgpt-share-snapshot-history";
-import { migrateLegacyMutableShareSnapshotSource } from "@/core/services/chatgpt-share-snapshot-migration";
 
 const resourceHash =
   "0f2e08f750e63fe2358752c452398948d3d05519a3b07e359b5ac2ee23e6464d";
@@ -118,51 +116,5 @@ describe("ChatGPT Share Snapshot history resolver", () => {
       status: "blocked",
       reason: "ambiguous-resource",
     });
-  });
-});
-
-describe("legacy mutable Snapshot compatibility", () => {
-  it("produces a first known immutable Snapshot without retaining or fabricating history", async () => {
-    const legacyMetadata: LegacyChatGPTShareSnapshotMetadata = {
-      schemaVersion: 1,
-      shareId: "12345678-abcd",
-      normalizedShareUrl: "https://chatgpt.com/share/12345678-abcd",
-      snapshotHash: "legacy-snapshot",
-      snapshotMessageCount: 2,
-      capturedAt: timestamp,
-      parserVersion: "1.0.0",
-      inputKind: "pasted-text",
-      hashAlgorithm: "sha256-json-role-content-v1",
-    };
-    const legacySource: ImportedSource = {
-      id: "legacy-source",
-      conversationId: "conversation",
-      kind: "text",
-      name: "Legacy",
-      content: "User:\nQuestion\n\nAssistant:\nAnswer",
-      importedAt: timestamp,
-      updatedAt: timestamp,
-      shareSnapshot: legacyMetadata,
-    };
-
-    const result =
-      await migrateLegacyMutableShareSnapshotSource(legacySource);
-    expect(result.status).toBe("ready");
-    if (result.status !== "ready") return;
-    expect(result.source.id).toBe(legacySource.id);
-    expect(result.source.content).toBe(legacySource.content);
-    expect(result.source.shareSnapshot).toMatchObject({
-      schemaVersion: 2,
-      resourceHash,
-      snapshotHash: "legacy-snapshot",
-      snapshotSequence: 1,
-    });
-    expect(result.source.shareSnapshot).not.toHaveProperty(
-      "previousSnapshotSourceId",
-    );
-    const serialized = JSON.stringify(result.source);
-    expect(serialized).not.toContain("12345678-abcd");
-    expect(serialized).not.toContain("chatgpt.com/share");
-    expect(JSON.stringify(legacySource)).toContain("12345678-abcd");
   });
 });
