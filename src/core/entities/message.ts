@@ -17,4 +17,6 @@ export type Message = {
   updatedAt: string;
   externalMessageId?: string;
   contentHash?: string;
+  sourceId?: string;
+  sourceOrdinal?: number;
 };

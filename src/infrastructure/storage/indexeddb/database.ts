@@ -177,6 +177,34 @@ export async function writeMany<T>(storeName: StoreName, records: T[]): Promise<
   return transactionDone(transaction);
 }
 
+/**
+ * Put records across multiple stores in one atomic transaction.
+ *
+ * Unlike replaceStores, this primitive never clears a store. Existing records
+ * whose IDs are not present in the batch are preserved.
+ */
+export async function putStores(batch: StoreBatch): Promise<void> {
+  const entries = (Object.entries(batch) as Array<[StoreName, unknown[]]>).filter(
+    ([, records]) => records.length > 0,
+  );
+  if (entries.length === 0) return;
+
+  const db = await openPalosDB();
+  const transaction = db.transaction(
+    entries.map(([storeName]) => storeName),
+    "readwrite",
+  );
+
+  for (const [storeName, records] of entries) {
+    const store = transaction.objectStore(storeName);
+    for (const record of records) {
+      store.put(record);
+    }
+  }
+
+  return transactionDone(transaction);
+}
+
 /** Delete a single record by key. */
 export async function deleteOne(storeName: StoreName, id: string): Promise<void> {
   const db = await openPalosDB();

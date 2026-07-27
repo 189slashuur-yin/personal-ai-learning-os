@@ -1,5 +1,135 @@
 # PALOS v1.8 — ChatGPT Share Snapshot Design Handoff
 
+## 2026-07-27 Phase 2C-2 headless application workflow
+
+本轮在未提交的 Phase 2A / 2B / 2C-1 worktree 上原地继续，新增无 UI 的 application boundary：
+
+`capture request → exact target resolution → preview → explicit confirm → freshness guard → canonical writer → typed result`
+
+没有修改 React、ImportWorkbench、copy/merge、Round derivation、Phase 2B canonical operation、IndexedDB schema/version/store、Analyzer、Proposal 或 Knowledge；没有访问网络、抓取 URL、读取 cookie，也没有 commit / push。
+
+### Layer boundary and lifecycle
+
+- `ChatGPTShareSnapshotWorkflow` 是 application orchestration，不是新的 domain service。它读取 Storage contracts、解析 Source target、调用 Phase 2C-1 pure service、保存 process-local preview state，并在有效 confirmation 后调用 writer。
+- 公开 `ShareSnapshotPreview` 只包含 preview identity、`new | append | same | ambiguous | invalid | blocked` 状态、resolved target、delta counts、baseline fingerprint、confirmable flag 和 warnings/errors；canonical plan 与完整 baseline 只保存在 workflow 的 private map，不通过 preview 暴露。
+- Target resolution 对 `shareId + normalizedShareUrl` 做精确匹配：0 个为 new，1 个为 existing，多个为 ambiguous；不依赖数组顺序和 latest heuristic。dangling Source、跨 Conversation source lineage 或 new Conversation ID collision 返回 invalid，全部零写入。
+- Confirm 要求 `previewId + baselineFingerprint`。`new/append` 在 freshness 通过后执行 writer；`same` 返回 typed noop 且不调用 writer；ambiguous/invalid/blocked 返回 typed terminal result；baseline 改变返回 stale；writer 异常被收敛为不泄漏底层数据的 write-failed。preview 在成功、stale、noop 或失败后消费，重复/并发确认不能再次执行同一 plan。
+
+### Deterministic freshness and writer adapter
+
+- Baseline 不新增 revision 字段。SHA-256 deterministic fingerprint 覆盖 Conversation identity/title/note/summary/conclusion/pending/context、Source identity/ownership/content/shareSnapshot metadata、Message IDs/order/role/content/external provenance/share provenance，以及 Round IDs/order/content/messageIds/note/summary/context。
+- Fingerprint 明确排除 `updatedAt`、`lastOpenedAt`、`Conversation.workspaceId/order` 等无关时间或 UI metadata，避免仅 UI 活动导致 stale；Message/Round 先按 canonical order + ID 排序，identity matching Source IDs 也排序。
+- Workflow confirm 先对当前 Storage view 重算 baseline。`IndexedDBShareSnapshotCanonicalWriter` 随后 drain pending writes，并在一个四-store readonly transaction 中读取持久化 Conversation/Source/Message/Round，重算 authoritative baseline；不匹配直接返回 stale，零 canonical 写入。
+- Baseline 匹配时，adapter 才调用原封不动的 Phase 2B `executeShareSnapshotCanonicalOperation(plan)`。put-only transaction、cache clear、preload、reload/source-lineage/reference/pending-write verification 仍由 Phase 2B operation 独占；adapter 只做 freshness boundary 与 typed receipt 映射。
+
+### Tests and verification
+
+- 新增 `tests/chatgpt-share-snapshot-workflow.test.ts` 9 项，覆盖 new、append/same、duplicate identity ambiguous、dangling/cross-owner invalid、preview 零写入、explicit confirm、stale baseline、duplicate confirm、writer stale/failure，以及 capture input/local enrichment immutability。
+- `tests/share-snapshot-persistence.test.ts` 新增 4 个真实 IndexedDB workflow integration：new 与 append 均完成 writer → Phase 2B operation → reload verification；adapter 能发现 cache 未变但 durable state 已变的 stale；readwrite abort 返回 typed write-failed 且四 store 原子保留。重复 confirm 不增加第二份 records，成功 receipt 证明 `pendingWriteCount === 0`。
+- 定向 gate：2 files / 25 tests passed，lint 与 `git diff --check` passed。
+- Final gate：`npm run lint` passed；`npm run build` passed（19 routes；沙箱首次禁止 Turbopack 临时端口，获准按相同命令重跑成功）；`npm test -- --run` passed（14 files / 258 tests）；`git diff --check` passed。按范围未运行 E2E。
+
+### Remaining risks / next boundary
+
+- Workflow preview registry 是进程内、单次使用状态；页面或应用 reload 后旧 preview 必须视为 stale，当前没有 durable preview/confirmation journal。
+- Writer 的 authoritative baseline read 是一致的单 readonly transaction，但 Phase 2B operation 保持既有 plan-only contract，因此 baseline transaction 完成到 Phase 2B readwrite transaction 开始之间仍存在很小的跨 tab/process TOCTOU 窗口。彻底关闭该窗口需要未来单独批准 expected-baseline-in-transaction 语义，不能在本阶段偷偷改变 Phase 2B operation。
+- Phase 2B 在 transaction commit 后若 preload/reload verification 因环境异常失败，仍没有 durable recovery journal；write-failed 不代表已 commit 的 transaction 可自动补偿。
+- 本阶段没有 UI wiring，因此 Share Snapshot 尚无产品入口。未来 UI 只能消费公开 preview/result，并在用户 explicit confirm 后调用 workflow；不得直接获取 plan 或调用 Phase 2B operation。
+- ImportWorkbench Merge provenance cleanup 与 `duplicateConversationWorkspace()` Source remap/share identity cleanup 继续延期，本轮没有修改相关代码。
+
+### Main Phase 2C-2 files
+
+- Core contract/models：`src/core/contracts/share-snapshot-canonical-writer.ts`、`src/core/models/share-snapshot-baseline.ts`、`src/core/models/share-snapshot-preview.ts`、`src/core/models/share-snapshot-workflow-result.ts`
+- Application：`src/core/services/chatgpt-share-snapshot-workflow.ts`
+- Infrastructure adapter：`src/infrastructure/storage/indexeddb/idb-share-snapshot-canonical-writer.ts`、`src/infrastructure/storage/indexeddb/index.ts`
+- Tests/docs：`tests/chatgpt-share-snapshot-workflow.test.ts`、`tests/share-snapshot-persistence.test.ts`、`HANDOFF.md`
+
+---
+
+## 2026-07-27 Phase 2C-1 pure service integration
+
+本轮继续复用未提交的 Phase 2A parser/comparator/import plan 与 Phase 2B canonical operation，只新增 Core pure service orchestration 和 integration tests。没有修改 React、ImportWorkbench、copy/merge、Search、delete/restore、Round derivation 或 IndexedDB schema，也没有 commit / push。
+
+### Pure service contract
+
+- 新增 `prepareChatGPTShareSnapshot()`，输入严格 share URL、raw Snapshot input、调用方提供的 `capturedAt`、`new | existing` target snapshot，以及可注入的 `createId(kind)`。Service 不读取 BrowserStorage/IndexedDB、不访问网络、不调用 canonical operation、不修改输入对象。
+- Service 依次组合 URL normalization → parser → metadata/SHA-256 → existing identity check → comparator → Phase 2A import plan → canonical plan materialization，返回 `new | append | same | blocked | invalid`。
+- `new/append` 才返回 `ChatGPTShareSnapshotCanonicalPlan`；`same/blocked/invalid` 不返回可执行 plan，也不会分配 canonical IDs。Core 现在拥有 canonical plan DTO，Phase 2B IndexedDB operation 只 import 该 type，依赖方向保持 Core → Infrastructure 单向。
+- ID 与时间不在 pure service 内隐式生成：调用方注入 `createId` 与 `capturedAt`，因此 tests/preview 可确定性重放。Materializer 会拒绝空 ID、同 store ID collision 和无效 Round suffix message index。
+
+### Canonical materialization semantics
+
+- Initial：创建一个 Source、完整 canonical Messages 与 derived Rounds；Message 保存同一 `sourceId` 和 parser absolute `sourceOrdinal`，Round.messageIds 只引用已物化 Message IDs。
+- Append：复用既有 Source ID，只写 suffix Messages/Rounds；Message `order` 从现有最大值继续，Round `order` 从现有最大值继续，sourceOrdinal 保留完整 Snapshot 中的 absolute ordinal。
+- Conversation title/note/summary/conclusion/pending/context、既有 Source name、旧 Messages/Rounds 及 Round enrichment 都不被改写；canonical plan 只更新 Conversation `updatedAt`、Source normalized transcript/metadata/`updatedAt` 和新增 suffix records。
+- Existing update 必须匹配 Source metadata 中的 `shareId + normalizedShareUrl`；source ownership、Message/Round ownership、旧 lineage 异常都会返回 `invalid`，不会形成 executable plan。
+- Source.content 继续使用 Phase 2A `renderChatGPTShareSnapshotTranscript()` 的规范化纯文本，不保存 HTML page chrome、script、DOM、cookie 或页面状态。
+
+### Integration tests and verification
+
+- 新增 `tests/chatgpt-share-snapshot-service.test.ts` 5 项：initial composition、safe append + local enrichment immutability、Same zero plan/zero ID、Diverged/Shorter blocked zero plan，以及 parser/identity invalid zero plan。
+- `tests/share-snapshot-persistence.test.ts` 新增两个跨层闭环：pure Service initial plan → Phase 2B operation → reload/verify，以及 pure Service append plan → Phase 2B operation → reload/verify。两条路径均验证 canonical counts、Source lineage、Round references 与 `pendingWriteCount === 0`。
+- Final gate：`npm run lint` passed；`npm run build` passed（19 routes）；`npm test -- --run` passed（13 files / 245 tests）；`git diff --check` passed。按范围未运行 E2E。
+
+### Remaining risks / next boundary
+
+- Phase 2C-1 只输出纯 preview/result/canonical plan；没有 UI confirm flow。下一阶段接 UI 时必须只在 explicit confirm 后把 `new/append` plan 交给 Phase 2B operation，不能让 parse/preview 自动写入。
+- Assistant-only suffix、Round extension 等规则继续完全沿用已批准的 Phase 2A import plan；本轮没有修改 Round derivation semantics。
+- ImportWorkbench Merge provenance cleanup 与 `duplicateConversationWorkspace()` Source remap/identity cleanup 仍按 Phase 2B 决策延期。
+- Post-commit preload/verification failure 仍没有 durable recovery journal；只有 IndexedDB transaction abort 具备完整原子回滚。
+
+### Main Phase 2C-1 files
+
+- Core：`src/core/services/chatgpt-share-snapshot-service.ts`
+- Infrastructure type integration：`src/infrastructure/storage/indexeddb/share-snapshot-operation.ts`
+- Tests：`tests/chatgpt-share-snapshot-service.test.ts`、`tests/share-snapshot-persistence.test.ts`
+- Docs：`HANDOFF.md`
+
+---
+
+## 2026-07-27 Phase 2B persistence foundation
+
+本轮从现有未提交 Phase 2A worktree 原地继续，没有 reset、discard、stash、commit 或 push。范围只包含 optional provenance persistence、IndexedDB put-only transaction、Share Snapshot canonical operation、reload verification 与 preservation tests；没有修改 UI、ImportWorkbench、Search、delete/restore、Conversation rendering、Round derivation、copy/merge 或 v1.6.1 batch-delete。
+
+### Optional-field compatibility
+
+- `Message.sourceId / sourceOrdinal` 与 `ImportedSource.shareSnapshot` 继续是 optional；没有提升 IndexedDB `DB_VERSION`、没有新增 store、没有 migration，也不回填旧记录。
+- BrowserStorage、IndexedDB Adapter、App Data schema v1 与 `ConversationVersion.snapshotData.messages` 都通过既有对象持久化保留 optional fields。缺失字段读取为 `undefined`，旧 Message / Source 不会被拒绝或改写。
+- App Data export/import 保持 `schemaVersion: 1`，Share Snapshot metadata、Message lineage 和 Version 内的 Message provenance 均可 round-trip。
+
+### Put-only transaction and canonical operation
+
+- `database.ts` 新增 `putStores(batch)`：从非空 batch 建立一个 `readwrite` transaction，只调用各 store 的 `put()`；不调用 `clear()`、`replaceStores()` 或 delete canonical operation。任一 request/transaction abort 时由 IndexedDB 原子语义回滚所有 store，未包含在 batch 的既有记录保持不变。
+- `share-snapshot-operation.ts` 执行已生成的 canonical plan：drain tracked writes（失败会向调用方抛出）→ 检查 pending count 为 0 → 读取 authoritative Conversation/Source/Message/Round state → 校验 ownership、ID collision、统一 sourceId、从 0 连续且唯一的 sourceOrdinal、metadata message count 与 Round.messageIds references → 单次 `putStores()` → clear caches → preload → 对四个完整 store 的预期记录逐 ID/内容核对 → 再验证 metadata、lineage、references 和 `pendingWriteCount === 0`。
+- Operation 是 put-only upsert：Conversation 与 Source metadata 可更新，Messages/Rounds 只执行 plan 中已物化的记录；不会 clear store、删除 Message、重建既有 ID 或调用 fire-and-forget adapters。
+
+### Preservation and Source.content decision
+
+- Integration fixture 从已有 2 Messages / 1 Round 开始，Round 带 `note="important note"`、`summary="summary"` 与 confirmed context；Conversation 带 Note、Overview fields 和完整 Context，旁侧存在 Knowledge 与 Task。
+- 追加后旧 Message IDs、旧 Round ID 及其 note/summary/context 完整不变，只新增 suffix Messages 与 suffix-derived Round；Conversation Context/Overview、Knowledge 和 Task 保持。
+- `ImportedSource.content` 仍保存由 Share parser 输出并规范化后的纯文本 transcript，因为当前 Search、Analyzer、Demo Provider、Conversation Detail 和 Dashboard 都读取该字段。不会保存输入 HTML、`script`、DOM、cookie、页面状态或内部 API payload；HTML 输入只经过 Phase 2A parser 提取 semantic Messages，再渲染为纯文本 Source。
+
+### Tests and verification
+
+- 新增 `tests/share-snapshot-persistence.test.ts` 10 项：Browser/IndexedDB legacy + optional-field round-trip、Conversation Version round-trip、App Data export/import round-trip、单 store put、多 store put、transaction abort atomic rollback、pending write drain、canonical success/reload/source lineage/reference verification、existing Round/enrichment preservation、invalid ordinal zero-write 与 Share operation abort rollback。
+- Phase 2A parser/comparator tests 与新增 persistence tests 定向运行：3 files / 25 tests passed。
+- Final gate：`npm run lint` passed；`npm run build` passed（19 routes）；`npm test -- --run` passed（12 files / 238 tests）；`git diff --check` passed。按本阶段要求未运行 E2E。
+
+### Remaining risks / deferred scope
+
+- `ImportWorkbench` 的 Merge 仍直接复制 Message，可能把原 Conversation 的 `sourceId/sourceOrdinal` 带入目标 Conversation；本轮按明确范围延期，没有修改 `import-workbench.tsx`。
+- `duplicateConversationWorkspace()` 仍先复制 Message、后复制 Source，并保留 Source `shareSnapshot` identity；副本可能继续携带原 Share identity 或无法正确 remap Message sourceId。本轮按明确范围延期，没有修改 copy/merge 代码。
+- IndexedDB transaction abort 可完整回滚；但 transaction 已完成后若 reload/preload 或 verification 因环境异常失败，本阶段没有 durable recovery journal 或 post-commit compensating rollback，调用方会收到失败且不能把状态描述为已验证成功。
+- Phase 2B 只提供 persistence foundation，尚未接 UI confirm flow；不代表 Share Snapshot UI 已可用。
+
+### Main files
+
+- Phase 2A entities/services：`message.ts`、`imported-source.ts`、四个 `chatgpt-share-snapshot-*.ts`
+- Phase 2B infrastructure：`indexeddb/database.ts`、`indexeddb/share-snapshot-operation.ts`、`indexeddb/index.ts`
+- Tests/docs：三个 Share Snapshot Vitest 文件、`HANDOFF.md`
+
+---
+
 ## 2026-07-25 design proposal
 
 本轮基于干净的 `feat/v1.8-share-snapshot` / `e55e677 release: PALOS v1.7 round-first context management` 只完成设计审查，没有写产品代码、修改 IndexedDB schema、创建 store、接入 Provider、commit 或 push。
