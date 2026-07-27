@@ -864,6 +864,103 @@ describe("Share Snapshot canonical operation", () => {
     });
   });
 
+  it("persists an assistant-only delta by extending the existing tail Round", async () => {
+    const storedMessages = [
+      message("message-a", "A", 0),
+      message("message-b", "B", 1),
+      message("message-c", "C", 2),
+    ];
+    const firstRound = round(
+      "round-existing",
+      ["message-a", "message-b"],
+      1,
+      {
+        question: "A",
+        answer: "B",
+      },
+    );
+    const tailRound = round("round-tail", ["message-c"], 2, {
+      title: "Preserved title",
+      question: "C",
+      answer: "",
+      note: "preserved note",
+      summary: "preserved summary",
+      context: {
+        inheritanceMode: "inherit",
+        snapshot: { currentState: "preserved context" },
+        confirmedAt: now,
+      },
+    });
+    const storedSource = source(3, {
+      content: "User:\nA\n\nAssistant:\nB\n\nUser:\nC",
+    });
+    await replaceStores({
+      conversations: [conversation()],
+      sources: [storedSource],
+      messages: storedMessages,
+      rounds: [firstRound, tailRound],
+    });
+    const preparation = await prepareChatGPTShareSnapshot({
+      shareUrl: "https://chatgpt.com/share/12345678-abcd",
+      snapshot: {
+        kind: "pasted-text",
+        content:
+          "User:\nA\n\nAssistant:\nB\n\nUser:\nC\n\nAssistant:\nD",
+      },
+      capturedAt: later,
+      target: {
+        kind: "existing",
+        conversation: conversation(),
+        source: storedSource,
+        messages: storedMessages,
+        rounds: [firstRound, tailRound],
+      },
+      createId(kind) {
+        return `delta-${kind}`;
+      },
+    });
+
+    expect(preparation).toMatchObject({
+      status: "append",
+      importPlan: { importedMessageCount: 1, importedRoundCount: 0 },
+      canonicalPlan: {
+        messages: [{ id: "delta-message", sourceOrdinal: 3 }],
+        rounds: [
+          {
+            id: tailRound.id,
+            answer: "D",
+            messageIds: ["message-c", "delta-message"],
+          },
+        ],
+      },
+    });
+    const result = await executeShareSnapshotCanonicalOperation(
+      preparation.canonicalPlan!,
+    );
+
+    expect(result.verification).toMatchObject({
+      messageCount: 4,
+      roundCount: 2,
+      sourceMessageCount: 4,
+      pendingWriteCount: 0,
+    });
+    expect(
+      (await readAll<Round>("rounds")).find(
+        ({ id }) => id === tailRound.id,
+      ),
+    ).toEqual({
+      ...tailRound,
+      answer: "D",
+      messageIds: ["message-c", "delta-message"],
+      updatedAt: later,
+    });
+    expect(
+      (await readAll<ImportedSource>("sources")).find(
+        ({ id }) => id === sourceId,
+      ),
+    ).toEqual(storedSource);
+  });
+
   it("drains pending writes, appends canonically, reloads, and preserves enrichment", async () => {
     const { oldMessages, oldRound, knowledge } = await seedShareWorkspace();
     let releasePendingWrite: (() => void) | undefined;

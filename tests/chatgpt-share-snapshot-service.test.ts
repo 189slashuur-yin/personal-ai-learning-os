@@ -123,6 +123,83 @@ async function existingTarget(
   };
 }
 
+async function unansweredTarget(): Promise<ChatGPTShareSnapshotExistingTarget> {
+  const drafts = [
+    { role: "user" as const, content: "Question", ordinal: 0 },
+    { role: "assistant" as const, content: "Answer", ordinal: 1 },
+    { role: "user" as const, content: "Follow-up", ordinal: 2 },
+  ];
+  const metadata: ChatGPTShareSnapshotMetadata = {
+    schemaVersion: 2,
+    resourceHash,
+    snapshotHash: await hashChatGPTShareSnapshot(drafts),
+    snapshotMessageCount: drafts.length,
+    capturedAt: previousAt,
+    parserVersion: "1.0.0",
+    inputKind: "pasted-text",
+    hashAlgorithm: "sha256-json-role-content-v1",
+    snapshotSequence: 1,
+  };
+  const messages: Message[] = drafts.map((draft) => ({
+    id: `old-message-${draft.ordinal}`,
+    conversationId,
+    role: draft.role,
+    content: draft.content,
+    order: draft.ordinal,
+    createdAt: previousAt,
+    updatedAt: previousAt,
+    sourceId,
+    sourceOrdinal: draft.ordinal,
+  }));
+  return {
+    kind: "existing",
+    conversation: conversation(),
+    source: {
+      id: sourceId,
+      conversationId,
+      kind: "text",
+      name: "Preserved source name",
+      content:
+        "User:\nQuestion\n\nAssistant:\nAnswer\n\nUser:\nFollow-up",
+      importedAt: previousAt,
+      updatedAt: previousAt,
+      shareSnapshot: metadata,
+    },
+    messages,
+    rounds: [
+      {
+        id: "old-round",
+        conversationId,
+        order: 1,
+        title: "Old round",
+        question: "Question",
+        answer: "Answer",
+        messageIds: ["old-message-0", "old-message-1"],
+        createdAt: previousAt,
+        updatedAt: previousAt,
+      },
+      {
+        id: "unanswered-round",
+        conversationId,
+        order: 2,
+        title: "Preserved follow-up title",
+        question: "Follow-up",
+        answer: "",
+        messageIds: ["old-message-2"],
+        note: "important local note",
+        summary: "important local summary",
+        context: {
+          inheritanceMode: "inherit",
+          snapshot: { currentState: "important local context" },
+          confirmedAt: previousAt,
+        },
+        createdAt: previousAt,
+        updatedAt: previousAt,
+      },
+    ],
+  };
+}
+
 describe("ChatGPT Share Snapshot pure service", () => {
   it("composes URL, parser, metadata, import plan, and initial canonical records", async () => {
     const ids = idFactory();
@@ -270,6 +347,131 @@ describe("ChatGPT Share Snapshot pure service", () => {
     );
     expect(ids.calls).toEqual(["source", "message", "message", "round"]);
     expect(JSON.stringify(target)).toBe(before);
+  });
+
+  it("projects an assistant-only append into the existing unanswered tail Round", async () => {
+    const ids = idFactory();
+    const target = await unansweredTarget();
+    const before = JSON.stringify(target);
+    const preparation = await prepareChatGPTShareSnapshot({
+      shareUrl,
+      snapshot: {
+        kind: "pasted-text",
+        content:
+          "User:\nQuestion\n\nAssistant:\nAnswer\n\nUser:\nFollow-up\n\nAssistant:\nDeferred answer",
+      },
+      capturedAt,
+      target,
+      createId: ids.createId,
+    });
+
+    expect(preparation).toMatchObject({
+      status: "append",
+      deltaProjection: {
+        status: "projected",
+        roundToExtend: {
+          id: "unanswered-round",
+          answer: "Deferred answer",
+          messageIds: ["old-message-2", "message-1"],
+          note: "important local note",
+          summary: "important local summary",
+          context: target.rounds[1].context,
+        },
+        roundsToCreate: [],
+      },
+      importPlan: {
+        kind: "append",
+        importedMessageCount: 1,
+        importedRoundCount: 0,
+        roundsToWrite: [],
+      },
+      canonicalPlan: {
+        messages: [
+          {
+            id: "message-1",
+            sourceId: "source-1",
+            sourceOrdinal: 3,
+          },
+        ],
+        rounds: [
+          {
+            id: "unanswered-round",
+            answer: "Deferred answer",
+            messageIds: ["old-message-2", "message-1"],
+          },
+        ],
+      },
+    });
+    expect(ids.calls).toEqual(["source", "message"]);
+    expect(JSON.stringify(target)).toBe(before);
+  });
+
+  it("extends the unanswered tail before deriving later User messages", async () => {
+    const ids = idFactory();
+    const target = await unansweredTarget();
+    const preparation = await prepareChatGPTShareSnapshot({
+      shareUrl,
+      snapshot: {
+        kind: "pasted-text",
+        content:
+          "User:\nQuestion\n\nAssistant:\nAnswer\n\nUser:\nFollow-up\n\nAssistant:\nDeferred answer\n\nUser:\nNew question\n\nAssistant:\nNew answer",
+      },
+      capturedAt,
+      target,
+      createId: ids.createId,
+    });
+
+    expect(preparation.status).toBe("append");
+    expect(preparation.canonicalPlan?.rounds).toEqual([
+      expect.objectContaining({
+        id: "unanswered-round",
+        messageIds: ["old-message-2", "message-1"],
+      }),
+      expect.objectContaining({
+        id: "round-1",
+        order: 3,
+        question: "New question",
+        answer: "New answer",
+        messageIds: ["message-2", "message-3"],
+      }),
+    ]);
+    expect(ids.calls).toEqual([
+      "source",
+      "message",
+      "message",
+      "message",
+      "round",
+    ]);
+  });
+
+  it("blocks an assistant-only append when the canonical tail is answered", async () => {
+    const ids = idFactory();
+    const preparation = await prepareChatGPTShareSnapshot({
+      shareUrl,
+      snapshot: {
+        kind: "pasted-text",
+        content:
+          "User:\nQuestion\n\nAssistant:\nAnswer\n\nAssistant:\nAdditional answer",
+      },
+      capturedAt,
+      target: await existingTarget(),
+      createId: ids.createId,
+    });
+
+    expect(preparation).toMatchObject({
+      status: "blocked",
+      deltaProjection: {
+        status: "blocked",
+        reason: "no-unanswered-tail-round",
+      },
+      importPlan: {
+        kind: "blocked",
+        importedMessageCount: 0,
+        importedRoundCount: 0,
+        deltaProjectionBlockedReason: "no-unanswered-tail-round",
+      },
+    });
+    expect(preparation.canonicalPlan).toBeUndefined();
   });
 
   it("returns Same with zero canonical writes and zero ID allocation", async () => {

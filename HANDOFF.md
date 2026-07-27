@@ -1,5 +1,44 @@
 # PALOS v1.8 — ChatGPT Share Snapshot Design Handoff
 
+## 2026-07-27 Phase 2C-3B assistant-only delta projector
+
+本轮从 clean checkpoint `ad36c0a feat: implement v1.8 immutable share snapshot core` 继续，只实现 immutable Share Snapshot append 的 Round delta projection。没有修改 UI、Copy/Merge/Restore、IndexedDB schema/version/store、`ShareResourceBinding`、全局 `deriveRoundDrafts()` 语义或 Phase 2C-3A Snapshot History Core；没有 commit / push。
+
+### Pure projection contract
+
+- 新增纯服务 `projectChatGPTShareSnapshotDelta()`，输入完整 canonical Messages、现有 Rounds、已物化 append suffix Messages 与 comparator baseline，返回 `projected` 或明确 blocked reason。
+- blocked reasons 冻结为 `no-unanswered-tail-round`、`tail-round-mismatch`、`message-order-mismatch`、`ownership-mismatch` 与 `projection-divergence`。校验不依赖 `updatedAt` 排序。
+- Assistant 开头的 suffix 只有在 target Round 存在、是 canonical conversation tail、answer 未完成、message membership 与现有 baseline 一致，且新 Message 的 `order/sourceOrdinal` 精确连续时才能扩展。
+- 扩展保留 Round ID、title、question、note、summary、context、createdAt；只更新 answer、messageIds 与 updatedAt。Assistant-only suffix 不调用通用 derivation 创建 orphan Round。
+- 对 `Assistant → User → Assistant`，只把首段 Assistant 投影到 unanswered tail；从第一个 User 起的剩余 suffix 才调用既有 `deriveRoundDrafts()`，且 draft message indexes 继续指向完整 suffix。
+- User 开头的正常 append 继续复用既有 derivation。全局 `deriveRoundDrafts()` 本身未修改。
+
+### Service and persistence integration
+
+- `prepareChatGPTShareSnapshot()` 在 append canonical materialization 内调用 projector。成功计划可同时包含同 ID 的 tail Round 更新与真正的新 Rounds；preview/import plan 的 `importedRoundCount` 只统计新 Round，不把被扩展的 Round 计为新增。
+- projection blocked 返回 `status=blocked`、详细 `deltaProjectionBlockedReason`，不生成 canonical plan，因此不会进入 writer。
+- canonical plan、writer contract 与 IndexedDB operation 均未扩展。既有 put-only operation 已支持同 owner Round upsert；集成测试验证 transaction、reload verification、旧 Snapshot Source immutability 以及 Round enrichment preservation。
+
+### Tests and verification
+
+- 新增 projector 纯单元测试，覆盖 valid assistant-only extension、无 tail、answered tail、ownership、ordinal、Round ID/enrichment preservation、later User derivation、无 orphan Round、tail membership 与 baseline divergence。
+- Share Snapshot service tests 覆盖 assistant-only canonical plan、混合 suffix 以及 answered tail zero-plan block；IndexedDB integration 覆盖同 ID tail Round 的 durable update/reload。
+- Final gate：`npm run lint` passed；`npm run build` passed（19 routes）；`npm test -- --run` passed（16 files / 277 tests）；`git diff --check` passed。按本阶段要求未运行 E2E。
+
+### Remaining risks / next boundary
+
+- Projector 依赖 Phase 2C-3A comparator 已验证完整 canonical Message stream；Round tail 只允许 exact membership/question projection，任何人工或旧数据偏差都会 fail closed，不会猜测修复。
+- Phase 2C-3B 只负责 Round projection，不改变 Copy/Merge/Restore provenance、UI capture/confirm 入口、legacy migration execution、cross-tab TOCTOU 或 post-commit recovery journal。
+- 当前 canonical writer 信任 Core 生成的 Round update shape；projector tests 已冻结“只改 answer/messageIds/updatedAt”，但 Infrastructure 尚未增加独立的 field-level Round mutation policy。
+
+### Main Phase 2C-3B files
+
+- Core：`src/core/services/chatgpt-share-snapshot-delta-projector.ts`、`chatgpt-share-snapshot-service.ts`、`chatgpt-share-snapshot-import.ts`
+- Tests：`tests/chatgpt-share-snapshot-delta-projector.test.ts`、`chatgpt-share-snapshot-service.test.ts`、`share-snapshot-persistence.test.ts`
+- Docs：`HANDOFF.md`
+
+---
+
 ## 2026-07-27 Phase 2C-2 headless application workflow
 
 本轮在未提交的 Phase 2A / 2B / 2C-1 worktree 上原地继续，新增无 UI 的 application boundary：

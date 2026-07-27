@@ -18,6 +18,7 @@ import {
   type ChatGPTShareSnapshotMessageDraft,
   type ChatGPTShareSnapshotParseResult,
 } from "@/core/services/chatgpt-share-snapshot-parser";
+import type { ChatGPTShareSnapshotDeltaBlockedReason } from "@/core/services/chatgpt-share-snapshot-delta-projector";
 import { deriveRoundDrafts } from "@/core/services/import-parser-pipeline";
 
 export type ChatGPTShareSnapshotPlanKind =
@@ -34,6 +35,7 @@ export type ChatGPTShareSnapshotImportPlan = {
   importedMessageCount: number;
   importedRoundCount: number;
   blockedReason?: "diverged" | "shorter" | "projection-diverged";
+  deltaProjectionBlockedReason?: ChatGPTShareSnapshotDeltaBlockedReason;
 };
 
 function cloneMessages(

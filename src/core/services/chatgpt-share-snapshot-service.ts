@@ -11,6 +11,10 @@ import {
   type ChatGPTShareSnapshotComparison,
 } from "@/core/services/chatgpt-share-snapshot-comparator";
 import {
+  projectChatGPTShareSnapshotDelta,
+  type ChatGPTShareSnapshotDeltaProjection,
+} from "@/core/services/chatgpt-share-snapshot-delta-projector";
+import {
   buildChatGPTShareSnapshotMetadata,
   buildExistingChatGPTShareSnapshotImportPlan,
   buildNewChatGPTShareSnapshotImportPlan,
@@ -74,6 +78,7 @@ export type ChatGPTShareSnapshotPreparation = {
   parsed: ChatGPTShareSnapshotParseResult;
   metadata?: ChatGPTShareSnapshotMetadata;
   comparison?: ChatGPTShareSnapshotComparison;
+  deltaProjection?: ChatGPTShareSnapshotDeltaProjection;
   importPlan?: ChatGPTShareSnapshotImportPlan;
   canonicalPlan?: ChatGPTShareSnapshotCanonicalPlan;
   warnings: string[];
@@ -187,10 +192,31 @@ function materializeCanonicalPlan(input: {
   parsed: ChatGPTShareSnapshotParseResult;
   metadata: ChatGPTShareSnapshotMetadata;
   importPlan: ChatGPTShareSnapshotImportPlan;
+  comparison?: ChatGPTShareSnapshotComparison;
   capturedAt: string;
   createId: (kind: ChatGPTShareSnapshotIdKind) => string;
-}): ChatGPTShareSnapshotCanonicalPlan {
-  const { target, parsed, metadata, importPlan, capturedAt, createId } = input;
+}):
+  | Readonly<{
+      status: "materialized";
+      plan: ChatGPTShareSnapshotCanonicalPlan;
+      deltaProjection?: ChatGPTShareSnapshotDeltaProjection;
+    }>
+  | Readonly<{
+      status: "blocked";
+      deltaProjection: Extract<
+        ChatGPTShareSnapshotDeltaProjection,
+        { status: "blocked" }
+      >;
+    }> {
+  const {
+    target,
+    parsed,
+    metadata,
+    importPlan,
+    comparison,
+    capturedAt,
+    createId,
+  } = input;
   if (importPlan.kind !== "new" && importPlan.kind !== "append") {
     throw new Error(
       `Share Snapshot ${importPlan.kind} plan cannot be materialized.`,
@@ -226,7 +252,31 @@ function materializeCanonicalPlan(input: {
     sourceId,
     sourceOrdinal: draft.ordinal,
   }));
-  const rounds: Round[] = importPlan.roundsToWrite.map((draft) => ({
+  let deltaProjection: ChatGPTShareSnapshotDeltaProjection | undefined;
+  let roundToExtend: Readonly<Round> | null = null;
+  let roundDrafts = importPlan.roundsToWrite;
+  if (target.kind === "existing" && importPlan.kind === "append") {
+    if (!comparison) {
+      throw new Error(
+        "Share Snapshot append materialization requires a comparison baseline.",
+      );
+    }
+    deltaProjection = projectChatGPTShareSnapshotDelta({
+      existingCanonicalMessages: existingMessages,
+      existingRounds,
+      appendSuffixMessages: messages,
+      comparisonBaseline: comparison,
+    });
+    if (deltaProjection.status === "blocked") {
+      return { status: "blocked", deltaProjection };
+    }
+    roundToExtend = deltaProjection.roundToExtend;
+    roundDrafts = deltaProjection.roundsToCreate.map((round) => ({
+      ...round,
+      messageIndexes: [...round.messageIndexes],
+    }));
+  }
+  const roundsToCreate: Round[] = roundDrafts.map((draft) => ({
     id: allocateId("round", createId, roundIds),
     conversationId,
     order: maxRoundOrder + draft.order,
@@ -245,6 +295,10 @@ function materializeCanonicalPlan(input: {
     createdAt: capturedAt,
     updatedAt: capturedAt,
   }));
+  const rounds: Round[] = [
+    ...(roundToExtend ? [{ ...roundToExtend }] : []),
+    ...roundsToCreate,
+  ];
   const source: ImportedSource = {
     id: sourceId,
     conversationId,
@@ -257,10 +311,14 @@ function materializeCanonicalPlan(input: {
   };
 
   return {
-    conversation: cloneConversation(target.conversation, capturedAt),
-    source,
-    messages,
-    rounds,
+    status: "materialized",
+    plan: {
+      conversation: cloneConversation(target.conversation, capturedAt),
+      source,
+      messages,
+      rounds,
+    },
+    ...(deltaProjection ? { deltaProjection } : {}),
   };
 }
 
@@ -297,20 +355,26 @@ export async function prepareChatGPTShareSnapshot(
   if (input.target.kind === "new") {
     const importPlan = buildNewChatGPTShareSnapshotImportPlan(parsed);
     try {
+      const materialization = materializeCanonicalPlan({
+        target: input.target,
+        parsed,
+        metadata,
+        importPlan,
+        capturedAt: input.capturedAt,
+        createId: input.createId,
+      });
+      if (materialization.status === "blocked") {
+        throw new Error(
+          "Initial Share Snapshot materialization cannot be delta-blocked.",
+        );
+      }
       return {
         status: "new",
         identity,
         parsed,
         metadata,
         importPlan,
-        canonicalPlan: materializeCanonicalPlan({
-          target: input.target,
-          parsed,
-          metadata,
-          importPlan,
-          capturedAt: input.capturedAt,
-          createId: input.createId,
-        }),
+        canonicalPlan: materialization.plan,
         warnings: [...parsed.warnings],
         errors: [],
       };
@@ -390,21 +454,61 @@ export async function prepareChatGPTShareSnapshot(
   }
 
   try {
+    const materialization = materializeCanonicalPlan({
+      target: input.target,
+      parsed,
+      metadata,
+      importPlan,
+      comparison,
+      capturedAt: input.capturedAt,
+      createId: input.createId,
+    });
+    if (materialization.status === "blocked") {
+      return {
+        status: "blocked",
+        identity,
+        parsed,
+        metadata,
+        comparison,
+        deltaProjection: materialization.deltaProjection,
+        importPlan: {
+          kind: "blocked",
+          comparisonStatus: "append",
+          messagesToWrite: [],
+          roundsToWrite: [],
+          importedMessageCount: 0,
+          importedRoundCount: 0,
+          deltaProjectionBlockedReason:
+            materialization.deltaProjection.reason,
+        },
+        warnings: [...parsed.warnings],
+        errors: [
+          `Share Snapshot delta projection is blocked: ${materialization.deltaProjection.reason}.`,
+        ],
+      };
+    }
+    const projectedImportPlan =
+      materialization.deltaProjection?.status === "projected"
+        ? {
+            ...importPlan,
+            roundsToWrite:
+              materialization.deltaProjection.roundsToCreate.map((round) => ({
+                ...round,
+                messageIndexes: [...round.messageIndexes],
+              })),
+            importedRoundCount:
+              materialization.deltaProjection.roundsToCreate.length,
+          }
+        : importPlan;
     return {
       status: "append",
       identity,
       parsed,
       metadata,
       comparison,
-      importPlan,
-      canonicalPlan: materializeCanonicalPlan({
-        target: input.target,
-        parsed,
-        metadata,
-        importPlan,
-        capturedAt: input.capturedAt,
-        createId: input.createId,
-      }),
+      deltaProjection: materialization.deltaProjection,
+      importPlan: projectedImportPlan,
+      canonicalPlan: materialization.plan,
       warnings: [...parsed.warnings],
       errors: [],
     };
