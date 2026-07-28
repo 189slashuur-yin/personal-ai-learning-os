@@ -1,5 +1,26 @@
 # PALOS v1.8 — ChatGPT Conversation Snapshot Handoff
 
+## 2026-07-29 v1.8 release documentation closure
+
+PALOS v1.8 immutable ChatGPT Conversation Snapshot 已达到 **release checkpoint complete**。当前 release candidate 基线为 `d8a8544 release: finalize v1.8 share snapshot checkpoint` / `v1.8.0-rc1`；本节只对齐最终文档状态，没有修改产品代码、Snapshot schema/model、workflow、canonical writer、storage、IndexedDB schema/store 或 import 行为，也没有 commit 或 push。
+
+### Final checkpoint
+
+- immutable Snapshot history、resourceHash identity、versioned saved HTML / rendered transcript parser、comparator、assistant-tail delta projector、canonical writer、reload verification、legacy migration 与 Phase 2E ImportWorkbench workflow 已落地。
+- Snapshot-owned Conversation 的通用 Source overwrite、Message edit/replace、普通 Existing import、ChatGPT Export append、Merge、Duplicate 与 Conversation Version Restore 已由 Core mutation guard 阻止；canonical Snapshot writer 是唯一 transcript mutation authority。
+- 普通 Conversation Restore 的既有 Message identity regeneration 语义保持不变；`Round.messageIds` 会自动重映射到当前 restored Messages，Round 内容/顺序/enrichment 保持，连续 Restore 与 reload 后引用一致。
+- 最终 browser smoke 已覆盖普通 Conversation 两次 Restore + reload、Snapshot-owned mutation guard、Snapshot New import 与 Existing append，未发现 release blocker。
+- Final automated gate：`npm run lint` passed；`npm run build` passed（19 routes）；`npm test -- --run` passed（20 files / 327 tests）；`npm run test:e2e` passed（Playwright 3/3）；`git diff --check` passed。
+
+### Release boundary
+
+- v1.8 不 fetch chatgpt.com，不读取 cookie/session/internal API，不接入真实云 Provider，不自动生成 Proposal/Knowledge。
+- v1.8 不新增 canonical store，不修改 IndexedDB schema、Snapshot metadata schema 或 Conversation aggregate boundary。
+- Snapshot history timeline、resolver-confirmed head read UX、Search integration、Copy/Merge/Restore lifecycle semantics 扩展与 conflict replace/rebase 继续延期，必须在后续版本重新确认范围。
+- 当前代码与 QA 已达到 release checkpoint；下一步只需产品负责人确认最终 `v1.8.0` release。
+
+---
+
 ## 2026-07-29 Snapshot import E2E selector hardening
 
 - 修复 `tests/e2e/share-snapshot-import.spec.ts` 对旧英文按钮文案 `Uploaded saved HTML` 的依赖。

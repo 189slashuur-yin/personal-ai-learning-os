@@ -4,19 +4,21 @@
 
 ## Current release
 
-- Current Version：v1.8 work in progress
-- Phase：Immutable ChatGPT Conversation Snapshot
-- Current Focus：Phase 2E user workflow integration
-- Automated Status：18 Vitest files / 302 tests；Playwright 2/2；lint/build/diff-check passed
-- Next Recommended Phase：Phase 2E checkpoint 已提交；产品验收后再进入已延期 lifecycle hardening；当前不 push
+- Current Version：v1.8 release checkpoint complete（`v1.8.0-rc1`）
+- Phase：Immutable ChatGPT Conversation Snapshot · Phase 2E 与 release hardening 已完成
+- Current Focus：release documentation closure 与最终产品验收
+- Automated Status：Vitest 20 files / 327 tests；Playwright 3/3；lint/build/diff-check passed
+- Next Recommended Phase：确认最终 `v1.8.0` release；已延期 lifecycle、read UX 与 Search hardening 需重新确认范围
 
-## v1.8 — Immutable ChatGPT Conversation Snapshot（local capture integrated）
+## v1.8 — Immutable ChatGPT Conversation Snapshot（release checkpoint complete）
 
 - ImportedSource 承载 immutable Snapshot history；resourceHash 作为持久 identity，raw share URL/share token 不进入 canonical data。
 - assistant-only delta projector、hardened canonical writer、reload verification 与 legacy metadata pure migration helper 已完成。
 - ImportWorkbench 第四个 input mode 为 Conversation Snapshot；content 必须来自 uploaded saved HTML / pasted full rendered transcript，来源 URL 可选。New 可生成 local identity，Existing 可复用所选 Conversation history；不 fetch chatgpt.com，不访问 cookie/session。
 - UI 已连接 parser → comparator → preview → explicit confirm → canonical writer；same/blocked 零写入，append 显示 Message delta、Round extend/create impact 与 preserved fields。
-- 不新增 ShareResourceBinding/store，不修改 IndexedDB schema、Copy/Merge/Restore、Search 或 rendering virtualization。
+- Snapshot-owned Conversation 的 Source overwrite、Message edit/replace、普通 Existing import、ChatGPT Export append、Merge、Duplicate 与 Version Restore 均由 immutable mutation guard 阻止；canonical Snapshot writer 保持唯一 transcript mutation authority。
+- 普通 Conversation Version Restore 继续生成新 Message IDs，同时重映射 `Round.messageIds`；连续 Restore 与 reload 后引用保持有效。
+- 不新增 ShareResourceBinding/store，不修改 IndexedDB schema、Snapshot model、Search 或 rendering virtualization。
 
 ## v1.7 — Personal AI Context Management（final QA passed, release commit pending）
 

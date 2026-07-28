@@ -1,12 +1,13 @@
-# PALOS v1.8 — ChatGPT Share Snapshot Import Design
+# PALOS v1.8 — ChatGPT Conversation Snapshot Final Design Record
 
 ## 文档状态
 
-- 状态：Design Proposal，仅设计，不授权实现
-- 日期：2026-07-25
-- 基线：PALOS v1.7 release，分支 `feat/v1.8-share-snapshot`
-- 目标：不等待完整 ChatGPT Data Export，也能把用户主动提供的分享内容保存为本地 Conversation Snapshot，并在后续捕获中只把安全确认的增量写入 PALOS
+- 状态：Final Design Record；v1.8 release checkpoint complete
+- 初稿日期：2026-07-25；最终记录：2026-07-29
+- 实现基线：`feat/v1.8-share-snapshot` / `d8a8544` / `v1.8.0-rc1`
+- 目标：不等待完整 ChatGPT Data Export，也能把用户主动提供的本地 saved HTML 或完整 rendered transcript 保存为 Conversation Snapshot，并在后续捕获中只把安全确认的增量写入 PALOS
 - 非目标：接入 OpenAI API、读取 ChatGPT 账号、模拟登录、自动抓取分享页、绕过 workspace 权限、自动生成 Knowledge
+- 说明：本文早期 proposal 中只接受纯文本的假设，已由最终本地 capture 范围取代；最终实现同时支持用户主动上传 saved HTML 与粘贴完整 rendered transcript。
 
 ## 1. 结论摘要
 
@@ -21,11 +22,11 @@
 - `ConversationVersion` 是 PALOS 本地恢复点，只包含 Conversation + Messages，不包含 Source / Round，不应复用为远端分享快照历史。
 - Knowledge 的独立生命周期和人工确认边界是合适的；任何分享快照更新都不得自动改写 Knowledge。
 
-v1.8 MVP 建议：
+v1.8 最终实现：
 
-1. 分享 URL 仅用于用户主动打开、来源标识和匹配；PALOS 不请求该 URL。
-2. 用户在浏览器中打开分享页，手动复制可见文本并粘贴到 PALOS。
-3. PALOS 使用纯函数、版本化 `ChatGPT Share Snapshot Parser` 生成候选快照。
+1. Conversation content 必填，来自用户主动上传的本地 saved HTML 或粘贴的完整 rendered transcript。
+2. ChatGPT share / conversation URL 是可选来源 identity；PALOS 只规范化并计算 SHA-256 resourceHash，不请求该 URL。
+3. PALOS 使用纯函数、版本化 `ChatGPT Conversation Snapshot Parser` 从受支持的 semantic transcript 结构生成候选快照。
 4. 每次已确认的不同内容保存为一条不可变 Snapshot Source；不新增 IndexedDB store。
 5. 先比较完整 transcript hash，再做有序 Message diff。
 6. 只有“旧消息序列是新消息序列的精确前缀”时才自动形成 append plan；其它变化进入 conflict preview，不写现有 Conversation。
@@ -292,15 +293,15 @@ Parser 不得：
 
 ### 6.1 Capture Artifact
 
-MVP 输入为：
+最终 MVP 输入为：
 
-- `channel = clipboard`
 - `producer = ChatGPT`
-- `format = provider-transcript`
-- optional validated share URL 作为 provenance
-- 用户手动粘贴的纯文本
+- `inputKind = saved-html | pasted-text`
+- 必需的本地 Conversation content：用户上传的 saved HTML，或粘贴的完整 rendered transcript
+- optional validated `https://chatgpt.com/share/<id>` / `https://chatgpt.com/c/<id>` 作为 transient source identity
+- New 无 URL时生成 namespaced PALOS local identity；Existing 无 URL时解析所选 Conversation 的唯一有效 Snapshot history
 
-不接受 HTML 文件、HAR、cookies、session token 或从 DevTools 复制的私有 API response。
+saved HTML parser 只读取本地文件中的受支持 semantic User / Assistant message containers，并跳过 script、style、template、nav、aside、button、SVG 与 page chrome。canonical Source 只保存规范化 transcript，不保存整页 HTML。仍不接受 HAR、cookies、session token、远端抓取结果或从 DevTools 复制的私有 API response。
 
 ### 6.2 Preview 必须展示
 
@@ -451,72 +452,60 @@ Expected post-write counts and references
 
 在现有三个输入来源旁增加第四个入口：
 
-> ChatGPT 分享快照
+> ChatGPT Conversation Snapshot
 >
-> 打开用户主动提供的分享链接，手动粘贴可见对话；PALOS 不登录、不抓取网页。
+> 上传本地 saved HTML 或粘贴完整 rendered transcript；来源链接可选。PALOS 不登录、不抓取网页。
 
-Share Snapshot 的目标由 `shareUrlHash` 决定，不强迫用户先理解 New / Existing：
+Conversation Snapshot 继续复用 ImportWorkbench 的 New / Existing target 轴；resourceHash history 是最终 owner authority：
 
-- 未匹配：显示“将创建新的 Conversation”并选择 Workspace。
-- 已匹配：显示“将更新现有 Conversation「…」”。
-- 同一 URL 已归属其它 Conversation：阻止静默追加，导航到已关联项。
-- 用户要把候选放进任意其它 Conversation 时，使用普通 Paste Text；不污染 share identity。
+- New：标题与 Workspace 必填；无 URL 时生成稳定 local identity。
+- Existing：必须选择目标 Conversation；无 URL 时使用其唯一有效 Snapshot history。
+- resolved owner 与用户选择不一致时 preview blocked，不静默重定向写入。
+- Snapshot-owned transcript 只能由 canonical Snapshot writer 更新，普通 Paste/TXT/Export/Merge/Edit/Restore 不得绕过。
 
 ### 9.2 引导步骤
 
-1. **提供链接**
-   - 只接受 `https://chatgpt.com/share/<id>`。
-   - 显示“链接是持链接可见信息，请只导入你有权保存的内容”。
-   - 复选项：“在当前浏览器保存完整链接，便于以后打开”；默认关闭。
+1. **提供 Conversation content**
+   - 二选一上传本地 saved HTML，或粘贴完整 rendered transcript。
+   - parser 只接受受支持的 User / Assistant 语义结构；不完整或未知布局 fail closed。
 
-2. **打开并复制**
-   - “在 ChatGPT 打开”使用普通新标签页导航。
-   - 说明 PALOS 不读取该标签页、不读取登录状态。
-   - 用户手动复制当前可见 transcript。
+2. **可选来源 identity**
+   - 接受严格的 `/share/<id>` 或 `/c/<id>` URL。
+   - URL 只存在于 capture state / workflow request，不进入 canonical data、diagnostics 或网络请求。
 
-3. **粘贴 Snapshot**
-   - 文本框、本地字符数和 Parser version。
-   - 保留 code block。
-   - unknown 比例过高时阻止确认或要求 Manual Round Builder。
+3. **选择 target**
+   - New 设置标题与 Workspace；Existing 选择一个 Conversation。
+   - content、identity、target、title、Workspace 或 input kind 改变时旧 preview 立即失效。
 
-4. **变更预览**
+4. **Comparator preview**
    - Initial：将创建多少 Messages / Rounds。
    - No change：不显示确认写入。
    - Safe append：新增多少 Messages；扩展最后一轮还是创建新轮次。
    - Conflict：显示分歧，不提供覆盖按钮。
 
-5. **确认**
+5. **显式确认**
    - 按钮文案明确为“确认保存 Snapshot”或“确认追加 N 条 Message”。
    - 文案列出 local enrichment 不会变化。
 
-6. **结果**
+6. **写入与结果**
    - Snapshot 序号和时间；
    - appended / skipped / unsupported；
-   - durable verification；
+   - canonical writer 单事务写入与 reload verification；
    - 打开 Conversation；
    - 可选“分析新增 Messages”，但不自动触发。
 
 ### 9.3 Conversation Detail 补充
 
-在来源区域增加：
-
-- `ChatGPT 分享快照` badge；
-- “最后捕获于”，不写“同步于”；
-- Snapshot timeline：时间、Message 数、delta、parser version；
-- “更新 Snapshot”返回 Import 引导；
-- masked URL，以及 retained URL 存在时的“打开链接”；
-- 原文 / 本地整理的视觉分区。
-
-Snapshot history 默认折叠，Search 默认不重复索引每个历史 transcript。
+Conversation Detail 显示 immutable ownership 状态，并提供返回 Conversation Snapshot Import 的入口。Snapshot-owned Source 为只读，Message Edit、从 Source 重新生成 Messages 与 Conversation Version Restore 均禁用；Core mutation guard 同时保护绕过 UI 的普通写入路径。Snapshot history timeline、resolver-confirmed head read UX 与专用 Search integration 延后处理，不属于 v1.8 release checkpoint。
 
 ## 10. 权限、安全和隐私边界
 
 ### 10.1 MVP 允许
 
-- 用户主动粘贴严格格式的 ChatGPT share URL；
-- PALOS 校验、mask 和本地 hash URL；
-- 用户主动在普通浏览器标签页打开链接；
-- 用户手动复制并粘贴可见文本；
+- 用户主动上传本地保存的 ChatGPT HTML；
+- 用户手动复制并粘贴完整 rendered transcript；
+- 用户可选提供严格格式的 ChatGPT share / conversation URL；
+- PALOS 校验并在本地 hash URL，不持久化 raw URL；
 - PALOS 在本地解析、比较和保存；
 - 用户明确确认每次初始导入或增量更新。
 
@@ -547,15 +536,14 @@ Snapshot history 默认折叠，Search 默认不重复索引每个历史 transcr
 
 ### 11.1 In scope
 
-- Share URL strict validation、mask、hash 和 optional local retention；
-- 普通浏览器打开链接；
-- 手动纯文本 Snapshot capture；
-- 专用 pure/versioned parser、diagnostics、preview；
+- optional ChatGPT share / conversation URL strict validation 与 SHA-256 identity hash；raw URL 不进入 canonical data；
+- 用户主动上传的本地 saved HTML，或粘贴的完整 rendered transcript；
+- saved HTML / rendered transcript 专用 pure/versioned parser、diagnostics、preview；
 - Snapshot Source optional metadata，不新增 store；
 - initial / no-change / exact-prefix safe-append / conflict 四态 comparator；
 - SHA-256 transcript/message hash；
 - safe append 的 Message / Round 投影，包括最后 unanswered Round extension；
-- Snapshot timeline 和 Conversation 来源 badge；
+- Conversation Detail immutable ownership 状态、只读 mutation boundary 与返回 Import 的更新入口；
 - local enrichment 不覆盖、不自动 Analyzer / Knowledge；
 - staged write、rollback、reload verification；
 - v1.7 数据和 ChatGPT Export 路径兼容；
@@ -566,7 +554,7 @@ Snapshot history 默认折叠，Search 默认不重复索引每个历史 transcr
 - 自动 URL fetch / re-fetch、conditional GET、定时 polling；
 - ChatGPT 登录、OAuth、cookies、browser session；
 - Enterprise / Edu workspace-gated link；
-- HTML / DOM / internal payload parser；
+- 自动抓取的 live HTML / DOM、任意网页 HTML 或 ChatGPT internal payload parser；本地 saved HTML 的受支持 semantic transcript parser 属于 in scope；
 - attachments、images、voice、canvas、tool calls；
 - 中间编辑、删除、重排的自动 reconciliation；
 - 多设备 sync、server storage、cloud crawler；

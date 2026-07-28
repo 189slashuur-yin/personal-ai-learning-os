@@ -2,14 +2,15 @@
 
 ## Current release context
 
-- Current Version：v1.8 work in progress
-- Current Focus：Conversation Snapshot local capture UX correction
-- Next Recommended Phase：保留当前 commit 历史，产品验收后再进入已延期的 lifecycle hardening；当前不 push
+- Current Version：v1.8 release checkpoint complete（`v1.8.0-rc1`）
+- Current Focus：immutable Conversation Snapshot architecture 已落地，进入最终 release 验收
+- Next Recommended Phase：确认最终 `v1.8.0` release；已延期 lifecycle、read UX 与 Search hardening 需单独批准
 
 当前架构结论仍受单浏览器、本地优先与浏览器存储边界约束。PALOS 业务数据默认使用 IndexedDB；LocalStorage 保留为轻量配置、UI 偏好、schema/storage metadata 与旧数据迁移来源。v1.0 候选必须先完成范围和验收评审，不能从本文的演进 seam 推定为已批准实现。
 
 ## v1.8 Conversation Snapshot workflow delta
 
+- v1.8 immutable Snapshot architecture 已完整落地：ImportedSource history、resourceHash identity、versioned parser、comparator、delta projector、canonical writer、reload verification、legacy migration 与 ImportWorkbench workflow 保持分层。
 - Import UI 仍是 target 与 input source 两个正交轴；input source 第四项命名为 `ChatGPT Conversation Snapshot`，复用原有 New / Existing state，并在 Snapshot 表单中只渲染一个 target selector。
 - Conversation content 必填且严格二选一：用户上传的本地 saved HTML 或粘贴的完整 rendered transcript。可选来源 identity 接受严格 ChatGPT share URL 或 logged-in conversation URL；URL 仅存在于 React capture state 与一次 workflow request，用于规范化和 SHA-256 resourceHash，不持久化、不请求、不读取 cookie/session/internal API。
 - New 无 URL时对 namespaced PALOS local identity 生成稳定 resourceHash；Existing 无 URL时从所选 Conversation 的唯一有效 immutable history 取得既有 resourceHash。旧 Share Snapshot v2 histories 继续兼容。
@@ -18,6 +19,9 @@
 - preview 显示 new/append/same/blocked、existing/snapshot/new Message counts、Round extend/create/total impact，以及 Conversation、Message provenance 和 Round enrichment preservation。
 - 输入、target、Workspace、标题或 content kind 改变都会丢弃旧 preview/workflow instance；异步 preview/file read 使用 revision guard，不能用 stale baseline confirm。
 - confirm 仅在 IndexedDB authoritative state 已加载、preview confirmable、baseline 与 target intent 均有效时启用；写入仍由 hardened canonical writer 的单事务与 reload verification 完成。LocalStorage debug mode 不执行 Share Snapshot canonical write。
+- Snapshot-owned Conversation 的通用 Source / Message mutation 统一由 Core ownership guard 阻止；Detail、普通 import/export append、Merge、Duplicate 与 Version Restore 都不能绕过 canonical writer。guard 不下沉到通用 Storage，因此 canonical operation 与权威恢复装载仍可工作。
+- 普通 Conversation Version Restore 保留既有“重新生成 Message ID”语义，并按 snapshot/current Message order 将现有 `Round.messageIds` 重映射到恢复后的 canonical Messages；Round 内容、顺序与 enrichment 不变，连续 Restore 和 IndexedDB reload 后引用仍一致。
+- 七个 canonical IndexedDB stores、数据库 schema、Snapshot metadata schema 与 Conversation aggregate boundary 均未改变。
 
 ## v1.7 Context Management delta
 
