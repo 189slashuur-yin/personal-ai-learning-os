@@ -1,6 +1,6 @@
 import type { ParsedMessageDraft } from "@/core/entities/import-parser";
 
-export const CHATGPT_SHARE_SNAPSHOT_PARSER_VERSION = "1.0.0";
+export const CHATGPT_SHARE_SNAPSHOT_PARSER_VERSION = "1.1.0";
 
 export type ChatGPTShareSnapshotInputKind = "saved-html" | "pasted-text";
 
@@ -295,8 +295,25 @@ function fallbackTitle(messages: ChatGPTShareSnapshotMessageDraft[]): string {
   const firstUser = messages.find((message) => message.role === "user");
   return (
     firstUser?.content.split("\n")[0].trim().slice(0, 80) ||
-    "ChatGPT Share Snapshot"
+    "ChatGPT Conversation Snapshot"
   );
+}
+
+function stripHtmlSpeakerHeading(
+  value: string,
+  role: "user" | "assistant",
+): string {
+  const lines = value.split("\n");
+  const firstLine = lines[0]?.trim() ?? "";
+  const isSpeakerHeading =
+    role === "user"
+      ? /^(?:you\s+said|user|you|你说|用户)\s*[：:]?$/i.test(firstLine)
+      : /^(?:chatgpt\s+said|assistant|chatgpt|gpt|chatgpt\s*说)\s*[：:]?$/i.test(
+          firstLine,
+        );
+  return isSpeakerHeading
+    ? normalizeVisibleHtmlText([lines.slice(1).join("\n")])
+    : value;
 }
 
 function parseSavedHtml(content: string): ChatGPTShareSnapshotParseResult {
@@ -310,12 +327,12 @@ function parseSavedHtml(content: string): ChatGPTShareSnapshotParseResult {
 
   if (!content.trim()) {
     return {
-      title: "ChatGPT Share Snapshot",
+      title: "ChatGPT Conversation Snapshot",
       messages,
       inputKind: "saved-html",
       parserVersion: CHATGPT_SHARE_SNAPSHOT_PARSER_VERSION,
       warnings,
-      errors: ["ChatGPT Share Snapshot HTML is empty."],
+      errors: ["网页 HTML 为空。请上传从 ChatGPT 保存的完整网页文件。"],
     };
   }
 
@@ -386,7 +403,10 @@ function parseSavedHtml(content: string): ChatGPTShareSnapshotParseResult {
       appendBoundary(activeMessage.chunks);
     }
     if (entry.messageRoot && activeMessage) {
-      const messageContent = normalizeVisibleHtmlText(activeMessage.chunks);
+      const messageContent = stripHtmlSpeakerHeading(
+        normalizeVisibleHtmlText(activeMessage.chunks),
+        activeMessage.role,
+      );
       if (messageContent) {
         messages.push({
           role: activeMessage.role,
@@ -403,11 +423,13 @@ function parseSavedHtml(content: string): ChatGPTShareSnapshotParseResult {
   }
 
   if (activeMessage) {
-    errors.push("ChatGPT Share Snapshot HTML contains an unclosed message.");
+    errors.push(
+      "网页文件结构不完整，最后一条对话没有正常结束。请重新保存完整网页后再试。",
+    );
   }
   if (messages.length === 0) {
     errors.push(
-      "Unsupported ChatGPT Share Snapshot HTML layout: no semantic message containers were found.",
+      "无法从这个网页文件识别 ChatGPT 对话。请上传公开分享页或已登录对话页保存的完整 HTML；当前文件可能不完整或页面结构暂不支持。",
     );
   }
 
@@ -529,7 +551,7 @@ function parsePastedText(content: string): ChatGPTShareSnapshotParseResult {
   }
   if (messages.length === 0) {
     errors.push(
-      "Unsupported ChatGPT Share Snapshot text layout: no supported speaker labels were found.",
+      "无法识别对话角色。请粘贴包含“你说 / ChatGPT 说”或“User / Assistant”标签的完整对话内容。",
     );
   }
 

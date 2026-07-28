@@ -1,10 +1,15 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   CHATGPT_SHARE_SNAPSHOT_PARSER_VERSION,
   parseChatGPTShareSnapshot,
 } from "@/core/services/chatgpt-share-snapshot-parser";
 
-describe("ChatGPT Share Snapshot parser", () => {
+function loadFixture(name: string): string {
+  return readFileSync(new URL(`./fixtures/${name}`, import.meta.url), "utf8");
+}
+
+describe("ChatGPT Conversation Snapshot parser", () => {
   it("parses semantic saved-page HTML without importing page chrome", () => {
     const html = `
       <!doctype html>
@@ -67,6 +72,52 @@ return label;</code></pre>
         /navigation|private|edit|copy|mistakes/i.test(message.content),
       ),
     ).toBe(false);
+  });
+
+  it("parses the synthetic public share-page fixture", () => {
+    const result = parseChatGPTShareSnapshot({
+      kind: "saved-html",
+      content: loadFixture("chatgpt-share-snapshot-initial.html"),
+    });
+
+    expect(result.errors).toEqual([]);
+    expect(result.messages).toHaveLength(3);
+    expect(result.messages.map(({ role }) => role)).toEqual([
+      "user",
+      "assistant",
+      "user",
+    ]);
+    expect(JSON.stringify(result)).not.toMatch(
+      /accountState|shared page navigation|ChatGPT can make mistakes|<article/i,
+    );
+  });
+
+  it("parses a saved logged-in conversation page without private payload or chrome", () => {
+    const result = parseChatGPTShareSnapshot({
+      kind: "saved-html",
+      content: loadFixture("chatgpt-conversation-snapshot-logged-in.html"),
+    });
+
+    expect(result).toMatchObject({
+      title: "Logged-in Conversation Fixture",
+      errors: [],
+    });
+    expect(result.messages).toEqual([
+      {
+        role: "user",
+        ordinal: 0,
+        content: "Can PALOS import a locally saved signed-in conversation?",
+      },
+      {
+        role: "assistant",
+        ordinal: 1,
+        content:
+          'Yes, when semantic message roles are present in the saved HTML.\nconst source = "local file only";',
+      },
+    ]);
+    expect(JSON.stringify(result)).not.toMatch(
+      /private@example|internalPayload|private-user-message-id|navigation|history chrome|account menu|You said|ChatGPT said/i,
+    );
   });
 
   it("parses rendered text and does not split role-like content", () => {
@@ -154,7 +205,7 @@ Answer`,
 
     expect(result.messages).toEqual([]);
     expect(result.errors).toEqual([
-      "Unsupported ChatGPT Share Snapshot HTML layout: no semantic message containers were found.",
+      "无法从这个网页文件识别 ChatGPT 对话。请上传公开分享页或已登录对话页保存的完整 HTML；当前文件可能不完整或页面结构暂不支持。",
     ]);
   });
 
@@ -166,7 +217,7 @@ Answer`,
 
     expect(result.messages).toEqual([]);
     expect(result.errors).toEqual([
-      "Unsupported ChatGPT Share Snapshot text layout: no supported speaker labels were found.",
+      "无法识别对话角色。请粘贴包含“你说 / ChatGPT 说”或“User / Assistant”标签的完整对话内容。",
     ]);
   });
 });

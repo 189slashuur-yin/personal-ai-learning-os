@@ -5,6 +5,7 @@ import type { Round } from "@/core/entities/round";
 import { ChatGPTExportImportService } from "@/core/services/chatgpt-export-import";
 import { ImportParserPipeline } from "@/core/services/import-parser-pipeline";
 import { ImportService } from "@/core/services/import-service";
+import { ConversationVersionService } from "@/core/services/conversation-version-service";
 import {
   batchDeleteConversationWorkspace,
   deleteConversationSidecarMetadata,
@@ -375,6 +376,110 @@ describe("IndexedDB storage reliability", () => {
     await preloadAll();
 
     expect(new IndexedDBMessageStorage().getByConversationId("c1")).toHaveLength(2);
+  });
+
+  it("persists restored Message identity and remapped Round references across reload", async () => {
+    const targetConversationId = "version-restore-reload";
+    const snapshotMessages = [
+      {
+        ...message("restore-old-user", targetConversationId, 0),
+        content: "Checkpoint question",
+      },
+      {
+        ...message("restore-old-assistant", targetConversationId, 1),
+        role: "assistant" as const,
+        content: "Checkpoint answer",
+      },
+    ];
+    const targetRound = {
+      ...round("restore-round", targetConversationId, 1),
+      title: "Preserved title",
+      question: "Preserved question",
+      answer: "Preserved answer",
+      messageIds: snapshotMessages.map((item) => item.id),
+      note: "Preserved note",
+      summary: "Preserved summary",
+    };
+    await replaceStores({
+      conversations: [conversation(targetConversationId)],
+      sources: [],
+      messages: snapshotMessages.map((item) => ({
+        ...item,
+        content: `Current ${item.order}`,
+      })),
+      rounds: [targetRound],
+      "conversation-versions": [
+        {
+          id: "restore-version",
+          conversationId: targetConversationId,
+          name: "Checkpoint",
+          description: "",
+          createdAt: now,
+          sourceVersion: 1,
+          messageCount: snapshotMessages.length,
+          snapshotData: {
+            conversation: conversation(targetConversationId),
+            messages: snapshotMessages,
+          },
+        },
+      ],
+    });
+    clearCaches();
+    await preloadAll();
+
+    const conversations = new IndexedDBConversationStorage();
+    const messages = new IndexedDBMessageStorage();
+    const rounds = new IndexedDBRoundStorage();
+    const sources = new IndexedDBSourceStorage();
+    const versions = new IndexedDBConversationVersionStorage();
+    const beforeMessageIds = messages
+      .getByConversationId(targetConversationId)
+      .map((item) => item.id);
+    const restored = new ConversationVersionService({
+      conversations,
+      messages,
+      versions,
+    }).restoreSnapshot(targetConversationId, "restore-version", {
+      sources,
+      rounds,
+    });
+
+    expect(restored).not.toBeNull();
+    expect(restored?.messages.map((item) => item.id)).not.toEqual(
+      beforeMessageIds,
+    );
+    expect(restored?.messages.map((item) => item.content)).toEqual([
+      "Checkpoint question",
+      "Checkpoint answer",
+    ]);
+    expect(rounds.getById(targetRound.id)).toEqual({
+      ...targetRound,
+      messageIds: restored?.messages.map((item) => item.id),
+    });
+
+    await flushCachesToIndexedDB();
+    clearCaches();
+    await preloadAll();
+
+    const reloadedMessages = new IndexedDBMessageStorage()
+      .getByConversationId(targetConversationId);
+    const reloadedRound = new IndexedDBRoundStorage().getById(targetRound.id);
+    const reloadedMessageIds = new Set(
+      reloadedMessages.map((item) => item.id),
+    );
+    expect(reloadedMessages.map((item) => item.content)).toEqual([
+      "Checkpoint question",
+      "Checkpoint answer",
+    ]);
+    expect(reloadedRound).toEqual({
+      ...targetRound,
+      messageIds: reloadedMessages.map((item) => item.id),
+    });
+    expect(
+      reloadedRound?.messageIds.every((messageId) =>
+        reloadedMessageIds.has(messageId),
+      ),
+    ).toBe(true);
   });
 
   it("removeByConversationId deletes real IndexedDB records", async () => {

@@ -29,6 +29,7 @@ import { BrowserWorkspaceStorage } from "@/infrastructure/storage/browser-worksp
 import { BrowserAppEventLogStorage } from "@/infrastructure/storage/browser-feedback-storage";
 import { RoundService } from "@/core/services/round-service";
 import { ConversationVersionService } from "@/core/services/conversation-version-service";
+import { assertShareSnapshotTranscriptMutable } from "@/core/services/share-snapshot-mutation-guard";
 import {
   ChatGPTExportImport,
   type ChatGPTExportImportSharedState,
@@ -312,9 +313,21 @@ export function ImportWorkbench() {
       const convStorage = createConversationStorage();
       const msgStorage = createMessageStorage();
       const roundStorage = createRoundStorage();
+      const sourceStorage = createSourceStorage();
       const versionStorage = createConversationVersionStorage();
       const target = convStorage.getById(mergeTargetId);
       if (!target) { setError("目标 Conversation 不存在。"); return; }
+
+      assertShareSnapshotTranscriptMutable(
+        sourceStorage,
+        mergeSourceId,
+        "merge from Conversation transcript",
+      );
+      assertShareSnapshotTranscriptMutable(
+        sourceStorage,
+        mergeTargetId,
+        "merge into Conversation transcript",
+      );
 
       // Auto-snapshot on target before merge
       new ConversationVersionService({
@@ -676,7 +689,7 @@ export function ImportWorkbench() {
             : mode === "txt"
               ? "TXT 文件"
               : mode === "share"
-                ? "ChatGPT Share Snapshot"
+                ? "ChatGPT Conversation Snapshot"
                 : "手动文本"}
         </p>
         {importPath === "existing" ? (
@@ -727,7 +740,7 @@ export function ImportWorkbench() {
           ["json", "ChatGPT Export", "导入官方 Export zip 解压后的 conversations.json / conversations-*.json"],
           ["paste", "Paste Text", "粘贴多轮问答文本"],
           ["txt", "TXT File", "选择 UTF-8 编码的 .txt 文件"],
-          ["share", "ChatGPT Share Snapshot", "用 saved HTML 或 rendered text 在本地捕获不可变快照"],
+          ["share", "ChatGPT Conversation Snapshot", "从本地 saved HTML 或完整 rendered transcript 捕获不可变快照；来源链接可选"],
         ] as const).map(([value, label, description]) => (
           <button
             className={`rounded-xl border p-5 text-left ${mode === value ? "border-zinc-900 bg-zinc-950 text-white" : value === "json" ? "border-emerald-300 bg-emerald-50 text-zinc-900 hover:border-emerald-400" : "border-zinc-200 bg-white text-zinc-900"}`}
@@ -741,7 +754,7 @@ export function ImportWorkbench() {
         ))}
       </div>
 
-      {importPath === "existing" ? (
+      {importPath === "existing" && mode !== "share" ? (
         <div className="rounded-xl border border-zinc-200 bg-white p-5">
           {existingConversations.length === 0 ? (
             <p className="text-sm text-amber-700">暂无可追加目标。请先新建一个 Conversation。</p>
@@ -800,6 +813,7 @@ export function ImportWorkbench() {
               router.push(`/conversation/${conversationId}?imported=rounds`);
             }
           }}
+          onExistingTargetChange={setExistingTargetId}
           onTitleChange={setTitle}
           onWorkspaceChange={setWorkspaceId}
           storageMode={storageMode}
@@ -889,7 +903,7 @@ export function ImportWorkbench() {
                   : "请先选择目标 Conversation"}
             </button>
             <p className="text-xs leading-5 text-zinc-500">确认前不会写入 Conversation、Message 或 Round。</p>
-            <p className="text-xs leading-5 text-zinc-500">此文本导入区不会处理 ChatGPT share identity；如需 immutable Snapshot history，请使用上方第四个 Share Snapshot mode。所有模式都不会抓取网页或读取浏览器历史。</p>
+            <p className="text-xs leading-5 text-zinc-500">此文本导入区不会处理 ChatGPT source identity；如需 immutable Snapshot history，请使用上方第四个 Conversation Snapshot mode。所有模式都不会抓取网页或读取浏览器历史。</p>
           </div>
         </div>
         </>

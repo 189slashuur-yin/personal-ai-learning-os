@@ -4,8 +4,10 @@ import type {
   ChatGPTShareSnapshotMetadata,
   ImportedSource,
 } from "@/core/entities/imported-source";
+import { isChatGPTShareSnapshotMetadata } from "@/core/entities/imported-source";
 import type { Message } from "@/core/entities/message";
 import type { Round } from "@/core/entities/round";
+import { shareSnapshotTargetSelectionError } from "@/app/import/chatgpt-share-snapshot-import";
 import { ConversationVersionService } from "@/core/services/conversation-version-service";
 import { prepareChatGPTShareSnapshot } from "@/core/services/chatgpt-share-snapshot-service";
 import {
@@ -39,6 +41,14 @@ import {
   executeShareSnapshotCanonicalOperation,
   type ShareSnapshotCanonicalPlan,
 } from "@/infrastructure/storage/indexeddb/share-snapshot-operation";
+import {
+  createPhase2FIndexedDBWorkflow,
+  loadPhase2FSavedHtml,
+  PHASE_2F_CONVERSATION_ID,
+  PHASE_2F_DIFFERENT_SHARE_URL,
+  PHASE_2F_SHARE_URL,
+  phase2FConversation,
+} from "./helpers/share-snapshot-validation";
 
 type StoreData = Map<string, unknown>;
 
@@ -1569,6 +1579,614 @@ describe("Share Snapshot IndexedDB workflow integration", () => {
     expect(await readAll<ImportedSource>("sources")).toEqual(originalSource);
     expect(await readAll<Message>("messages")).toEqual(oldMessages);
     expect(await readAll<Round>("rounds")).toEqual([oldRound]);
+    expect(getPendingWriteCount()).toBe(0);
+  });
+});
+
+describe("Phase 2F saved HTML to canonical storage validation", () => {
+  it("creates canonical Source, Messages, and Rounds from a saved ChatGPT share page", async () => {
+    const workflow = createPhase2FIndexedDBWorkflow();
+    const preview = await workflow.preview({
+      shareUrl: PHASE_2F_SHARE_URL,
+      snapshot: loadPhase2FSavedHtml(
+        "chatgpt-share-snapshot-initial.html",
+      ),
+      newConversation: phase2FConversation(),
+    });
+
+    expect(preview).toMatchObject({
+      status: "new",
+      confirmable: true,
+      summary: {
+        existingMessageCount: 0,
+        snapshotMessageCount: 3,
+        newMessageCount: 3,
+        existingRoundCount: 0,
+        newRoundCount: 2,
+      },
+    });
+    expect(await readAll("conversations")).toEqual([]);
+    expect(await readAll("sources")).toEqual([]);
+
+    const result = await workflow.confirm({
+      previewId: preview.previewId,
+      baselineFingerprint: preview.baselineFingerprint as string,
+    });
+
+    expect(result).toMatchObject({
+      status: "success",
+      mode: "new",
+      receipt: {
+        writtenMessageCount: 3,
+        writtenRoundCount: 2,
+        verifiedMessageCount: 3,
+        verifiedRoundCount: 2,
+        pendingWriteCount: 0,
+      },
+    });
+
+    const reloaded = await reloadIndexedDBStorages();
+    const persistedConversation = reloaded.conversations.getById(
+      PHASE_2F_CONVERSATION_ID,
+    );
+    const sources = reloaded.sources.getAll();
+    const messages = reloaded.messages.getByConversationId(
+      PHASE_2F_CONVERSATION_ID,
+    );
+    const rounds = reloaded.rounds.getByConversationId(
+      PHASE_2F_CONVERSATION_ID,
+    );
+
+    expect(persistedConversation).toMatchObject({
+      id: PHASE_2F_CONVERSATION_ID,
+      title: "Phase 2F saved HTML validation",
+      sourceType: "ChatGPT",
+    });
+    expect(sources).toHaveLength(1);
+    expect(sources[0]).toMatchObject({
+      id: "phase-2f-source-1",
+      conversationId: PHASE_2F_CONVERSATION_ID,
+      name: "PALOS Snapshot Validation",
+      shareSnapshot: {
+        schemaVersion: 2,
+        snapshotMessageCount: 3,
+        inputKind: "saved-html",
+        snapshotSequence: 1,
+      },
+    });
+    expect(
+      isChatGPTShareSnapshotMetadata(sources[0].shareSnapshot)
+        ? sources[0].shareSnapshot.previousSnapshotSourceId
+        : "invalid-metadata",
+    ).toBeUndefined();
+    expect(sources[0].shareSnapshot).not.toHaveProperty("shareId");
+    expect(sources[0].shareSnapshot).not.toHaveProperty("normalizedShareUrl");
+    expect(
+      isChatGPTShareSnapshotMetadata(sources[0].shareSnapshot)
+        ? sources[0].shareSnapshot.resourceHash
+        : "",
+    ).toMatch(/^[a-f0-9]{64}$/);
+    expect(sources[0].content).not.toMatch(
+      /<article|navigation|accountState|ChatGPT can make mistakes/i,
+    );
+
+    expect(
+      messages.map(
+        ({ role, content, order, sourceId: owner, sourceOrdinal }) => ({
+          role,
+          content,
+          order,
+          sourceId: owner,
+          sourceOrdinal,
+        }),
+      ),
+    ).toEqual([
+      {
+        role: "user",
+        content: "How should I freeze an architecture decision?",
+        order: 0,
+        sourceId: "phase-2f-source-1",
+        sourceOrdinal: 0,
+      },
+      {
+        role: "assistant",
+        content:
+          "Record the decision, alternatives, and consequences before implementation.",
+        order: 1,
+        sourceId: "phase-2f-source-1",
+        sourceOrdinal: 1,
+      },
+      {
+        role: "user",
+        content: "What should happen to an assistant-only update?",
+        order: 2,
+        sourceId: "phase-2f-source-1",
+        sourceOrdinal: 2,
+      },
+    ]);
+    expect(rounds).toHaveLength(2);
+    expect(rounds[0]).toMatchObject({
+      order: 1,
+      question: "How should I freeze an architecture decision?",
+      answer:
+        "Record the decision, alternatives, and consequences before implementation.",
+      messageIds: ["phase-2f-message-1", "phase-2f-message-2"],
+    });
+    expect(rounds[1]).toMatchObject({
+      order: 2,
+      question: "What should happen to an assistant-only update?",
+      answer: "",
+      messageIds: ["phase-2f-message-3"],
+    });
+  });
+
+  it("appends a later saved page and extends the enriched unanswered tail Round", async () => {
+    const workflow = createPhase2FIndexedDBWorkflow();
+    const initialPreview = await workflow.preview({
+      shareUrl: PHASE_2F_SHARE_URL,
+      snapshot: loadPhase2FSavedHtml(
+        "chatgpt-share-snapshot-initial.html",
+      ),
+      newConversation: phase2FConversation(),
+    });
+    const initialResult = await workflow.confirm({
+      previewId: initialPreview.previewId,
+      baselineFingerprint: initialPreview.baselineFingerprint as string,
+    });
+    expect(initialResult.status).toBe("success");
+
+    let reloaded = await reloadIndexedDBStorages();
+    const initialSource = reloaded.sources.getAll()[0];
+    const initialMessages = reloaded.messages.getByConversationId(
+      PHASE_2F_CONVERSATION_ID,
+    );
+    const initialRounds = reloaded.rounds.getByConversationId(
+      PHASE_2F_CONVERSATION_ID,
+    );
+    const tailRound = initialRounds.find(({ order }) => order === 2);
+    expect(tailRound).toBeDefined();
+    const enrichedTail: Round = {
+      ...(tailRound as Round),
+      note: "preserved Phase 2F note",
+      summary: "preserved Phase 2F summary",
+      context: {
+        inheritanceMode: "inherit",
+        snapshot: { currentState: "preserved Phase 2F context" },
+        confirmedAt: "2026-07-27T02:01:30.000Z",
+      },
+    };
+    await putStores({ rounds: [enrichedTail] });
+    reloaded = await reloadIndexedDBStorages();
+
+    const appendPreview = await workflow.preview({
+      shareUrl: PHASE_2F_SHARE_URL,
+      snapshot: loadPhase2FSavedHtml(
+        "chatgpt-share-snapshot-assistant-append.html",
+      ),
+      newConversation: phase2FConversation({
+        id: "phase-2f-unused-new-conversation",
+      }),
+    });
+
+    expect(appendPreview).toMatchObject({
+      status: "append",
+      target: {
+        kind: "existing",
+        conversationId: PHASE_2F_CONVERSATION_ID,
+        sourceId: "phase-2f-source-1",
+      },
+      summary: {
+        existingMessageCount: 3,
+        snapshotMessageCount: 4,
+        newMessageCount: 1,
+        existingRoundCount: 2,
+        newRoundCount: 0,
+      },
+      confirmable: true,
+    });
+
+    const appendResult = await workflow.confirm({
+      previewId: appendPreview.previewId,
+      baselineFingerprint: appendPreview.baselineFingerprint as string,
+    });
+    expect(appendResult).toMatchObject({
+      status: "success",
+      mode: "append",
+      receipt: {
+        writtenMessageCount: 1,
+        writtenRoundCount: 1,
+        verifiedMessageCount: 4,
+        verifiedRoundCount: 2,
+        pendingWriteCount: 0,
+      },
+    });
+
+    reloaded = await reloadIndexedDBStorages();
+    const sources = reloaded.sources.getAll();
+    const messages = reloaded.messages.getByConversationId(
+      PHASE_2F_CONVERSATION_ID,
+    );
+    const rounds = reloaded.rounds.getByConversationId(
+      PHASE_2F_CONVERSATION_ID,
+    );
+    const persistedTail = rounds.find(({ order }) => order === 2);
+
+    expect(sources).toHaveLength(2);
+    expect(sources.find(({ id }) => id === initialSource.id)).toEqual(
+      initialSource,
+    );
+    expect(
+      sources.find(({ id }) => id === "phase-2f-source-2")?.shareSnapshot,
+    ).toMatchObject({
+      schemaVersion: 2,
+      inputKind: "saved-html",
+      snapshotMessageCount: 4,
+      previousSnapshotSourceId: initialSource.id,
+      snapshotSequence: 2,
+    });
+    expect(messages.slice(0, 3)).toEqual(initialMessages);
+    expect(messages[3]).toMatchObject({
+      id: "phase-2f-message-4",
+      role: "assistant",
+      content:
+        "Extend the unanswered tail Round without replacing its local enrichment.",
+      order: 3,
+      sourceId: "phase-2f-source-2",
+      sourceOrdinal: 3,
+    });
+    expect(rounds).toHaveLength(2);
+    expect(persistedTail).toMatchObject({
+      id: enrichedTail.id,
+      note: enrichedTail.note,
+      summary: enrichedTail.summary,
+      context: enrichedTail.context,
+      question: enrichedTail.question,
+      title: enrichedTail.title,
+      answer:
+        "Extend the unanswered tail Round without replacing its local enrichment.",
+      messageIds: [
+        "phase-2f-message-3",
+        "phase-2f-message-4",
+      ],
+    });
+  });
+
+  it("updates an Existing local Snapshot history without a URL and preserves notes, context, and Knowledge", async () => {
+    const workflow = createPhase2FIndexedDBWorkflow();
+    const initialConversation = phase2FConversation({
+      note: "preserved conversation note",
+      summary: "preserved conversation summary",
+      context: {
+        longTermBackground: "preserved background",
+        currentState: "preserved current state",
+      },
+    });
+    const initialPreview = await workflow.preview({
+      snapshot: loadPhase2FSavedHtml(
+        "chatgpt-share-snapshot-initial.html",
+      ),
+      newConversation: initialConversation,
+      target: { kind: "new" },
+    });
+    const initialResult = await workflow.confirm({
+      previewId: initialPreview.previewId,
+      baselineFingerprint: initialPreview.baselineFingerprint as string,
+    });
+    expect(initialResult.status).toBe("success");
+
+    let reloaded = await reloadIndexedDBStorages();
+    const initialTail = reloaded.rounds
+      .getByConversationId(PHASE_2F_CONVERSATION_ID)
+      .find(({ order }) => order === 2) as Round;
+    const enrichedTail: Round = {
+      ...initialTail,
+      note: "preserved tail note",
+      summary: "preserved tail summary",
+      context: {
+        inheritanceMode: "inherit",
+        snapshot: { currentState: "preserved tail context" },
+        confirmedAt: "2026-07-27T02:01:30.000Z",
+      },
+    };
+    const knowledge = {
+      id: "phase-2f-preserved-knowledge",
+      proposalId: "phase-2f-existing-proposal",
+      title: "Preserved knowledge",
+      content: "Knowledge must not change during Snapshot append.",
+      summary: "Preserved",
+      sourceFile: "manual",
+      sourceConversationId: PHASE_2F_CONVERSATION_ID,
+      tagIds: [],
+      createdAt: "2026-07-27T02:01:20.000Z",
+      updatedAt: "2026-07-27T02:01:20.000Z",
+      status: "Active",
+    };
+    await putStores({
+      rounds: [enrichedTail],
+      "knowledge-cards": [knowledge],
+    });
+    reloaded = await reloadIndexedDBStorages();
+
+    const appendPreview = await workflow.preview({
+      snapshot: loadPhase2FSavedHtml(
+        "chatgpt-share-snapshot-assistant-append.html",
+      ),
+      newConversation: phase2FConversation({
+        id: "phase-2f-unused-no-url-conversation",
+      }),
+      target: {
+        kind: "existing",
+        conversationId: PHASE_2F_CONVERSATION_ID,
+      },
+    });
+
+    expect(appendPreview).toMatchObject({
+      status: "append",
+      confirmable: true,
+      target: {
+        kind: "existing",
+        conversationId: PHASE_2F_CONVERSATION_ID,
+      },
+    });
+    const appendResult = await workflow.confirm({
+      previewId: appendPreview.previewId,
+      baselineFingerprint: appendPreview.baselineFingerprint as string,
+    });
+    expect(appendResult.status).toBe("success");
+
+    reloaded = await reloadIndexedDBStorages();
+    expect(
+      reloaded.conversations.getById(PHASE_2F_CONVERSATION_ID),
+    ).toMatchObject({
+      note: initialConversation.note,
+      summary: initialConversation.summary,
+      context: initialConversation.context,
+    });
+    expect(
+      reloaded.rounds
+        .getByConversationId(PHASE_2F_CONVERSATION_ID)
+        .find(({ id }) => id === enrichedTail.id),
+    ).toMatchObject({
+      id: enrichedTail.id,
+      note: enrichedTail.note,
+      summary: enrichedTail.summary,
+      context: enrichedTail.context,
+      answer:
+        "Extend the unanswered tail Round without replacing its local enrichment.",
+    });
+    expect(await readAll("knowledge-cards")).toEqual([knowledge]);
+  });
+
+  it("blocks a different resourceHash from the selected Existing target without writing", async () => {
+    const workflow = createPhase2FIndexedDBWorkflow();
+    const initialPreview = await workflow.preview({
+      shareUrl: PHASE_2F_SHARE_URL,
+      snapshot: loadPhase2FSavedHtml(
+        "chatgpt-share-snapshot-initial.html",
+      ),
+      newConversation: phase2FConversation(),
+    });
+    await workflow.confirm({
+      previewId: initialPreview.previewId,
+      baselineFingerprint: initialPreview.baselineFingerprint as string,
+    });
+    const before = JSON.stringify({
+      conversations: await readAll("conversations"),
+      sources: await readAll("sources"),
+      messages: await readAll("messages"),
+      rounds: await readAll("rounds"),
+    });
+
+    const differentResourcePreview = await workflow.preview({
+      shareUrl: PHASE_2F_DIFFERENT_SHARE_URL,
+      snapshot: loadPhase2FSavedHtml(
+        "chatgpt-share-snapshot-assistant-append.html",
+      ),
+      newConversation: phase2FConversation({
+        id: "phase-2f-different-resource-conversation",
+      }),
+    });
+    const targetError = shareSnapshotTargetSelectionError(
+      differentResourcePreview,
+      "existing",
+      PHASE_2F_CONVERSATION_ID,
+    );
+
+    expect(differentResourcePreview).toMatchObject({
+      status: "new",
+      target: {
+        kind: "new",
+        conversationId: "phase-2f-different-resource-conversation",
+      },
+    });
+    expect(targetError).toContain("首次确认必须使用 New");
+    expect(
+      JSON.stringify({
+        conversations: await readAll("conversations"),
+        sources: await readAll("sources"),
+        messages: await readAll("messages"),
+        rounds: await readAll("rounds"),
+      }),
+    ).toBe(before);
+  });
+
+  it("blocks duplicate heads discovered from canonical saved-page history", async () => {
+    const workflow = createPhase2FIndexedDBWorkflow();
+    const initialPreview = await workflow.preview({
+      shareUrl: PHASE_2F_SHARE_URL,
+      snapshot: loadPhase2FSavedHtml(
+        "chatgpt-share-snapshot-initial.html",
+      ),
+      newConversation: phase2FConversation(),
+    });
+    await workflow.confirm({
+      previewId: initialPreview.previewId,
+      baselineFingerprint: initialPreview.baselineFingerprint as string,
+    });
+    let reloaded = await reloadIndexedDBStorages();
+    const initialSource = reloaded.sources.getAll()[0];
+    await putStores({
+      sources: [
+        {
+          ...initialSource,
+          id: "phase-2f-duplicate-head",
+          name: "Duplicate Phase 2F head",
+        },
+      ],
+    });
+    reloaded = await reloadIndexedDBStorages();
+    const before = JSON.stringify({
+      sources: reloaded.sources.getAll(),
+      messages: reloaded.messages.getAll(),
+      rounds: reloaded.rounds.getAll(),
+    });
+
+    const blocked = await workflow.preview({
+      shareUrl: PHASE_2F_SHARE_URL,
+      snapshot: loadPhase2FSavedHtml(
+        "chatgpt-share-snapshot-assistant-append.html",
+      ),
+      newConversation: phase2FConversation({
+        id: "phase-2f-unused-duplicate-head",
+      }),
+    });
+
+    expect(blocked).toMatchObject({
+      status: "blocked",
+      confirmable: false,
+    });
+    expect(blocked.errors.join(" ")).toContain("multiple-heads");
+    expect(
+      JSON.stringify({
+        sources: await readAll("sources"),
+        messages: await readAll("messages"),
+        rounds: await readAll("rounds"),
+      }),
+    ).toBe(before);
+  });
+
+  it("rejects a saved-page append plan with a sequence mismatch before writing", async () => {
+    const workflow = createPhase2FIndexedDBWorkflow();
+    const initialPreview = await workflow.preview({
+      shareUrl: PHASE_2F_SHARE_URL,
+      snapshot: loadPhase2FSavedHtml(
+        "chatgpt-share-snapshot-initial.html",
+      ),
+      newConversation: phase2FConversation(),
+    });
+    await workflow.confirm({
+      previewId: initialPreview.previewId,
+      baselineFingerprint: initialPreview.baselineFingerprint as string,
+    });
+    const reloaded = await reloadIndexedDBStorages();
+    const currentConversation = reloaded.conversations.getById(
+      PHASE_2F_CONVERSATION_ID,
+    );
+    const currentSource = reloaded.sources.getAll()[0];
+    expect(currentConversation).not.toBeNull();
+
+    let nextId = 0;
+    const preparation = await prepareChatGPTShareSnapshot({
+      shareUrl: PHASE_2F_SHARE_URL,
+      snapshot: loadPhase2FSavedHtml(
+        "chatgpt-share-snapshot-assistant-append.html",
+      ),
+      capturedAt: "2026-07-27T02:02:00.000Z",
+      target: {
+        kind: "existing",
+        conversation: currentConversation as Conversation,
+        source: currentSource,
+        messages: reloaded.messages.getByConversationId(
+          PHASE_2F_CONVERSATION_ID,
+        ),
+        rounds: reloaded.rounds.getByConversationId(
+          PHASE_2F_CONVERSATION_ID,
+        ),
+      },
+      createId: (kind) => `phase-2f-invalid-${kind}-${++nextId}`,
+    });
+    expect(preparation.status).toBe("append");
+    expect(preparation.canonicalPlan).toBeDefined();
+    const plan = preparation.canonicalPlan as ShareSnapshotCanonicalPlan;
+    expect(isChatGPTShareSnapshotMetadata(plan.source.shareSnapshot)).toBe(
+      true,
+    );
+    const planMetadata = plan.source
+      .shareSnapshot as ChatGPTShareSnapshotMetadata;
+    const invalidPlan: ShareSnapshotCanonicalPlan = {
+      ...plan,
+      source: {
+        ...plan.source,
+        shareSnapshot: {
+          ...planMetadata,
+          snapshotSequence: 7,
+        },
+      },
+    };
+    const before = JSON.stringify({
+      conversations: await readAll("conversations"),
+      sources: await readAll("sources"),
+      messages: await readAll("messages"),
+      rounds: await readAll("rounds"),
+    });
+
+    await expect(
+      executeShareSnapshotCanonicalOperation(invalidPlan),
+    ).rejects.toThrow("expected 2");
+
+    expect(
+      JSON.stringify({
+        conversations: await readAll("conversations"),
+        sources: await readAll("sources"),
+        messages: await readAll("messages"),
+        rounds: await readAll("rounds"),
+      }),
+    ).toBe(before);
+  });
+
+  it("rejects a stale saved-page baseline and leaves the Snapshot chain unchanged", async () => {
+    const workflow = createPhase2FIndexedDBWorkflow();
+    const initialPreview = await workflow.preview({
+      shareUrl: PHASE_2F_SHARE_URL,
+      snapshot: loadPhase2FSavedHtml(
+        "chatgpt-share-snapshot-initial.html",
+      ),
+      newConversation: phase2FConversation(),
+    });
+    await workflow.confirm({
+      previewId: initialPreview.previewId,
+      baselineFingerprint: initialPreview.baselineFingerprint as string,
+    });
+    const appendPreview = await workflow.preview({
+      shareUrl: PHASE_2F_SHARE_URL,
+      snapshot: loadPhase2FSavedHtml(
+        "chatgpt-share-snapshot-assistant-append.html",
+      ),
+      newConversation: phase2FConversation({
+        id: "phase-2f-unused-stale",
+      }),
+    });
+    await putStores({
+      conversations: [
+        phase2FConversation({
+          note: "durably changed after Phase 2F preview",
+          updatedAt: "2026-07-27T02:02:30.000Z",
+        }),
+      ],
+    });
+
+    const stale = await workflow.confirm({
+      previewId: appendPreview.previewId,
+      baselineFingerprint: appendPreview.baselineFingerprint as string,
+    });
+
+    expect(stale.status).toBe("stale");
+    expect(await readAll<ImportedSource>("sources")).toHaveLength(1);
+    expect(await readAll<Message>("messages")).toHaveLength(3);
+    expect(await readAll<Round>("rounds")).toHaveLength(2);
+    expect((await readAll<Conversation>("conversations"))[0].note).toBe(
+      "durably changed after Phase 2F preview",
+    );
     expect(getPendingWriteCount()).toBe(0);
   });
 });

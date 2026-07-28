@@ -15,6 +15,7 @@ import type { ShareSnapshotCaptureRequest } from "@/core/models/share-snapshot-p
 import { hashChatGPTShareSnapshot } from "@/core/services/chatgpt-share-snapshot-comparator";
 import {
   ChatGPTShareSnapshotWorkflow,
+  CONVERSATION_SNAPSHOT_CONTENT_REQUIRED_MESSAGE,
   type ChatGPTShareSnapshotWorkflowStorages,
 } from "@/core/services/chatgpt-share-snapshot-workflow";
 import type { ChatGPTShareSnapshotIdKind } from "@/core/services/chatgpt-share-snapshot-service";
@@ -237,7 +238,7 @@ function storageSnapshot(
   });
 }
 
-describe("ChatGPT Share Snapshot application workflow", () => {
+describe("ChatGPT Conversation Snapshot application workflow", () => {
   it("resolves no matching Source as a new, confirmable preview without writing", async () => {
     const { workflow, storages, writer } = workflowHarness();
     const request = captureRequest();
@@ -267,6 +268,112 @@ describe("ChatGPT Share Snapshot application workflow", () => {
     expect(storageSnapshot(storages)).toBe(storageBefore);
     expect(writer.commands).toHaveLength(0);
     expect(JSON.stringify(request)).toBe(inputBefore);
+  });
+
+  it("rejects URL-only input before parsing", async () => {
+    const { workflow, writer } = workflowHarness();
+    const preview = await workflow.preview({
+      ...captureRequest(),
+      shareUrl: undefined,
+      sourceUrl: shareUrl,
+      snapshot: { kind: "pasted-text", content: "" },
+      target: { kind: "new" },
+    });
+
+    expect(preview).toMatchObject({
+      status: "invalid",
+      confirmable: false,
+      summary: {
+        snapshotMessageCount: 0,
+      },
+      errors: [CONVERSATION_SNAPSHOT_CONTENT_REQUIRED_MESSAGE],
+    });
+    expect(writer.commands).toHaveLength(0);
+  });
+
+  it("creates a New Conversation with a stable local identity when URL is omitted", async () => {
+    const { workflow, writer } = workflowHarness();
+    const request: ShareSnapshotCaptureRequest = {
+      ...captureRequest(),
+      shareUrl: undefined,
+      target: { kind: "new" },
+    };
+
+    const firstPreview = await workflow.preview(request);
+    const secondPreview = await workflow.preview(request);
+
+    expect(firstPreview).toMatchObject({
+      status: "new",
+      confirmable: true,
+      resourceFingerprint: secondPreview.resourceFingerprint,
+    });
+    const result = await workflow.confirm({
+      previewId: firstPreview.previewId,
+      baselineFingerprint: firstPreview.baselineFingerprint as string,
+    });
+    expect(result.status).toBe("success");
+    expect(writer.commands).toHaveLength(1);
+    const metadata = writer.commands[0].plan.source.shareSnapshot;
+    expect(metadata).toMatchObject({
+      schemaVersion: 2,
+      snapshotSequence: 1,
+    });
+    expect(
+      metadata && "resourceHash" in metadata ? metadata.resourceHash : "",
+    ).toMatch(/^[a-f0-9]{64}$/);
+    expect(JSON.stringify(metadata)).not.toContain("palos:");
+  });
+
+  it("accepts a normal logged-in Conversation URL as optional identity only", async () => {
+    const { workflow, writer } = workflowHarness();
+    const sourceUrl =
+      "https://chatgpt.com/c/logged-in-conversation-123?model=test#latest";
+    const preview = await workflow.preview({
+      ...captureRequest(),
+      shareUrl: undefined,
+      sourceUrl,
+      target: { kind: "new" },
+    });
+
+    expect(preview).toMatchObject({
+      status: "new",
+      confirmable: true,
+    });
+    const result = await workflow.confirm({
+      previewId: preview.previewId,
+      baselineFingerprint: preview.baselineFingerprint as string,
+    });
+
+    expect(result.status).toBe("success");
+    expect(writer.commands).toHaveLength(1);
+    expect(JSON.stringify({ preview, result, command: writer.commands[0] })).not
+      .toContain(sourceUrl);
+    expect(JSON.stringify(writer.commands[0])).not.toContain(
+      "logged-in-conversation-123",
+    );
+  });
+
+  it("uses an Existing Conversation's compatible Snapshot history when URL is omitted", async () => {
+    const { workflow, storages, writer } = workflowHarness();
+    await seedExisting(storages);
+
+    const preview = await workflow.preview({
+      ...captureRequest(),
+      shareUrl: undefined,
+      target: { kind: "existing", conversationId },
+    });
+
+    expect(preview).toMatchObject({
+      status: "append",
+      confirmable: true,
+      resourceFingerprint: resourceHash.slice(0, 8),
+      target: {
+        kind: "existing",
+        conversationId,
+        sourceId,
+      },
+    });
+    expect(writer.commands).toHaveLength(0);
   });
 
   it("resolves one matching Source to append or same without changing enrichment", async () => {

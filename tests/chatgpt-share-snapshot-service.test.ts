@@ -567,7 +567,7 @@ describe("ChatGPT Share Snapshot pure service", () => {
     });
 
     expect(parserFailure.status).toBe("invalid");
-    expect(parserFailure.errors[0]).toMatch(/no supported speaker labels/i);
+    expect(parserFailure.errors[0]).toContain("无法识别对话角色");
     expect(identityFailure.status).toBe("invalid");
     expect(identityFailure.errors).toEqual([
       "Share Snapshot URL does not match source source.",

@@ -280,8 +280,19 @@ export function ConversationList() {
   }
 
   async function handleDuplicate(conversation: Conversation) {
-    duplicateConversationWorkspace(conversation.id, createWorkspaceStorages());
-    await persistAndReload();
+    try {
+      duplicateConversationWorkspace(
+        conversation.id,
+        createWorkspaceStorages(),
+      );
+      await persistAndReload();
+    } catch (error) {
+      alert(
+        error instanceof Error
+          ? `Conversation 复制失败：${error.message}`
+          : "Conversation 复制失败，请刷新后重试。",
+      );
+    }
   }
 
   async function handleMove(conversationId: string, workspaceId: string) {

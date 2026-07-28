@@ -6,6 +6,7 @@ import type { ConversationSourceType } from "@/core/entities/conversation";
 import type { ConversationParserId, ImportPreview } from "@/core/entities/import-parser";
 import type { Message } from "@/core/entities/message";
 import type { Round } from "@/core/entities/round";
+import { assertShareSnapshotTranscriptMutable } from "@/core/services/share-snapshot-mutation-guard";
 
 export type ConfirmImportInput = {
   title?: string;
@@ -103,6 +104,12 @@ export class ImportService {
     if (!conversation) {
       throw new Error("Target conversation not found.");
     }
+
+    assertShareSnapshotTranscriptMutable(
+      this.sources,
+      conversationId,
+      "append imported transcript",
+    );
 
     const timestamp = new Date().toISOString();
     const existingMessages = this.messages.getByConversationId(conversationId);

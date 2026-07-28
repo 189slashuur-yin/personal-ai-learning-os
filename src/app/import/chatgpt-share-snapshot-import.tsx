@@ -19,7 +19,10 @@ import {
   type ChatGPTShareSnapshotInput,
   type ChatGPTShareSnapshotInputKind,
 } from "@/core/services/chatgpt-share-snapshot-parser";
-import { ChatGPTShareSnapshotWorkflow } from "@/core/services/chatgpt-share-snapshot-workflow";
+import {
+  ChatGPTShareSnapshotWorkflow,
+  CONVERSATION_SNAPSHOT_CONTENT_REQUIRED_MESSAGE,
+} from "@/core/services/chatgpt-share-snapshot-workflow";
 import { decodeUtf8Text } from "@/core/services/import-page-state";
 import {
   createStorageInstances,
@@ -31,7 +34,7 @@ type ShareSnapshotBusyState = "idle" | "previewing" | "confirming";
 
 export type ShareSnapshotImportUiState = Readonly<{
   inputKind: ChatGPTShareSnapshotInputKind;
-  shareUrl: string;
+  sourceUrl: string;
   content: string;
   fileName: string;
   fileInputRevision: number;
@@ -42,7 +45,7 @@ export type ShareSnapshotImportUiState = Readonly<{
 }>;
 
 export type ShareSnapshotImportUiAction =
-  | Readonly<{ type: "edit-url"; value: string }>
+  | Readonly<{ type: "edit-source-url"; value: string }>
   | Readonly<{ type: "edit-content"; value: string; fileName?: string }>
   | Readonly<{ type: "select-input-kind"; value: ChatGPTShareSnapshotInputKind }>
   | Readonly<{ type: "target-changed" }>
@@ -60,7 +63,7 @@ export type ShareSnapshotImportUiAction =
 export function createShareSnapshotImportUiState(): ShareSnapshotImportUiState {
   return {
     inputKind: "pasted-text",
-    shareUrl: "",
+    sourceUrl: "",
     content: "",
     fileName: "",
     fileInputRevision: 0,
@@ -88,10 +91,10 @@ export function reduceShareSnapshotImportUiState(
   action: ShareSnapshotImportUiAction,
 ): ShareSnapshotImportUiState {
   switch (action.type) {
-    case "edit-url":
+    case "edit-source-url":
       return {
         ...clearPreparedOutcome(state),
-        shareUrl: action.value,
+        sourceUrl: action.value,
       };
     case "edit-content":
       return {
@@ -104,7 +107,7 @@ export function reduceShareSnapshotImportUiState(
       return {
         ...createShareSnapshotImportUiState(),
         inputKind: action.value,
-        shareUrl: state.shareUrl,
+        sourceUrl: state.sourceUrl,
         fileInputRevision: state.fileInputRevision + 1,
       };
     case "target-changed":
@@ -192,17 +195,17 @@ export function shareSnapshotTargetSelectionError(
   if (importPath === "new") {
     return preview.target.kind === "new"
       ? null
-      : `该分享资源已属于「${preview.target.conversationTitle}」。请切换到 Existing 并选择该 Conversation。`;
+      : `该来源 identity 已属于「${preview.target.conversationTitle}」。请切换到 Existing 并选择该 Conversation。`;
   }
   if (!existingTargetId) {
     return "请先使用页面已有的 target selector 选择目标 Conversation。";
   }
   if (preview.target.kind === "new") {
-    return "该分享资源尚无 Snapshot 历史。首次确认必须使用 New 创建新的 Conversation。";
+    return "该来源 identity 尚无 Snapshot 历史。首次确认必须使用 New 创建新的 Conversation。";
   }
   return preview.target.conversationId === existingTargetId
     ? null
-    : `resourceHash 解析到「${preview.target.conversationTitle}」，与当前选择的 Conversation 不一致。`;
+    : `来源 identity 解析到「${preview.target.conversationTitle}」，与当前选择的 Conversation 不一致。`;
 }
 
 export type ShareSnapshotRoundImpact = Readonly<{
@@ -377,6 +380,7 @@ type ChatGPTShareSnapshotImportProps = {
   idbReady: boolean;
   onTitleChange: (value: string) => void;
   onWorkspaceChange: (value: string) => void;
+  onExistingTargetChange: (value: string) => void;
   onCompleted: (conversationId: string, mode: "new" | "append") => void;
 };
 
@@ -404,12 +408,12 @@ function resultFailureMessage(result: ShareSnapshotWorkflowResult): string {
     result.status === "invalid" ||
     result.status === "blocked"
   ) {
-    return result.errors.join(" ") || "Share Snapshot 已阻止写入。";
+    return result.errors.join(" ") || "Conversation Snapshot 已阻止写入。";
   }
   if (result.status === "stale" || result.status === "write-failed") {
     return result.message;
   }
-  return "Share Snapshot 未完成写入。";
+  return "Conversation Snapshot 未完成写入。";
 }
 
 export function ChatGPTShareSnapshotImport({
@@ -423,6 +427,7 @@ export function ChatGPTShareSnapshotImport({
   idbReady,
   onTitleChange,
   onWorkspaceChange,
+  onExistingTargetChange,
   onCompleted,
 }: ChatGPTShareSnapshotImportProps) {
   const [state, dispatch] = useReducer(
@@ -464,7 +469,6 @@ export function ChatGPTShareSnapshotImport({
   const canRequestPreview =
     isIndexedDBReady &&
     state.busy === "idle" &&
-    Boolean(state.shareUrl.trim()) &&
     Boolean(state.content.trim()) &&
     (importPath === "new" ? Boolean(title.trim()) : Boolean(existingTargetId));
   const canConfirm =
@@ -539,9 +543,13 @@ export function ChatGPTShareSnapshotImport({
 
     try {
       const preview = await requestShareSnapshotPreview(workflow, {
-        shareUrl: state.shareUrl,
+        sourceUrl: state.sourceUrl.trim() || undefined,
         snapshot,
         newConversation,
+        target:
+          importPath === "new"
+            ? { kind: "new" }
+            : { kind: "existing", conversationId: existingTargetId },
       });
       if (
         requestRevisionRef.current !== requestRevision ||
@@ -555,7 +563,7 @@ export function ChatGPTShareSnapshotImport({
       workflowRef.current = null;
       dispatch({
         type: "failed",
-        message: "Share Snapshot preview 失败；未写入 canonical data。",
+        message: "Conversation Snapshot preview 失败；未写入 canonical data。",
         consumePreview: true,
       });
     }
@@ -573,7 +581,7 @@ export function ChatGPTShareSnapshotImport({
       workflowRef.current = null;
       dispatch({
         type: "failed",
-        message: "Share Snapshot confirm 失败；请重新生成 preview。",
+        message: "Conversation Snapshot confirm 失败；请重新生成 preview。",
         consumePreview: true,
       });
       return;
@@ -608,41 +616,22 @@ export function ChatGPTShareSnapshotImport({
     <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
       <div className="space-y-5 rounded-xl border border-zinc-200 bg-white p-6">
         <div>
-          <p className="eyebrow">ChatGPT Share Snapshot</p>
+          <p className="eyebrow">ChatGPT Conversation Snapshot</p>
           <p className="mt-2 text-sm leading-6 text-zinc-600">
-            PALOS 不访问 chatgpt.com、不读取 cookie 或 session。URL 只在本次
-            capture 的内存中用于规范化和生成 resourceHash。
+            导入内容必须来自本地保存的 HTML 或完整 rendered transcript。
+            PALOS 不访问 chatgpt.com，也不读取 cookie、session 或 internal API。
           </p>
         </div>
 
         {!isIndexedDBReady ? (
           <p className="rounded-lg bg-amber-50 px-4 py-3 text-sm text-amber-800">
-            Share Snapshot canonical writer 仅在 IndexedDB 加载完成后可用。
+            Conversation Snapshot canonical writer 仅在 IndexedDB 加载完成后可用。
           </p>
         ) : null}
 
-        <label className="block text-sm font-medium text-zinc-800">
-          ChatGPT share URL
-          <input
-            autoComplete="off"
-            className="mt-2 w-full rounded-lg border border-zinc-300 px-3 py-2.5"
-            inputMode="url"
-            onChange={(event) =>
-              invalidatePreparedState({
-                type: "edit-url",
-                value: event.target.value,
-              })
-            }
-            placeholder="https://chatgpt.com/share/…"
-            spellCheck={false}
-            type="url"
-            value={state.shareUrl}
-          />
-        </label>
-
         <div>
-          <p className="text-sm font-medium text-zinc-800">
-            Snapshot content source
+          <p className="text-sm font-semibold text-zinc-900">
+            A. Conversation content <span className="text-red-600">· required</span>
           </p>
           <div className="mt-2 grid gap-2 sm:grid-cols-2">
             <button
@@ -659,7 +648,7 @@ export function ChatGPTShareSnapshotImport({
               }
               type="button"
             >
-              Pasted rendered text
+              粘贴完整 rendered transcript
             </button>
             <button
               className={`rounded-lg border px-4 py-3 text-left text-sm ${
@@ -667,6 +656,7 @@ export function ChatGPTShareSnapshotImport({
                   ? "border-zinc-900 bg-zinc-950 text-white"
                   : "border-zinc-200 bg-white text-zinc-800"
               }`}
+              data-testid="share-snapshot-saved-html-mode"
               onClick={() =>
                 invalidatePreparedState({
                   type: "select-input-kind",
@@ -675,14 +665,14 @@ export function ChatGPTShareSnapshotImport({
               }
               type="button"
             >
-              Uploaded saved HTML
+              上传本地 saved HTML
             </button>
           </div>
         </div>
 
         {state.inputKind === "saved-html" ? (
           <label className="block text-sm font-medium text-zinc-800">
-            Saved HTML file
+            ChatGPT saved HTML file
             <input
               accept=".html,.htm,text/html"
               className="mt-2 block w-full text-sm"
@@ -698,7 +688,7 @@ export function ChatGPTShareSnapshotImport({
           </label>
         ) : (
           <label className="block text-sm font-medium text-zinc-800">
-            Rendered transcript
+            完整对话内容
             <textarea
               className="mt-2 min-h-72 w-full rounded-lg border border-zinc-300 px-4 py-3 font-mono text-sm leading-6"
               onChange={(event) =>
@@ -707,14 +697,57 @@ export function ChatGPTShareSnapshotImport({
                   value: event.target.value,
                 })
               }
-              placeholder={"User:\nQuestion\n\nAssistant:\nAnswer"}
+              placeholder={
+                "You said:\nQuestion\n\nChatGPT said:\nAnswer\n\n也支持 User / Assistant 标签"
+              }
               value={state.content}
             />
           </label>
         )}
 
+        <div>
+          <p className="text-sm font-semibold text-zinc-900">
+            B. Optional source identity
+          </p>
+          <label className="mt-2 block text-sm font-medium text-zinc-800">
+            ChatGPT share / conversation URL（可选）
+            <input
+              autoComplete="off"
+              className="mt-2 w-full rounded-lg border border-zinc-300 px-3 py-2.5"
+              inputMode="url"
+              onChange={(event) =>
+                invalidatePreparedState({
+                  type: "edit-source-url",
+                  value: event.target.value,
+                })
+              }
+              placeholder="https://chatgpt.com/share/… 或 https://chatgpt.com/c/…"
+              spellCheck={false}
+              type="url"
+              value={state.sourceUrl}
+            />
+          </label>
+          <p className="mt-2 text-xs leading-5 text-zinc-500">
+            链接只在本次 capture 的内存中生成 resourceHash，不会被请求或原文保存。
+            New 留空时生成稳定的 PALOS local identity；Existing 留空时使用所选
+            Conversation 的现有 Snapshot history。
+          </p>
+          {state.sourceUrl.trim() && !state.content.trim() ? (
+            <p
+              className="mt-3 whitespace-pre-line rounded-lg bg-amber-50 px-4 py-3 text-sm text-amber-800"
+              role="alert"
+            >
+              {CONVERSATION_SNAPSHOT_CONTENT_REQUIRED_MESSAGE}
+            </p>
+          ) : null}
+        </div>
+
+        <div>
+          <p className="text-sm font-semibold text-zinc-900">
+            C. Target Conversation
+          </p>
         {importPath === "new" ? (
-          <>
+          <div className="mt-2 space-y-4">
             <label className="block text-sm font-medium text-zinc-800">
               Conversation 标题
               <input
@@ -723,7 +756,7 @@ export function ChatGPTShareSnapshotImport({
                   invalidatePreparedState({ type: "target-changed" });
                   onTitleChange(event.target.value);
                 }}
-                placeholder="ChatGPT Share Snapshot"
+                placeholder="ChatGPT Conversation Snapshot"
                 value={title}
               />
             </label>
@@ -744,13 +777,34 @@ export function ChatGPTShareSnapshotImport({
                 ))}
               </select>
             </label>
-          </>
+          </div>
         ) : (
-          <p className="rounded-lg bg-zinc-50 px-4 py-3 text-sm text-zinc-700">
-            Selected target: {selectedTarget?.title ?? "—"}。resourceHash
-            解析出的 owner 必须与该选择一致。
-          </p>
+          <div className="mt-2">
+            <label className="block text-sm font-medium text-zinc-800">
+              选择目标 Conversation
+              <select
+                className="mt-2 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2.5"
+                onChange={(event) => {
+                  invalidatePreparedState({ type: "target-changed" });
+                  onExistingTargetChange(event.target.value);
+                }}
+                value={existingTargetId}
+              >
+                <option value="">— 请选择 —</option>
+                {existingConversations.map((conversation) => (
+                  <option key={conversation.id} value={conversation.id}>
+                    {conversation.title} ({conversation.sourceType})
+                  </option>
+                ))}
+              </select>
+            </label>
+            <p className="mt-2 rounded-lg bg-zinc-50 px-4 py-3 text-sm text-zinc-700">
+              Selected target: {selectedTarget?.title ?? "—"}。留空来源链接时，
+              PALOS 将验证并使用该 Conversation 的唯一 Snapshot history。
+            </p>
+          </div>
         )}
+        </div>
 
         <button
           className="w-full rounded-lg border border-zinc-900 bg-white px-5 py-3 text-sm font-semibold text-zinc-900 disabled:border-zinc-200 disabled:text-zinc-400"
@@ -760,7 +814,7 @@ export function ChatGPTShareSnapshotImport({
         >
           {state.busy === "previewing"
             ? "Preparing local preview…"
-            : "Preview Share Snapshot"}
+            : "Preview Conversation Snapshot"}
         </button>
 
         <p className="text-xs leading-5 text-zinc-500">
@@ -778,7 +832,7 @@ export function ChatGPTShareSnapshotImport({
           />
         ) : (
           <p className="text-sm text-zinc-500">
-            提供 URL 和本地 Snapshot 内容后生成 comparator preview。
+            D. 添加必需的本地对话内容后生成 comparator preview；来源链接可选。
           </p>
         )}
 
@@ -809,14 +863,14 @@ export function ChatGPTShareSnapshotImport({
             ? "Writing and verifying…"
             : state.preview?.status === "append"
               ? `Confirm append ${state.preview.summary.newMessageCount} Messages`
-              : "Confirm save Snapshot"}
+              : "Confirm save Conversation Snapshot"}
         </button>
         <p className="text-xs leading-5 text-zinc-500">
           Same 和 blocked 状态不提供写入按钮。确认时会重新校验 freshness，并由
           canonical writer 在单一事务中写入和 reload verification。
         </p>
         <p className="text-xs leading-5 text-zinc-500">
-          请只保存你有权处理的内容；远端分享撤销不会自动删除本地 Snapshot。
+          请只保存你有权处理的内容；远端页面变化或失效不会自动删除本地 Snapshot。
         </p>
       </div>
     </section>

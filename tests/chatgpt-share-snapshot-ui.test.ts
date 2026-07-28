@@ -132,7 +132,7 @@ const assistantOnlyAppend = {
     "User:\nQuestion\n\nAssistant:\nAnswer\n\nUser:\nFollow-up\n\nAssistant:\nLate answer",
 };
 
-describe("Phase 2E Share Snapshot input mode", () => {
+describe("v1.8 Conversation Snapshot input mode", () => {
   it("round-trips the fourth mode while preserving the existing target selector", () => {
     expect(deriveActiveImportSection("share")).toBe("share-snapshot");
     const search = buildImportPageSearch("", {
@@ -149,8 +149,15 @@ describe("Phase 2E Share Snapshot input mode", () => {
   });
 
   it("clears prepared previews when content, target, or local input kind changes", () => {
-    const prepared = reduceShareSnapshotImportUiState(
+    const withSourceUrl = reduceShareSnapshotImportUiState(
       createShareSnapshotImportUiState(),
+      {
+        type: "edit-source-url",
+        value: "https://chatgpt.com/c/ui-conversation-identity",
+      },
+    );
+    const prepared = reduceShareSnapshotImportUiState(
+      withSourceUrl,
       { type: "preview-ready", preview: preview("append") },
     );
     const edited = reduceShareSnapshotImportUiState(prepared, {
@@ -175,6 +182,7 @@ describe("Phase 2E Share Snapshot input mode", () => {
     );
     expect(inputKindChanged).toMatchObject({
       inputKind: "saved-html",
+      sourceUrl: "https://chatgpt.com/c/ui-conversation-identity",
       content: "",
       fileName: "",
       preview: null,
@@ -182,7 +190,7 @@ describe("Phase 2E Share Snapshot input mode", () => {
   });
 });
 
-describe("Phase 2E Share Snapshot preview rendering", () => {
+describe("v1.8 Conversation Snapshot preview rendering", () => {
   it("renders append counts, assistant extension impact, and preserved fields", () => {
     const html = renderToStaticMarkup(
       createElement(ShareSnapshotPreviewCard, {
@@ -244,7 +252,7 @@ describe("Phase 2E Share Snapshot preview rendering", () => {
   });
 });
 
-describe("Phase 2E Share Snapshot explicit confirm flow", () => {
+describe("v1.8 Conversation Snapshot explicit confirm flow", () => {
   it("previews without writing and invokes the writer only after explicit confirm", async () => {
     const { workflow, writer } = workflowHarness();
 
@@ -279,5 +287,42 @@ describe("Phase 2E Share Snapshot explicit confirm flow", () => {
     expect(componentSource).not.toMatch(/\bfetch\s*\(/);
     expect(componentSource).not.toMatch(/XMLHttpRequest/);
     expect(componentSource).not.toMatch(/document\.cookie/);
+    expect(componentSource).toContain("ChatGPT Conversation Snapshot");
+    expect(componentSource.indexOf("A. Conversation content")).toBeLessThan(
+      componentSource.indexOf("B. Optional source identity"),
+    );
+    expect(componentSource.indexOf("B. Optional source identity")).toBeLessThan(
+      componentSource.indexOf("C. Target Conversation"),
+    );
+    expect(componentSource.indexOf("C. Target Conversation")).toBeLessThan(
+      componentSource.indexOf(
+        "D. 添加必需的本地对话内容后生成 comparator preview",
+      ),
+    );
+  });
+});
+
+describe("v1.8 immutable Snapshot UI mutation boundaries", () => {
+  it("keeps Detail transcript edits and Workbench merge behind ownership guards", () => {
+    const detailSource = readFileSync(
+      new URL(
+        "../src/app/conversation/[id]/conversation-detail.tsx",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const workbenchSource = readFileSync(
+      new URL("../src/app/import/import-workbench.tsx", import.meta.url),
+      "utf8",
+    );
+
+    expect(detailSource).toContain("shareSnapshotOwned:");
+    expect(detailSource).toContain(
+      "readOnly={state.shareSnapshotOwned}",
+    );
+    expect(detailSource).toContain("sources: createSourceStorage()");
+    expect(detailSource).toContain("state.shareSnapshotOwned ||");
+    expect(workbenchSource.match(/assertShareSnapshotTranscriptMutable\(/g))
+      .toHaveLength(2);
   });
 });

@@ -30,6 +30,7 @@ import { PromptTemplateService } from "@/core/services/prompt-template-service";
 import { ProviderConfigurationService } from "@/core/services/provider-configuration-service";
 import { ProviderService } from "@/core/services/provider-service";
 import { deriveQAPairs } from "@/core/services/qa-pair-service";
+import { isShareSnapshotOwnedConversation } from "@/core/services/share-snapshot-mutation-guard";
 import { countWords } from "@/core/services/text-statistics";
 import { TaskService } from "@/core/services/task-service";
 import { WorkspaceService } from "@/core/services/workspace-service";
@@ -81,6 +82,7 @@ type DetailState =
       conversation: Conversation;
       source: ImportedSource | null;
       sourceCount: number;
+      shareSnapshotOwned: boolean;
       messages: Message[];
       proposals: Proposal[];
       knowledgeCard: KnowledgeCard | null;
@@ -186,6 +188,7 @@ export function ConversationDetail({
   const [snapshotName, setSnapshotName] = useState("");
   const [snapshotDescription, setSnapshotDescription] = useState("");
   const [restoreStatus, setRestoreStatus] = useState<string | null>(null);
+  const [roundWorkspaceRevision, setRoundWorkspaceRevision] = useState(0);
   const [collapsedMessageIds, setCollapsedMessageIds] = useState<Set<string>>(
     new Set(),
   );
@@ -347,9 +350,10 @@ export function ConversationDetail({
 
       const sourceStorage = createSourceStorage();
       const source = sourceStorage.getByConversationId(conversationId);
-      const sourceCount = sourceStorage
+      const conversationSources = sourceStorage
         .getAll()
-        .filter((candidate) => candidate.conversationId === conversationId).length;
+        .filter((candidate) => candidate.conversationId === conversationId);
+      const sourceCount = conversationSources.length;
       const proposalStorage = createProposalStorage();
       const conversationProposals = proposalStorage.getByConversationId(
         conversationId,
@@ -401,6 +405,10 @@ export function ConversationDetail({
         conversation: openedConversation,
         source,
         sourceCount,
+        shareSnapshotOwned: isShareSnapshotOwnedConversation(
+          sourceStorage,
+          conversationId,
+        ),
         messages,
         proposals,
         knowledgeCard,
@@ -442,6 +450,7 @@ export function ConversationDetail({
   useEffect(() => {
     if (
       state.status !== "ready" ||
+      state.shareSnapshotOwned ||
       draft === lastSavedContent.current ||
       (!state.source && draft.length === 0)
     ) {
@@ -449,6 +458,16 @@ export function ConversationDetail({
     }
 
     const autosaveTimer = window.setTimeout(() => {
+      const sourceStorage = createSourceStorage();
+      if (
+        isShareSnapshotOwnedConversation(
+          sourceStorage,
+          state.conversation.id,
+        )
+      ) {
+        return;
+      }
+
       const timestamp = new Date().toISOString();
       const nextSource: ImportedSource = {
         id: state.source?.id ?? crypto.randomUUID(),
@@ -466,7 +485,7 @@ export function ConversationDetail({
         updatedAt: timestamp,
       };
 
-      createSourceStorage().save(nextSource);
+      sourceStorage.save(nextSource);
       createConversationStorage().save(nextConversation);
       lastSavedContent.current = draft;
       setLastSavedAt(timestamp);
@@ -818,7 +837,20 @@ export function ConversationDetail({
   }
 
   function generateMessages() {
-    if (state.status !== "ready" || !draft.trim()) {
+    if (
+      state.status !== "ready" ||
+      state.shareSnapshotOwned ||
+      !draft.trim()
+    ) {
+      return;
+    }
+
+    if (
+      isShareSnapshotOwnedConversation(
+        createSourceStorage(),
+        state.conversation.id,
+      )
+    ) {
       return;
     }
 
@@ -938,6 +970,10 @@ export function ConversationDetail({
   }
 
   function startEditingMessage(message: Message) {
+    if (state.status !== "ready" || state.shareSnapshotOwned) {
+      return;
+    }
+
     setEditingMessageId(message.id);
     setMessageDraft(message.content);
     setSavedMessageId(null);
@@ -949,13 +985,14 @@ export function ConversationDetail({
   }
 
   function saveMessageEditing(messageId: string) {
-    if (state.status !== "ready") {
+    if (state.status !== "ready" || state.shareSnapshotOwned) {
       return;
     }
 
     const result = editMessage(messageId, messageDraft, {
       conversations: createConversationStorage(),
       messages: createMessageStorage(),
+      sources: createSourceStorage(),
     });
 
     if (!result) {
@@ -1004,7 +1041,7 @@ export function ConversationDetail({
   }
 
   function restoreSnapshot(version: ConversationVersion) {
-    if (state.status !== "ready") {
+    if (state.status !== "ready" || state.shareSnapshotOwned) {
       return;
     }
 
@@ -1020,7 +1057,14 @@ export function ConversationDetail({
       conversations: createConversationStorage(),
       messages: createMessageStorage(),
       versions: createConversationVersionStorage(),
-    }).restoreSnapshot(state.conversation.id, version.id);
+    }).restoreSnapshot(
+      state.conversation.id,
+      version.id,
+      {
+        sources: createSourceStorage(),
+        rounds: createRoundStorage(),
+      },
+    );
 
     if (!result) {
       return;
@@ -1040,6 +1084,7 @@ export function ConversationDetail({
     setMessageSearchQuery("");
     setActiveSearchIndex(0);
     setMessageTimelineMode("collapsed");
+    setRoundWorkspaceRevision((current) => current + 1);
     setRestoreStatus("Restored successfully");
   }
 
@@ -1335,7 +1380,19 @@ export function ConversationDetail({
       ) : null}
 
       <div id="section-rounds">
-        {detailMode === "workspace" ? <ConversationWorkspaceMode conversationId={conversationId} onAnalyzeRound={runRoundAnalyzer} /> : <RoundWorkspace conversationId={conversationId} onAnalyzeRound={runRoundAnalyzer} />}
+        {detailMode === "workspace" ? (
+          <ConversationWorkspaceMode
+            conversationId={conversationId}
+            key={`round-workspace-${roundWorkspaceRevision}`}
+            onAnalyzeRound={runRoundAnalyzer}
+          />
+        ) : (
+          <RoundWorkspace
+            conversationId={conversationId}
+            key={`round-workspace-${roundWorkspaceRevision}`}
+            onAnalyzeRound={runRoundAnalyzer}
+          />
+        )}
       </div>
 
       <ConversationContextPanel
@@ -1643,7 +1700,8 @@ export function ConversationDetail({
                         {version.messageCount} Messages
                       </span>
                       <button
-                        className="rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-50"
+                        className="rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-40"
+                        disabled={state.shareSnapshotOwned}
                         onClick={() => restoreSnapshot(version)}
                         type="button"
                       >
@@ -1675,6 +1733,15 @@ export function ConversationDetail({
           </p>
         </div>
         <div className="rounded-xl border border-zinc-200 bg-white p-5">
+          {state.shareSnapshotOwned ? (
+            <p
+              className="mb-4 rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-800"
+              role="status"
+            >
+              此 Conversation 由 immutable share Snapshot 管理。Source 与
+              Messages 只能通过 Conversation Snapshot import 更新。
+            </p>
+          ) : null}
           <textarea
             className="min-h-64 w-full resize-y rounded-lg border border-zinc-200 bg-zinc-50 p-4 font-mono text-sm leading-7 text-zinc-800 outline-none focus:border-zinc-400 focus:bg-white focus:ring-2 focus:ring-zinc-100"
             onChange={(event) => {
@@ -1682,6 +1749,7 @@ export function ConversationDetail({
               setSaveStatus("editing");
             }}
             placeholder="在这里粘贴 ChatGPT、Claude、DeepSeek、Markdown 或其他原始文本…"
+            readOnly={state.shareSnapshotOwned}
             value={draft}
           />
           <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-xs text-zinc-500">
@@ -1773,7 +1841,7 @@ export function ConversationDetail({
             ) : null}
             <button
               className="rounded-lg bg-zinc-950 px-4 py-2.5 text-sm font-medium text-white hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-300"
-              disabled={!draft.trim()}
+              disabled={!draft.trim() || state.shareSnapshotOwned}
               onClick={generateMessages}
               type="button"
             >
@@ -1987,7 +2055,10 @@ export function ConversationDetail({
                               </button>
                               <button
                                 className="rounded-md bg-zinc-950 px-3 py-1.5 text-xs font-medium text-white hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-300"
-                                disabled={!messageDraft.trim()}
+                                disabled={
+                                  !messageDraft.trim() ||
+                                  state.shareSnapshotOwned
+                                }
                                 onClick={() => saveMessageEditing(message.id)}
                                 type="button"
                               >
@@ -2012,7 +2083,10 @@ export function ConversationDetail({
                             </span>
                             <button
                               className="rounded-md border border-zinc-200 bg-white px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-40"
-                              disabled={editingMessageId !== null}
+                              disabled={
+                                editingMessageId !== null ||
+                                state.shareSnapshotOwned
+                              }
                               onClick={() => startEditingMessage(message)}
                               type="button"
                             >

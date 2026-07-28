@@ -15,10 +15,10 @@ PALOS 面向需要与 AI 长期协作的个人用户。产品要解决的不是�
 
 ## 当前阶段
 
-截至 2026-07-27，v1.8 immutable ChatGPT Share Snapshot core、delta projector、canonical writer、legacy migration 与 Phase 2E ImportWorkbench workflow integration 已完成并通过完整验证。该路径不修改 IndexedDB schema，也不新增 canonical store。
+截至 2026-07-28，v1.8 immutable ChatGPT Conversation Snapshot core、delta projector、canonical writer、legacy migration 与 ImportWorkbench workflow integration 已完成。导入内容必须来自本地 saved HTML 或完整 rendered transcript；来源 identity 可选。该路径不修改 IndexedDB schema，也不新增 canonical store。
 
 - Current Version：v1.8 work in progress
-- Current Focus：Phase 2E Share Snapshot local capture / preview / explicit confirm integration
+- Current Focus：Conversation Snapshot local capture UX correction and validation
 - Next Recommended Phase：保留当前 commit 历史，在产品验收后再冻结后续 lifecycle hardening；当前不 push
 
 v1.7 继续把 Conversation 作为 Aggregate Root、Round 作为最小整理单元、Task 作为独立行动实体、Knowledge 作为长期稳定信息。Context 是当前有效状态，不等于所有聊天，也不自动升级为 Knowledge。
@@ -39,7 +39,7 @@ v1.7 Final Usability Correction 不扩展领域：每个 Round 卡片内直接�
 - Recipe = 本地手动工作流模板，不是 Agent，不自动执行。
 - Task / Today = 可选行动项，不是 Second Brain 主流程。
 - ChatGPT Export Import = 仅处理 zip 解压后的 `conversations.json` 最小文本；不处理其中的附件、图片、tool call、canvas、voice 或 shared link reference。
-- ChatGPT Share Snapshot = 用户提供严格 share URL，并上传 saved HTML 或粘贴 rendered text；PALOS 只在内存中规范化 URL / 生成 resourceHash，不请求 chatgpt.com，不读取 cookie/session，preview 后显式确认才写 immutable Snapshot history。
+- ChatGPT Conversation Snapshot = 用户必须上传本地 saved HTML 或粘贴完整 rendered transcript；可选提供严格的 ChatGPT share/conversation URL 作为来源 identity。New 无 URL 时生成 PALOS local resourceHash，Existing 无 URL时使用所选 Conversation 的有效 Snapshot history。PALOS 不请求 URL、不读取 cookie/session，preview 后显式确认才写 immutable Snapshot history。
 - 重复 ChatGPT 导入复用已有 Conversation，只追加新 Message；旧 Rounds 不自动覆盖。
 
 v1.7 的信息边界：Conversation 保存“讨论过什么”，Context 表达“现在什么仍然有效”，Knowledge 只保存“值得长期复用且已人工确认的稳定信息”。短期价格讨论、临时尝试和未确认判断不会仅因出现在 Context 或 Conversation 中自动成为 Knowledge。

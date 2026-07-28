@@ -13,6 +13,7 @@ import {
   collectConversationDependencyIds,
   type ConversationDependencyIds,
 } from "@/core/services/conversation-referential-integrity";
+import { assertShareSnapshotTranscriptMutable } from "@/core/services/share-snapshot-mutation-guard";
 
 export type ConversationWorkspaceStorages = {
   conversations: ConversationStorage;
@@ -167,6 +168,12 @@ export function duplicateConversationWorkspace(
   if (!originalConversation) {
     return null;
   }
+
+  assertShareSnapshotTranscriptMutable(
+    storages.sources,
+    conversationId,
+    "duplicate Conversation transcript",
+  );
 
   const timestamp = new Date().toISOString();
   const duplicatedConversation: Conversation = {

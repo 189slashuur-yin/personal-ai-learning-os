@@ -10,9 +10,15 @@ export type ShareSnapshotWorkflowStatus =
   | "blocked";
 
 export type ShareSnapshotCaptureRequest = Readonly<{
-  shareUrl: string;
+  sourceUrl?: string;
+  /** Backward-compatible caller field for the original Share Snapshot flow. */
+  shareUrl?: string;
   snapshot: ChatGPTShareSnapshotInput;
   newConversation: Readonly<Conversation>;
+  target?: Readonly<
+    | { kind: "new" }
+    | { kind: "existing"; conversationId: string }
+  >;
 }>;
 
 export type ShareSnapshotResolvedTarget = Readonly<{

@@ -14,7 +14,10 @@ import {
 } from "@/core/services/chatgpt-share-snapshot-import";
 import type { ChatGPTShareSnapshotMessageDraft } from "@/core/services/chatgpt-share-snapshot-parser";
 import {
+  identifyChatGPTConversationSourceUrl,
+  identifyPalosLocalSnapshotSource,
   identifyChatGPTShareUrl,
+  normalizeChatGPTConversationSourceUrl,
   normalizeChatGPTShareUrl,
 } from "@/core/services/chatgpt-share-snapshot-url";
 
@@ -101,6 +104,35 @@ describe("ChatGPT Share Snapshot URL identity", () => {
     expect(identity).toEqual({ resourceHash });
     expect(JSON.stringify(identity)).not.toContain("12345678-abcd");
     expect(JSON.stringify(identity)).not.toContain("chatgpt.com/share");
+  });
+
+  it("accepts a normal logged-in conversation URL without retaining it", async () => {
+    const rawUrl =
+      "https://chatgpt.com/c/12345678-1234-1234-1234-123456789abc?model=auto#latest";
+    expect(normalizeChatGPTConversationSourceUrl(rawUrl)).toBe(
+      "https://chatgpt.com/c/12345678-1234-1234-1234-123456789abc",
+    );
+    const identity = await identifyChatGPTConversationSourceUrl(rawUrl);
+    expect(identity.resourceHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(JSON.stringify(identity)).not.toContain("chatgpt.com");
+    expect(JSON.stringify(identity)).not.toContain("12345678-1234");
+  });
+
+  it("generates a stable namespaced PALOS local identity", async () => {
+    const first = await identifyPalosLocalSnapshotSource(
+      "conversation-local-identity",
+    );
+    const repeated = await identifyPalosLocalSnapshotSource(
+      "conversation-local-identity",
+    );
+    const other = await identifyPalosLocalSnapshotSource(
+      "conversation-other-identity",
+    );
+
+    expect(first).toEqual(repeated);
+    expect(first.resourceHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(first).not.toEqual(other);
+    expect(JSON.stringify(first)).not.toContain("conversation-local-identity");
   });
 
   it("rejects non-ChatGPT and non-HTTPS URLs", () => {

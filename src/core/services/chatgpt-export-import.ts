@@ -7,6 +7,7 @@ import type { ImportPreview, ParsedMessageDraft } from "@/core/entities/import-p
 import { deriveRoundDrafts } from "@/core/services/import-parser-pipeline";
 import { ImportService } from "@/core/services/import-service";
 import { RoundService } from "@/core/services/round-service";
+import { assertShareSnapshotTranscriptMutable } from "@/core/services/share-snapshot-mutation-guard";
 
 type ChatGPTNode = {
   id?: string;
@@ -309,6 +310,11 @@ export class ChatGPTExportImportService {
 
     const existing = this.conversations.getById(preview.existingConversationId);
     if (!existing) throw new Error("Existing Conversation is unavailable.");
+    assertShareSnapshotTranscriptMutable(
+      this.sources,
+      existing.id,
+      "append ChatGPT export",
+    );
     const storedMessages = this.messages.getByConversationId(existing.id);
     const externalIds = new Set(storedMessages.flatMap((message) => message.externalMessageId ? [message.externalMessageId] : []));
     const hashes = new Set(storedMessages.map((message) => message.contentHash ?? contentHash(message.role, message.content)));
@@ -388,6 +394,12 @@ export class ChatGPTExportImportService {
     const timestamp = new Date().toISOString();
     const target = this.conversations.getById(targetConversationId);
     if (!target) throw new Error("Target conversation not found.");
+
+    assertShareSnapshotTranscriptMutable(
+      this.sources,
+      targetConversationId,
+      "append ChatGPT export",
+    );
 
     const existingMessages = this.messages.getByConversationId(targetConversationId);
 

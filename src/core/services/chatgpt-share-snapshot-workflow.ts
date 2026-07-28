@@ -32,7 +32,9 @@ import {
   type ChatGPTShareSnapshotTarget,
 } from "@/core/services/chatgpt-share-snapshot-service";
 import {
+  identifyChatGPTConversationSourceUrl,
   identifyChatGPTShareUrl,
+  identifyPalosLocalSnapshotSource,
   shareResourceFingerprint,
   type ChatGPTShareIdentity,
 } from "@/core/services/chatgpt-share-snapshot-url";
@@ -67,6 +69,17 @@ const EMPTY_SUMMARY: ShareSnapshotPreviewSummary = {
   newRoundCount: 0,
 };
 
+export const CONVERSATION_SNAPSHOT_CONTENT_REQUIRED_MESSAGE =
+  "链接只用于识别来源，不能单独导入对话。\n请上传已保存的网页 HTML，或粘贴完整对话内容。";
+
+export function validateConversationSnapshotContent(
+  request: Pick<ShareSnapshotCaptureRequest, "snapshot">,
+): string | null {
+  return request.snapshot.content.trim()
+    ? null
+    : CONVERSATION_SNAPSHOT_CONTENT_REQUIRED_MESSAGE;
+}
+
 function preparationStatus(
   preparation: ChatGPTShareSnapshotPreparation,
 ): ShareSnapshotWorkflowStatus {
@@ -98,9 +111,91 @@ export class ChatGPTShareSnapshotWorkflow {
     request: ShareSnapshotCaptureRequest,
   ): Promise<ShareSnapshotPreview> {
     const previewId = this.allocatePreviewId();
+    const contentError = validateConversationSnapshotContent(request);
+    if (contentError) {
+      return this.storeTerminalPreview({
+        previewId,
+        status: "invalid",
+        summary: EMPTY_SUMMARY,
+        confirmable: false,
+        warnings: [],
+        errors: [contentError],
+      });
+    }
+
+    const allSources = this.storages.sources.getAll();
+    const preferredSourceUrl = request.sourceUrl?.trim() ?? "";
+    const legacySourceUrl = request.shareUrl?.trim() ?? "";
+    if (
+      preferredSourceUrl &&
+      legacySourceUrl &&
+      preferredSourceUrl !== legacySourceUrl
+    ) {
+      return this.storeTerminalPreview({
+        previewId,
+        status: "invalid",
+        summary: EMPTY_SUMMARY,
+        confirmable: false,
+        warnings: [],
+        errors: ["一次 Snapshot capture 只能提供一个来源链接。"],
+      });
+    }
+    const sourceUrl = preferredSourceUrl || legacySourceUrl;
     let identity: ChatGPTShareIdentity;
     try {
-      identity = await identifyChatGPTShareUrl(request.shareUrl);
+      if (sourceUrl) {
+        identity = await identifyChatGPTConversationSourceUrl(sourceUrl);
+      } else if (request.target?.kind === "existing") {
+        const targetConversationId = request.target.conversationId;
+        const targetSources = allSources.filter(
+          (source) =>
+            source.conversationId === targetConversationId &&
+            isChatGPTShareSnapshotMetadata(source.shareSnapshot),
+        );
+        const resourceHashes = new Set(
+          targetSources.flatMap((source) =>
+            isChatGPTShareSnapshotMetadata(source.shareSnapshot)
+              ? [source.shareSnapshot.resourceHash]
+              : [],
+          ),
+        );
+        if (resourceHashes.size === 0) {
+          const hasLegacyHistory = allSources.some(
+            (source) =>
+              source.conversationId === targetConversationId &&
+              isLegacyChatGPTShareSnapshotMetadata(source.shareSnapshot),
+          );
+          return this.storeTerminalPreview({
+            previewId,
+            status: "invalid",
+            summary: EMPTY_SUMMARY,
+            confirmable: false,
+            warnings: [],
+            errors: [
+              hasLegacyHistory
+                ? "所选 Conversation 只有旧版 Snapshot metadata；请先完成显式 legacy migration。"
+                : "所选 Conversation 没有可用的 Snapshot history，无法在不提供来源链接时判断更新基线。",
+            ],
+          });
+        }
+        if (resourceHashes.size > 1) {
+          return this.storeTerminalPreview({
+            previewId,
+            status: "ambiguous",
+            summary: EMPTY_SUMMARY,
+            confirmable: false,
+            warnings: [],
+            errors: [
+              "所选 Conversation 存在多个 Snapshot resource identity，无法自动选择更新基线。",
+            ],
+          });
+        }
+        identity = { resourceHash: [...resourceHashes][0] };
+      } else {
+        identity = await identifyPalosLocalSnapshotSource(
+          request.newConversation.id,
+        );
+      }
     } catch (error) {
       return this.storeTerminalPreview({
         previewId,
@@ -112,7 +207,6 @@ export class ChatGPTShareSnapshotWorkflow {
       });
     }
 
-    const allSources = this.storages.sources.getAll();
     for (const source of allSources) {
       if (!isLegacyChatGPTShareSnapshotMetadata(source.shareSnapshot)) continue;
       try {
@@ -152,6 +246,21 @@ export class ChatGPTShareSnapshotWorkflow {
     let existingRoundCount = 0;
 
     if (matchingSources.length === 0) {
+      if (request.target?.kind === "existing") {
+        return this.storeTerminalPreview({
+          previewId,
+          resourceFingerprint: shareResourceFingerprint(identity.resourceHash),
+          status: "invalid",
+          summary: EMPTY_SUMMARY,
+          confirmable: false,
+          warnings: [],
+          errors: [
+            sourceUrl
+              ? "这个来源链接与所选 Conversation 的 Snapshot history 不匹配。请清空链接以使用现有本地 history，或选择正确的 Conversation。"
+              : "所选 Conversation 没有可用的 Snapshot history。",
+          ],
+        });
+      }
       if (
         this.storages.conversations.getById(request.newConversation.id) !== null
       ) {
@@ -190,6 +299,25 @@ export class ChatGPTShareSnapshotWorkflow {
         });
       }
       const conversationId = matchingSources[0].conversationId;
+      if (
+        request.target?.kind === "existing" &&
+        conversationId !== request.target.conversationId
+      ) {
+        const actualOwner = conversationId
+          ? this.storages.conversations.getById(conversationId)
+          : null;
+        return this.storeTerminalPreview({
+          previewId,
+          resourceFingerprint: shareResourceFingerprint(identity.resourceHash),
+          status: "invalid",
+          summary: EMPTY_SUMMARY,
+          confirmable: false,
+          warnings: [],
+          errors: [
+            `来源 identity 属于「${actualOwner?.title ?? conversationId ?? "未知 Conversation"}」，与当前选择不一致。`,
+          ],
+        });
+      }
       if (!conversationId) {
         return this.storeTerminalPreview({
           previewId,
@@ -291,7 +419,7 @@ export class ChatGPTShareSnapshotWorkflow {
     }
 
     const preparation = await prepareChatGPTShareSnapshot({
-      shareUrl: request.shareUrl,
+      identity,
       snapshot: request.snapshot,
       capturedAt,
       target,

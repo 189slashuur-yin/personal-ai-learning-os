@@ -1,6 +1,8 @@
 import type { ConversationStorage } from "@/core/contracts/conversation-storage";
 import type { ConversationVersionStorage } from "@/core/contracts/conversation-version-storage";
 import type { MessageStorage } from "@/core/contracts/message-storage";
+import type { RoundStorage } from "@/core/contracts/round-storage";
+import type { SourceStorage } from "@/core/contracts/source-storage";
 import type {
   ConversationContextChange,
   ConversationVersion,
@@ -8,6 +10,8 @@ import type {
 } from "@/core/entities/conversation-version";
 import type { Conversation } from "@/core/entities/conversation";
 import type { Message } from "@/core/entities/message";
+import type { Round } from "@/core/entities/round";
+import { assertShareSnapshotTranscriptMutable } from "@/core/services/share-snapshot-mutation-guard";
 
 export type ConversationVersionStorages = {
   conversations: ConversationStorage;
@@ -18,7 +22,13 @@ export type ConversationVersionStorages = {
 export type RestoredConversationSnapshot = {
   conversation: Conversation;
   messages: Message[];
+  rounds: Round[];
   version: ConversationVersion;
+};
+
+export type ConversationSnapshotRestoreStorages = {
+  sources: SourceStorage;
+  rounds: RoundStorage;
 };
 
 export type CreateConversationSnapshotOptions = {
@@ -78,6 +88,7 @@ export class ConversationVersionService {
   restoreSnapshot(
     conversationId: string,
     versionId: string,
+    restoreStorages: ConversationSnapshotRestoreStorages,
   ): RestoredConversationSnapshot | null {
     const currentConversation =
       this.storages.conversations.getById(conversationId);
@@ -89,6 +100,16 @@ export class ConversationVersionService {
       return null;
     }
 
+    assertShareSnapshotTranscriptMutable(
+      restoreStorages.sources,
+      conversationId,
+      "restore Conversation version",
+    );
+
+    const currentMessages =
+      this.storages.messages.getByConversationId(conversationId);
+    const currentRounds =
+      restoreStorages.rounds.getByConversationId(conversationId);
     const timestamp = new Date().toISOString();
     const restoredConversation: Conversation = {
       ...cloneConversation(version.snapshotData.conversation),
@@ -105,16 +126,44 @@ export class ConversationVersionService {
         updatedAt: timestamp,
       }),
     );
+    const restoredMessageByOrder = new Map(
+      restoredMessages.map((message) => [message.order, message]),
+    );
+    const restoredMessageIdByReferenceId = new Map(
+      version.snapshotData.messages.map((message, index) => [
+        message.id,
+        restoredMessages[index].id,
+      ]),
+    );
+    currentMessages.forEach((message) => {
+      const restoredMessage = restoredMessageByOrder.get(message.order);
+      if (restoredMessage) {
+        restoredMessageIdByReferenceId.set(message.id, restoredMessage.id);
+      }
+    });
+    const restoredRounds: Round[] = currentRounds.map((round) => ({
+      ...round,
+      messageIds: round.messageIds.flatMap((messageId) => {
+        const restoredMessageId =
+          restoredMessageIdByReferenceId.get(messageId);
+        return restoredMessageId ? [restoredMessageId] : [];
+      }),
+    }));
 
     this.storages.conversations.save(restoredConversation);
     this.storages.messages.replaceByConversationId(
       currentConversation.id,
       restoredMessages,
     );
+    restoreStorages.rounds.replaceByConversationId(
+      currentConversation.id,
+      restoredRounds,
+    );
 
     return {
       conversation: restoredConversation,
       messages: restoredMessages,
+      rounds: restoredRounds,
       version,
     };
   }

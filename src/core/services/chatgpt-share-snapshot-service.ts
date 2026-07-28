@@ -58,7 +58,9 @@ export type ChatGPTShareSnapshotTarget =
   | ChatGPTShareSnapshotExistingTarget;
 
 export type PrepareChatGPTShareSnapshotInput = Readonly<{
-  shareUrl: string;
+  identity?: ChatGPTShareIdentity;
+  /** Backward-compatible direct service input. Prefer identity from workflow. */
+  shareUrl?: string;
   snapshot: ChatGPTShareSnapshotInput;
   capturedAt: string;
   target: ChatGPTShareSnapshotTarget;
@@ -325,7 +327,14 @@ function materializeCanonicalPlan(input: {
 export async function prepareChatGPTShareSnapshot(
   input: PrepareChatGPTShareSnapshotInput,
 ): Promise<ChatGPTShareSnapshotPreparation> {
-  const identity = await identifyChatGPTShareUrl(input.shareUrl);
+  const identity = input.identity
+    ? { ...input.identity }
+    : await identifyChatGPTShareUrl(input.shareUrl ?? "");
+  if (!/^[a-f0-9]{64}$/.test(identity.resourceHash)) {
+    throw new Error(
+      "Conversation Snapshot resource identity must be a SHA-256 hash.",
+    );
+  }
   const parsed = parseChatGPTShareSnapshot(input.snapshot);
   const capturedAtError = validateCapturedAt(input.capturedAt);
   const inputErrors = [

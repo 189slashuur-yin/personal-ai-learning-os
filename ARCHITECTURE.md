@@ -3,17 +3,18 @@
 ## Current release context
 
 - Current Version：v1.8 work in progress
-- Current Focus：Phase 2E Share Snapshot user workflow integration
+- Current Focus：Conversation Snapshot local capture UX correction
 - Next Recommended Phase：保留当前 commit 历史，产品验收后再进入已延期的 lifecycle hardening；当前不 push
 
 当前架构结论仍受单浏览器、本地优先与浏览器存储边界约束。PALOS 业务数据默认使用 IndexedDB；LocalStorage 保留为轻量配置、UI 偏好、schema/storage metadata 与旧数据迁移来源。v1.0 候选必须先完成范围和验收评审，不能从本文的演进 seam 推定为已批准实现。
 
-## v1.8 Phase 2E Share Snapshot workflow delta
+## v1.8 Conversation Snapshot workflow delta
 
-- Import UI 仍是 target 与 input source 两个正交轴；input source 新增第四个 `ChatGPT Share Snapshot`，复用原有 New / Existing selector，不增加第二个 target selector。
-- Share mode 只接受用户上传的 saved HTML 或粘贴的 rendered text。严格 ChatGPT share URL 仅存在于 React capture state 与一次 workflow request 中，用于规范化和 SHA-256 resourceHash；不持久化 raw URL/share token，不访问 chatgpt.com，不读取 cookie/session。
+- Import UI 仍是 target 与 input source 两个正交轴；input source 第四项命名为 `ChatGPT Conversation Snapshot`，复用原有 New / Existing state，并在 Snapshot 表单中只渲染一个 target selector。
+- Conversation content 必填且严格二选一：用户上传的本地 saved HTML 或粘贴的完整 rendered transcript。可选来源 identity 接受严格 ChatGPT share URL 或 logged-in conversation URL；URL 仅存在于 React capture state 与一次 workflow request，用于规范化和 SHA-256 resourceHash，不持久化、不请求、不读取 cookie/session/internal API。
+- New 无 URL时对 namespaced PALOS local identity 生成稳定 resourceHash；Existing 无 URL时从所选 Conversation 的唯一有效 immutable history 取得既有 resourceHash。旧 Share Snapshot v2 histories 继续兼容。
 - UI 只调用公开 `ChatGPTShareSnapshotWorkflow.preview()` / `confirm()`；parser、comparator、delta projector 与 canonical plan 仍封装在 workflow 内。UI 不读取 private plan，也不直接调用 canonical operation。
-- resourceHash history 仍是真实 owner authority。New / Existing selector 是用户意图 guard：resolved target 与选择不一致时 preview 明确阻止 confirm，不静默重定向写入。
+- resourceHash history 仍是真实 owner authority。New / Existing selector 是用户意图 guard：resolved target 与选择不一致时 preview 明确阻止 confirm，不静默重定向写入；URL-only 在 parser 前阻止。
 - preview 显示 new/append/same/blocked、existing/snapshot/new Message counts、Round extend/create/total impact，以及 Conversation、Message provenance 和 Round enrichment preservation。
 - 输入、target、Workspace、标题或 content kind 改变都会丢弃旧 preview/workflow instance；异步 preview/file read 使用 revision guard，不能用 stale baseline confirm。
 - confirm 仅在 IndexedDB authoritative state 已加载、preview confirmable、baseline 与 target intent 均有效时启用；写入仍由 hardened canonical writer 的单事务与 reload verification 完成。LocalStorage debug mode 不执行 Share Snapshot canonical write。
