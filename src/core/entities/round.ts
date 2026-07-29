@@ -1,3 +1,22 @@
+import type {
+  ConversationContext,
+  ConversationContextField,
+} from "@/core/entities/conversation";
+
+export const roundContextInheritanceModes = ["inherit", "exclude"] as const;
+
+export type RoundContextInheritanceMode =
+  (typeof roundContextInheritanceModes)[number];
+
+export type RoundContext = {
+  inheritanceMode: RoundContextInheritanceMode;
+  sourceRoundId?: string;
+  excludedFields?: ConversationContextField[];
+  overrides?: ConversationContext;
+  snapshot?: ConversationContext;
+  confirmedAt?: string;
+};
+
 export type Round = {
   id: string;
   conversationId: string;
@@ -8,6 +27,7 @@ export type Round = {
   messageIds: string[];
   note?: string;
   summary?: string;
+  context?: RoundContext;
   createdAt: string;
   updatedAt: string;
 };

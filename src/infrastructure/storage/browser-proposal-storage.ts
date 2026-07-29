@@ -1,7 +1,11 @@
 import type { ProposalStorage } from "@/core/contracts/proposal-storage";
 import type { Proposal } from "@/core/entities/proposal";
+import {
+  clearCurrentProposalPointer,
+  readCurrentProposalPointer,
+  writeCurrentProposalPointer,
+} from "@/infrastructure/storage/flow-pointers";
 
-const CURRENT_PROPOSAL_KEY = "ai-learning-os.current-proposal";
 const PROPOSALS_KEY = "ai-learning-os.proposals";
 
 export class BrowserProposalStorage implements ProposalStorage {
@@ -30,34 +34,29 @@ export class BrowserProposalStorage implements ProposalStorage {
 
   saveCurrent(proposal: Proposal) {
     this.save(proposal);
-    window.localStorage.setItem(CURRENT_PROPOSAL_KEY, JSON.stringify(proposal));
+    writeCurrentProposalPointer(proposal);
   }
 
   getCurrent() {
-    const storedProposal = window.localStorage.getItem(CURRENT_PROPOSAL_KEY);
-
-    if (!storedProposal) {
-      return null;
-    }
-
-    return JSON.parse(storedProposal) as Proposal;
+    const currentProposal = readCurrentProposalPointer();
+    if (!currentProposal) return null;
+    const canonicalProposal = this.readStoredProposals().find(
+      (proposal) => proposal.id === currentProposal.id,
+    );
+    if (canonicalProposal) return canonicalProposal;
+    clearCurrentProposalPointer();
+    return null;
   }
 
   getAll() {
+    return this.readStoredProposals();
+  }
+
+  private readStoredProposals() {
     const storedProposals = window.localStorage.getItem(PROPOSALS_KEY);
-    const proposals = storedProposals
+    return storedProposals
       ? (JSON.parse(storedProposals) as Proposal[])
       : [];
-    const currentProposal = this.getCurrent();
-
-    if (
-      currentProposal &&
-      !proposals.some((proposal) => proposal.id === currentProposal.id)
-    ) {
-      return [...proposals, currentProposal];
-    }
-
-    return proposals;
   }
 
   getById(id: string) {
@@ -78,7 +77,7 @@ export class BrowserProposalStorage implements ProposalStorage {
     this.write(this.getAll().filter((proposal) => proposal.id !== id));
 
     if (this.getCurrent()?.id === id) {
-      window.localStorage.removeItem(CURRENT_PROPOSAL_KEY);
+      clearCurrentProposalPointer();
     }
   }
 
@@ -95,7 +94,7 @@ export class BrowserProposalStorage implements ProposalStorage {
       currentProposal?.sourceId &&
       sourceIdSet.has(currentProposal.sourceId)
     ) {
-      window.localStorage.removeItem(CURRENT_PROPOSAL_KEY);
+      clearCurrentProposalPointer();
     }
   }
 
@@ -107,7 +106,7 @@ export class BrowserProposalStorage implements ProposalStorage {
 
     const currentProposal = this.getCurrent();
     if (currentProposal?.conversationId === conversationId) {
-      window.localStorage.removeItem(CURRENT_PROPOSAL_KEY);
+      clearCurrentProposalPointer();
     }
   }
 

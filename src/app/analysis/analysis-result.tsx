@@ -13,9 +13,11 @@ import { ProviderService } from "@/core/services/provider-service";
 import { BrowserAIProviderStorage } from "@/infrastructure/storage/browser-ai-provider-storage";
 import { BrowserAnalyzerRunStorage } from "@/infrastructure/storage/browser-analyzer-run-storage";
 import { BrowserPromptTemplateStorage } from "@/infrastructure/storage/browser-prompt-template-storage";
-import { BrowserProposalStorage } from "@/infrastructure/storage/browser-proposal-storage";
 import { BrowserProviderConfigurationStorage } from "@/infrastructure/storage/browser-provider-configuration-storage";
-import { BrowserSourceStorage } from "@/infrastructure/storage/browser-source-storage";
+import {
+  createProposalStorage,
+  createSourceStorage,
+} from "@/infrastructure/storage/storage-factory";
 import { CapabilityBadges } from "@/app/capability-badges";
 
 type AnalysisState =
@@ -76,7 +78,7 @@ export function AnalysisResult() {
 
   useEffect(() => {
     const analysisTimer = window.setTimeout(async () => {
-      const source = new BrowserSourceStorage().getCurrent();
+      const source = createSourceStorage().getCurrent();
 
       if (!source) {
         setState({ status: "missing-source" });
@@ -88,7 +90,7 @@ export function AnalysisResult() {
 
       if (result.proposal) {
         const proposal = result.proposal;
-        new BrowserProposalStorage().saveCurrent(proposal);
+        createProposalStorage().saveCurrent(proposal);
         setState({ status: "complete", proposal });
       } else {
         setState({
@@ -102,7 +104,7 @@ export function AnalysisResult() {
   }, []);
 
   async function retryOrSimulate(simulateFailure = false) {
-    const sourceStorage = new BrowserSourceStorage();
+    const sourceStorage = createSourceStorage();
     const sourceId = latestRun?.sourceId;
     const source = sourceId
       ? sourceStorage.getAll().find((item) => item.id === sourceId) ?? null
@@ -125,7 +127,7 @@ export function AnalysisResult() {
       return;
     }
 
-    new BrowserProposalStorage().saveCurrent(result.proposal);
+    createProposalStorage().saveCurrent(result.proposal);
     setState({ status: "complete", proposal: result.proposal });
   }
 

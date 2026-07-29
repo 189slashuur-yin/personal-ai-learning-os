@@ -7,22 +7,38 @@ import { DEFAULT_WORKSPACE_ID, type Workspace } from "@/core/entities/workspace"
 import {
   batchDeleteConversationWorkspace,
   type BatchDeleteResult,
+  deleteConversationSidecarMetadata,
   deleteConversationWorkspace,
   duplicateConversationWorkspace,
   type ConversationWorkspaceStorages,
 } from "@/core/services/conversation-workspace";
-import { BrowserConversationStorage } from "@/infrastructure/storage/browser-conversation-storage";
-import { BrowserConversationVersionStorage } from "@/infrastructure/storage/browser-conversation-version-storage";
 import { BrowserAnalyzerRunStorage } from "@/infrastructure/storage/browser-analyzer-run-storage";
 import { BrowserAssetStorage } from "@/infrastructure/storage/browser-asset-storage";
-import { BrowserKnowledgeCardStorage } from "@/infrastructure/storage/browser-knowledge-card-storage";
-import { BrowserMessageStorage } from "@/infrastructure/storage/browser-message-storage";
-import { BrowserProposalStorage } from "@/infrastructure/storage/browser-proposal-storage";
-import { BrowserSourceStorage } from "@/infrastructure/storage/browser-source-storage";
 import { BrowserTaskStorage } from "@/infrastructure/storage/browser-task-storage";
 import { BrowserWorkspaceStorage } from "@/infrastructure/storage/browser-workspace-storage";
-import { BrowserRoundStorage } from "@/infrastructure/storage/browser-round-storage";
+import {
+  createStorageInstances,
+  ensureIndexedDBLoaded,
+  getStorageMode,
+} from "@/infrastructure/storage/storage-factory";
+import {
+  clearCaches,
+  flushCachesToIndexedDB,
+  getCachedCounts,
+} from "@/infrastructure/storage/indexeddb/preload";
+import { bulkDeleteCanonicalConversations } from "@/infrastructure/storage/indexeddb/canonical-operations";
+import {
+  completeDestructiveDiagnosticOperation,
+  recordBulkDiagnostic,
+  startBulkDiagnosticOperation,
+} from "@/infrastructure/diagnostics/bulk-data-diagnostics";
 import { WorkspaceService } from "@/core/services/workspace-service";
+import { BulkDiagnosticsCopyButton } from "@/app/bulk-diagnostics-copy-button";
+import {
+  deriveConversationQuickFilterIds,
+  filterConversationQuickItems,
+  type ConversationQuickFilter,
+} from "@/core/services/conversation-quick-filters";
 import { ConversationCard } from "./conversation-card";
 import { CreateConversationDialog } from "./create-conversation-dialog";
 
@@ -37,16 +53,17 @@ type ConversationItem = {
 };
 
 function createWorkspaceStorages(): ConversationWorkspaceStorages {
+  const businessStorages = createStorageInstances();
   return {
-    conversations: new BrowserConversationStorage(),
-    sources: new BrowserSourceStorage(),
-    proposals: new BrowserProposalStorage(),
-    knowledgeCards: new BrowserKnowledgeCardStorage(),
-    messages: new BrowserMessageStorage(),
+    conversations: businessStorages.conversations,
+    sources: businessStorages.sources,
+    proposals: businessStorages.proposals,
+    knowledgeCards: businessStorages.knowledgeCards,
+    messages: businessStorages.messages,
     analyzerRuns: new BrowserAnalyzerRunStorage(),
-    versions: new BrowserConversationVersionStorage(),
+    versions: businessStorages.conversationVersions,
     assets: new BrowserAssetStorage(),
-    rounds: new BrowserRoundStorage(),
+    rounds: businessStorages.rounds,
   };
 }
 
@@ -91,6 +108,58 @@ function loadConversationData(): { items: ConversationItem[]; workspaces: Worksp
   }), workspaces };
 }
 
+function getOrphanDependentCounts(
+  storages: ConversationWorkspaceStorages,
+): Record<string, number> {
+  const conversationIds = new Set(
+    storages.conversations.getAll().map((conversation) => conversation.id),
+  );
+  const sources = storages.sources.getAll();
+  const sourceIds = new Set(sources.map((source) => source.id));
+  const messages = storages.messages.getAll();
+  const messageIds = new Set(messages.map((message) => message.id));
+  const rounds = storages.rounds?.getAll() ?? [];
+  const roundIds = new Set(rounds.map((round) => round.id));
+  const proposals = storages.proposals.getAll();
+  const proposalIds = new Set(proposals.map((proposal) => proposal.id));
+
+  return {
+    messages: messages
+      .filter((message) => !conversationIds.has(message.conversationId)).length,
+    rounds: rounds.filter(
+      (round) => !conversationIds.has(round.conversationId),
+    ).length,
+    sources: sources.filter(
+      (source) =>
+        Boolean(
+          source.conversationId &&
+            !conversationIds.has(source.conversationId),
+        ),
+    ).length,
+    proposals: proposals.filter(
+      (proposal) =>
+        Boolean(
+          (proposal.conversationId &&
+            !conversationIds.has(proposal.conversationId)) ||
+            (proposal.sourceId && !sourceIds.has(proposal.sourceId)) ||
+            (proposal.sourceRoundId && !roundIds.has(proposal.sourceRoundId)) ||
+            proposal.sourceMessageIds?.some(
+              (messageId) => !messageIds.has(messageId),
+            ),
+        ),
+    ).length,
+    knowledgeCards: storages.knowledgeCards
+      .getAll()
+      .filter((card) => !proposalIds.has(card.proposalId)).length,
+    conversationVersions:
+      storages.versions
+        ?.getAll()
+        .filter(
+          (version) => !conversationIds.has(version.conversationId),
+        ).length ?? 0,
+  };
+}
+
 export function ConversationList() {
   const [items, setItems] = useState<ConversationItem[] | null>(null);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
@@ -99,75 +168,110 @@ export function ConversationList() {
 
   // P0-8: Batch selection
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [quickFilter, setQuickFilter] = useState<"all" | "empty" | "imported" | "failed-import">("all");
+  const [quickFilter, setQuickFilter] = useState<ConversationQuickFilter>("all");
   const [deleteResult, setDeleteResult] = useState<BatchDeleteResult | null>(null);
 
   useEffect(() => {
     const loadTimer = window.setTimeout(() => {
-      const data = loadConversationData();
-      setItems(data.items);
-      setWorkspaces(data.workspaces);
-      const requestedWorkspace = new URLSearchParams(window.location.search).get(
-        "workspace",
-      );
-      if (
-        requestedWorkspace &&
-        data.workspaces.some((workspace) => workspace.id === requestedWorkspace)
-      ) {
-        setWorkspaceFilter(requestedWorkspace);
+      async function load() {
+        if (getStorageMode() === "indexedDB") {
+          await ensureIndexedDBLoaded();
+        }
+        const data = loadConversationData();
+        setItems(data.items);
+        setWorkspaces(data.workspaces);
+        const requestedWorkspace = new URLSearchParams(window.location.search).get(
+          "workspace",
+        );
+        if (
+          requestedWorkspace &&
+          data.workspaces.some((workspace) => workspace.id === requestedWorkspace)
+        ) {
+          setWorkspaceFilter(requestedWorkspace);
+        }
       }
+      void load();
     }, 0);
 
     return () => window.clearTimeout(loadTimer);
   }, []);
 
   // P0-8: Derived sets for quick filters
-  const emptyConversationIds = useMemo(
-    () =>
-      new Set(
-        (items ?? [])
-          .filter((item) => item.messageCount === 0 || item.roundCount === 0)
-          .map((item) => item.conversation.id),
-      ),
+  const quickFilterIds = useMemo(
+    () => deriveConversationQuickFilterIds(items ?? []),
     [items],
   );
+  const emptyConversationIds = quickFilterIds.empty;
+  const importedConversationIds = quickFilterIds.imported;
+  const failedImportIds = quickFilterIds.failedImport;
 
-  const importedConversationIds = useMemo(
-    () =>
-      new Set(
-        (items ?? [])
-          .filter((item) => item.conversation.externalSource === "chatgpt")
-          .map((item) => item.conversation.id),
-      ),
-    [items],
-  );
+  async function persistAndReload() {
+    if (getStorageMode() === "indexedDB") {
+      await flushCachesToIndexedDB();
+      clearCaches();
+      await ensureIndexedDBLoaded();
+    }
+    const data = loadConversationData();
+    setItems(data.items);
+    setWorkspaces(data.workspaces);
+  }
 
-  const failedImportIds = useMemo(
-    () =>
-      new Set(
-        (items ?? [])
-          .filter(
-            (item) =>
-              item.conversation.externalSource === "chatgpt" &&
-              item.messageCount === 0 &&
-              item.roundCount === 0,
-          )
-          .map((item) => item.conversation.id),
-      ),
-    [items],
-  );
-
-  function handleDelete(conversation: Conversation) {
+  async function handleDelete(conversation: Conversation) {
     const confirmed = window.confirm(
-      `确定删除「${conversation.title}」吗？关联的 Rounds、Messages、Source、Proposal、KnowledgeCard、AnalyzerRun、Conversation History 与 Asset metadata 也会删除；真实本地文件不会删除，关联 Task 会保留并显示 source missing。`,
+      `确定删除「${conversation.title}」吗？关联的 Rounds、Messages、Source、Proposal、AnalyzerRun、Conversation History 与 Asset metadata 会删除；已确认 Knowledge 和关联 Task 会保留，但来源会显示已删除。真实本地文件不会删除。`,
     );
 
     if (!confirmed) {
       return;
     }
 
-    deleteConversationWorkspace(conversation.id, createWorkspaceStorages());
-    setItems(loadConversationData().items);
+    let sidecarCleanupFailures: string[] = [];
+    try {
+      if (getStorageMode() === "indexedDB") {
+        const result = await bulkDeleteCanonicalConversations([
+          conversation.id,
+        ]);
+        sidecarCleanupFailures = deleteConversationSidecarMetadata(
+          result.deletedDependencyIds,
+          {
+            analyzerRuns: new BrowserAnalyzerRunStorage(),
+            assets: new BrowserAssetStorage(),
+          },
+        );
+        const data = loadConversationData();
+        setItems(data.items);
+        setWorkspaces(data.workspaces);
+      } else {
+        const result = deleteConversationWorkspace(
+          conversation.id,
+          createWorkspaceStorages(),
+        );
+        sidecarCleanupFailures = result.sidecarCleanupFailures;
+        await persistAndReload();
+      }
+    } catch (error) {
+      console.error("[handleDelete] post-delete integrity verification failed", error);
+      alert(
+        "Conversation 删除未通过完整性验证。请复制诊断信息并刷新后复查；不会显示删除成功。",
+      );
+      return;
+    }
+
+    if (sidecarCleanupFailures.length > 0) {
+      console.error("[handleDelete] sidecar cleanup failures", sidecarCleanupFailures);
+      alert(
+        `Conversation 主数据已删除，但 ${sidecarCleanupFailures.length} 个 sidecar 清理失败。请复制诊断信息后重试。`,
+      );
+    }
+
+    // Verify deletion
+    const verifyStorages = createWorkspaceStorages();
+    if (verifyStorages.conversations.getById(conversation.id)) {
+      console.error(
+        `[handleDelete] Conversation ${conversation.id} still present after persistAndReload.`,
+      );
+    }
+
     setSelectedIds((prev) => {
       const next = new Set(prev);
       next.delete(conversation.id);
@@ -175,20 +279,29 @@ export function ConversationList() {
     });
   }
 
-  function handleDuplicate(conversation: Conversation) {
-    duplicateConversationWorkspace(conversation.id, createWorkspaceStorages());
-    setItems(loadConversationData().items);
+  async function handleDuplicate(conversation: Conversation) {
+    try {
+      duplicateConversationWorkspace(
+        conversation.id,
+        createWorkspaceStorages(),
+      );
+      await persistAndReload();
+    } catch (error) {
+      alert(
+        error instanceof Error
+          ? `Conversation 复制失败：${error.message}`
+          : "Conversation 复制失败，请刷新后重试。",
+      );
+    }
   }
 
-  function handleMove(conversationId: string, workspaceId: string) {
+  async function handleMove(conversationId: string, workspaceId: string) {
     new WorkspaceService(
       new BrowserWorkspaceStorage(),
-      new BrowserConversationStorage(),
+      createStorageInstances().conversations,
       new BrowserTaskStorage(),
     ).moveConversation(conversationId, workspaceId);
-    const data = loadConversationData();
-    setItems(data.items);
-    setWorkspaces(data.workspaces);
+    await persistAndReload();
   }
 
   // P0-8: Batch selection helpers
@@ -214,9 +327,12 @@ export function ConversationList() {
   }
 
   // P0-8: Batch delete
-  function handleBatchDelete() {
+  async function handleBatchDelete() {
     const ids = Array.from(selectedIds);
     if (ids.length === 0) return;
+
+    // Clear previous delete result before starting new delete
+    setDeleteResult(null);
 
     const emptyCount = ids.filter((id) => emptyConversationIds.has(id)).length;
 
@@ -225,14 +341,205 @@ export function ConversationList() {
         `选中数量：${ids.length}\n` +
         `其中 0 Message / 0 Round 的数量：${emptyCount}\n\n` +
         `删除后将同时移除关联的 Messages、Rounds、Source 和 Proposals。\n` +
-        `Knowledge 不会自动删除，但可能产生孤立 Knowledge。`,
+        `已确认 Knowledge 会保留，并显示来源已删除；关联 Task 也会保留。`,
     );
 
     if (!confirmed) return;
 
-    const result = batchDeleteConversationWorkspace(ids, createWorkspaceStorages());
-    setDeleteResult(result);
-    setItems(loadConversationData().items);
+    // Record pre-delete counts for accurate reporting
+    const preDeleteStorages = createWorkspaceStorages();
+    const preDeleteConversationIds = new Set(
+      preDeleteStorages.conversations.getAll().map((c) => c.id),
+    );
+    const actuallyExistingIds = ids.filter((id) => preDeleteConversationIds.has(id));
+    const operation = startBulkDiagnosticOperation("batch-delete", {
+      storageMode: getStorageMode(),
+      requestedIds: ids,
+      actualExistingIds: actuallyExistingIds,
+      requestedConversationCount: ids.length,
+      actualExistingConversationCount: actuallyExistingIds.length,
+      cacheCounts: getCachedCounts(),
+      orphanDependentCounts: getOrphanDependentCounts(preDeleteStorages),
+    });
+
+    let beforeResult: BatchDeleteResult;
+    let notDeleted: string[];
+    let orphanDependentCounts: Record<string, number>;
+    let finalEntityCounts: Record<string, number>;
+    try {
+      if (getStorageMode() === "indexedDB") {
+        const canonicalResult = await bulkDeleteCanonicalConversations(
+          ids,
+          (phase, data) => {
+            if (phase === "after-write-barrier") {
+              recordBulkDiagnostic(operation, "write barrier complete", data);
+            } else if (phase === "after-in-memory-snapshot") {
+              recordBulkDiagnostic(operation, "after in-memory mutation", {
+                ...data,
+                strategy: "canonical snapshot; caches unchanged before commit",
+                requestedIds: ids,
+                actualExistingIds: actuallyExistingIds,
+                remainingRequestedIds: [],
+                cacheCounts: getCachedCounts(),
+              });
+            } else if (phase === "before-replace") {
+              recordBulkDiagnostic(operation, "before flush", data);
+            } else if (phase === "after-replace") {
+              recordBulkDiagnostic(operation, "after flush", data);
+            } else if (phase === "after-flow-pointer-cleanup") {
+              recordBulkDiagnostic(operation, "after flow pointer cleanup", data);
+            } else if (phase === "after-clear-caches") {
+              recordBulkDiagnostic(operation, "after clearCaches", data);
+            } else if (phase === "after-preload") {
+              recordBulkDiagnostic(operation, "after preload/reload", data);
+            }
+          },
+        );
+        const sidecarCleanupFailures = deleteConversationSidecarMetadata(
+          canonicalResult.deletedDependencyIds,
+          {
+            analyzerRuns: new BrowserAnalyzerRunStorage(),
+            assets: new BrowserAssetStorage(),
+          },
+        );
+        beforeResult = {
+          ...canonicalResult.deletion,
+          sidecarCleanupFailures,
+        };
+        notDeleted = canonicalResult.verification.remainingRequestedIds;
+        orphanDependentCounts = {
+          ...canonicalResult.verification.orphanDependentCounts,
+          knowledgeCards: canonicalResult.deletion.orphanedKnowledgeCount,
+        };
+        finalEntityCounts = Object.fromEntries(
+          Object.entries(canonicalResult.verification.indexedDBCounts),
+        );
+
+        if (sidecarCleanupFailures.length > 0) {
+          recordBulkDiagnostic(operation, "sidecar cleanup failed", {
+            failures: sidecarCleanupFailures,
+          });
+        }
+      } else {
+        beforeResult = batchDeleteConversationWorkspace(
+          ids,
+          createWorkspaceStorages(),
+        );
+        const afterMutationStorages = createWorkspaceStorages();
+        const afterMutationIds = new Set(
+          afterMutationStorages.conversations.getAll().map((item) => item.id),
+        );
+        notDeleted = ids.filter((id) => afterMutationIds.has(id));
+        orphanDependentCounts = getOrphanDependentCounts(
+          afterMutationStorages,
+        );
+        finalEntityCounts = {
+          conversations: afterMutationStorages.conversations.getAll().length,
+          messages: afterMutationStorages.messages.getAll().length,
+          rounds: afterMutationStorages.rounds?.getAll().length ?? 0,
+          sources: afterMutationStorages.sources.getAll().length,
+          proposals: afterMutationStorages.proposals.getAll().length,
+          knowledgeCards: afterMutationStorages.knowledgeCards.getAll().length,
+          conversationVersions:
+            afterMutationStorages.versions?.getAll().length ?? 0,
+        };
+        recordBulkDiagnostic(operation, "after in-memory mutation", {
+          strategy: "LocalStorage synchronous adapters",
+          requestedIds: ids,
+          actualExistingIds: actuallyExistingIds,
+          remainingRequestedIds: notDeleted,
+          deletionEstimate: beforeResult,
+          orphanDependentCounts,
+        });
+        recordBulkDiagnostic(operation, "before flush", {
+          skipped: true,
+          reason: "LocalStorage mode",
+        });
+        recordBulkDiagnostic(operation, "after flush", {
+          skipped: true,
+          reason: "LocalStorage mode",
+        });
+        recordBulkDiagnostic(operation, "after clearCaches", {
+          skipped: true,
+          reason: "LocalStorage mode",
+        });
+        recordBulkDiagnostic(operation, "after preload/reload", {
+          skipped: true,
+          reason: "LocalStorage mode",
+        });
+      }
+    } catch (persistError) {
+      console.error(
+        "[handleBatchDelete] canonical persistence failed — no success report will be shown.",
+        persistError,
+      );
+      recordBulkDiagnostic(operation, "final state", {
+        success: false,
+        requestedIds: ids,
+        actualExistingIds: actuallyExistingIds,
+        errorName:
+          persistError instanceof Error ? persistError.name : "unknown",
+        errorMessage:
+          persistError instanceof Error
+            ? persistError.message
+            : String(persistError),
+        cacheCounts: getCachedCounts(),
+      });
+      completeDestructiveDiagnosticOperation(operation);
+      // Do NOT show success report if persistence failed
+      setDeleteResult(null);
+      // Report failure based on actual storage state
+      alert(
+        `批量删除持久化失败。${actuallyExistingIds.length} 个 Conversation 可能未被删除。请刷新页面后重试。`,
+      );
+      return;
+    }
+
+    if (notDeleted.length > 0) {
+      console.error(
+        `[handleBatchDelete] ${notDeleted.length} conversation(s) still present after canonical verification.`,
+        { remainingCount: notDeleted.length, sample: notDeleted.slice(0, 10) },
+      );
+    }
+
+    const actualDeletedCount = actuallyExistingIds.length - notDeleted.length;
+    recordBulkDiagnostic(operation, "final state", {
+      success: notDeleted.length === 0,
+      requestedIds: ids,
+      actualExistingIds: actuallyExistingIds,
+      remainingRequestedIds: notDeleted,
+      actualDeletedConversationCount: actualDeletedCount,
+      orphanDependentCounts,
+      firstResidualPhase: notDeleted.length > 0 ? "final verification" : null,
+      finalEntityCounts,
+      cacheCounts: getCachedCounts(),
+      lastCompletedAwaitedPhase:
+        getStorageMode() === "indexedDB"
+          ? "canonical replace + preload verification"
+          : "LocalStorage synchronous delete",
+    });
+    completeDestructiveDiagnosticOperation(operation, finalEntityCounts);
+    setDeleteResult({
+      ...beforeResult,
+      deletedConversations: actualDeletedCount,
+    });
+
+    if (beforeResult.sidecarCleanupFailures.length > 0) {
+      alert(
+        `Canonical 数据已删除，但 ${beforeResult.sidecarCleanupFailures.length} 个 sidecar 清理失败。请复制诊断信息后复查。`,
+      );
+    }
+
+    const data = loadConversationData();
+    setItems(data.items);
+    setWorkspaces(data.workspaces);
+
+    if (actualDeletedCount === 0 && ids.length > 0) {
+      console.error(
+        `[handleBatchDelete] CRITICAL: 0 out of ${ids.length} conversations were deleted. Storage layer may be failing.`,
+      );
+    }
+
     setSelectedIds(new Set());
   }
 
@@ -244,23 +551,11 @@ export function ConversationList() {
     );
   }
 
-  const visibleItems = items.filter((item) => {
-    // Workspace filter
-    if (workspaceFilter !== "all" && item.conversation.workspaceId !== workspaceFilter) {
-      return false;
-    }
-    // Quick filter
-    switch (quickFilter) {
-      case "empty":
-        return emptyConversationIds.has(item.conversation.id);
-      case "imported":
-        return importedConversationIds.has(item.conversation.id);
-      case "failed-import":
-        return failedImportIds.has(item.conversation.id);
-      default:
-        return true;
-    }
-  });
+  const visibleItems = filterConversationQuickItems(
+    items,
+    workspaceFilter,
+    quickFilter,
+  );
 
   const allVisibleSelected =
     visibleItems.length > 0 &&
@@ -343,6 +638,8 @@ export function ConversationList() {
             </>
           ) : null}
         </div>
+
+        <BulkDiagnosticsCopyButton />
 
         <div className="ml-auto flex flex-wrap items-center gap-2" aria-label="快捷筛选">
           <span className="text-xs text-zinc-400">筛选：</span>

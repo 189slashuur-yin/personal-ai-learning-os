@@ -96,8 +96,11 @@ function toSearchDocuments(data: SearchData): SearchDocument[] {
       ? sourceById.get(proposal.sourceId)?.conversationId
       : undefined);
   const getWorkspace = (conversationId?: string) => {
-    const workspaceId = conversationId
-      ? conversationById.get(conversationId)?.workspaceId ?? DEFAULT_WORKSPACE_ID
+    const conversation = conversationId
+      ? conversationById.get(conversationId)
+      : undefined;
+    const workspaceId = conversation
+      ? conversation.workspaceId ?? DEFAULT_WORKSPACE_ID
       : undefined;
     return {
       id: workspaceId,
@@ -116,6 +119,7 @@ function toSearchDocuments(data: SearchData): SearchDocument[] {
       .filter(Boolean)
       .join(" · ");
     const content = source?.content ?? "";
+    const context = conversation.context ?? {};
 
     return {
       id: conversation.id,
@@ -129,6 +133,16 @@ function toSearchDocuments(data: SearchData): SearchDocument[] {
       fields: {
         title: conversation.title,
         note: conversation.note ?? "",
+        summary: conversation.summary ?? "",
+        conclusion: conversation.conclusion ?? "",
+        pendingQuestions: conversation.pendingQuestions ?? "",
+        context: [
+          context.longTermBackground,
+          context.currentState,
+          context.decisions,
+          context.constraints,
+          context.nextActions,
+        ].filter(Boolean).join("\n"),
         content,
         source: sourceLabel,
         workspace: workspace.name ?? "",

@@ -20,6 +20,12 @@ export class InMemoryConversationStorage implements ConversationStorage {
     this.store.delete(id);
   }
 
+  removeMany(ids: string[]): void {
+    for (const id of ids) {
+      this.store.delete(id);
+    }
+  }
+
   clear(): void {
     this.store.clear();
   }

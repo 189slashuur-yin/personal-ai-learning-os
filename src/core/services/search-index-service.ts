@@ -1,4 +1,7 @@
-import type { Conversation } from "@/core/entities/conversation";
+import {
+  conversationContextFields,
+  type Conversation,
+} from "@/core/entities/conversation";
 import type { ImportedSource } from "@/core/entities/imported-source";
 import type { KnowledgeCard } from "@/core/entities/knowledge-card";
 import type { Message } from "@/core/entities/message";
@@ -14,6 +17,7 @@ import type { Tag } from "@/core/entities/tag";
 import type { Task } from "@/core/entities/task";
 import { DEFAULT_WORKSPACE_ID, type Workspace } from "@/core/entities/workspace";
 import { deriveQAPairs } from "@/core/services/qa-pair-service";
+import { parseRoundRecord } from "@/core/services/round-record";
 
 export type SearchIndexData = {
   workspaces: Workspace[];
@@ -34,6 +38,21 @@ type MatchCandidate = {
   mode: "exact" | "contains" | "fuzzy";
   score: number;
 };
+
+function searchFieldPriority(
+  document: SearchDocument,
+  field: string,
+): number {
+  if (field === "title") return 650;
+  if (field.startsWith("context.")) return 600;
+  if (document.entityType === "conversation" && field === "summary") return 550;
+  if (document.entityType === "conversation" && field === "conclusion") return 500;
+  if (document.entityType === "knowledge") return 450;
+  if (document.entityType === "round" && field === "summary") return 425;
+  if (document.entityType === "round" && field.startsWith("record.")) return 400;
+  if (document.entityType === "message" && field === "content") return 350;
+  return 250;
+}
 
 function normalize(value: string) {
   return value.trim().toLocaleLowerCase().replace(/\s+/g, " ");
@@ -90,6 +109,9 @@ export class SearchIndexService {
     const conversationById = new Map(
       this.data.conversations.map((conversation) => [conversation.id, conversation]),
     );
+    const roundById = new Map(
+      this.data.rounds.map((round) => [round.id, round]),
+    );
     const sourceById = new Map(
       this.data.sources.map((source) => [source.id, source]),
     );
@@ -108,9 +130,11 @@ export class SearchIndexService {
     };
 
     const getWorkspace = (conversationId?: string) => {
-      const workspaceId = conversationId
-        ? conversationById.get(conversationId)?.workspaceId ??
-          DEFAULT_WORKSPACE_ID
+      const conversation = conversationId
+        ? conversationById.get(conversationId)
+        : undefined;
+      const workspaceId = conversation
+        ? conversation.workspaceId ?? DEFAULT_WORKSPACE_ID
         : undefined;
       return {
         id: workspaceId,
@@ -148,6 +172,7 @@ export class SearchIndexService {
     const conversations: SearchDocument[] = this.data.conversations.map(
       (conversation) => {
         const workspace = getWorkspace(conversation.id);
+        const context = conversation.context ?? {};
         return {
           id: documentId("conversation", conversation.id),
           entityType: "conversation",
@@ -155,7 +180,13 @@ export class SearchIndexService {
           workspaceId: workspace.id,
           workspaceName: workspace.name,
           title: conversation.title,
-          body: [conversation.note, conversation.summary, conversation.conclusion, conversation.pendingQuestions].filter(Boolean).join("\n"),
+          body: [
+            ...conversationContextFields.map((field) => context[field]),
+            conversation.summary,
+            conversation.conclusion,
+            conversation.pendingQuestions,
+            conversation.note,
+          ].filter(Boolean).join("\n"),
           sourceLabel: conversation.sourceType,
           sourcePath: [workspacePath(workspace.id), conversation.title].filter(Boolean).join(" > "),
           updatedAt: conversation.updatedAt,
@@ -166,6 +197,11 @@ export class SearchIndexService {
             summary: conversation.summary ?? "",
             conclusion: conversation.conclusion ?? "",
             pendingQuestions: conversation.pendingQuestions ?? "",
+            "context.longTermBackground": context.longTermBackground ?? "",
+            "context.currentState": context.currentState ?? "",
+            "context.decisions": context.decisions ?? "",
+            "context.constraints": context.constraints ?? "",
+            "context.nextActions": context.nextActions ?? "",
             sourceType: conversation.sourceType,
             workspace: workspace.name ?? "",
           },
@@ -237,6 +273,8 @@ export class SearchIndexService {
     const rounds: SearchDocument[] = this.data.rounds.map((round) => {
       const conversation = conversationById.get(round.conversationId);
       const workspace = getWorkspace(round.conversationId);
+      const contextSnapshot = round.context?.snapshot ?? {};
+      const record = parseRoundRecord(round);
       return {
         id: documentId("round", round.id),
         entityType: "round",
@@ -244,7 +282,18 @@ export class SearchIndexService {
         workspaceId: workspace.id,
         workspaceName: workspace.name,
         title: round.title || `${conversation?.title ?? "Conversation"} · Round ${round.order}`,
-        body: [round.question, round.answer, round.note, round.summary].filter(Boolean).join("\n"),
+        body: [
+          ...conversationContextFields.map((field) => contextSnapshot[field]),
+          record.conclusion,
+          record.notes,
+          record.nextActions,
+          record.goal,
+          record.decisions,
+          record.pendingQuestions,
+          record.legacyNote,
+          round.question,
+          round.answer,
+        ].filter(Boolean).join("\n"),
         sourceLabel: "Round",
         sourcePath: `${workspacePath(workspace.id)}${workspace.id ? " > " : ""}${conversation?.title ?? "Conversation"} > Round ${round.order}`,
         updatedAt: round.updatedAt,
@@ -253,8 +302,18 @@ export class SearchIndexService {
           title: round.title,
           question: round.question,
           answer: round.answer,
-          note: round.note ?? "",
           summary: round.summary ?? "",
+          "record.notes": record.notes,
+          "record.nextActions": record.nextActions,
+          "record.goal": record.goal,
+          "record.decisions": record.decisions,
+          "record.pendingQuestions": record.pendingQuestions,
+          "record.legacyNote": record.legacyNote,
+          "context.longTermBackground": contextSnapshot.longTermBackground ?? "",
+          "context.currentState": contextSnapshot.currentState ?? "",
+          "context.decisions": contextSnapshot.decisions ?? "",
+          "context.constraints": contextSnapshot.constraints ?? "",
+          "context.nextActions": contextSnapshot.nextActions ?? "",
           conversation: conversation?.title ?? "",
           workspace: workspace.name ?? "",
         },
@@ -344,12 +403,22 @@ export class SearchIndexService {
 
     const knowledge: SearchDocument[] = this.data.knowledgeCards.map((card) => {
       const proposal = proposalById.get(card.proposalId);
-      const conversationId =
+      const referencedConversationId =
         card.sourceConversationId ??
         (proposal ? getProposalConversationId(proposal) : undefined);
-      const conversation = conversationId
-        ? conversationById.get(conversationId)
+      const conversation = referencedConversationId
+        ? conversationById.get(referencedConversationId)
         : undefined;
+      const conversationId = conversation?.id;
+      const sourceRound = card.sourceRoundId
+        ? roundById.get(card.sourceRoundId)
+        : undefined;
+      const sourceRoundId =
+        sourceRound &&
+        conversationId &&
+        sourceRound.conversationId === conversationId
+          ? sourceRound.id
+          : undefined;
       const workspace = getWorkspace(conversationId);
       const tags = card.tagIds.flatMap((tagId) => {
         const tag = tagById.get(tagId);
@@ -366,7 +435,9 @@ export class SearchIndexService {
           .filter(Boolean)
           .join("\n"),
         sourceLabel: card.sourceFile,
-        sourcePath: `${conversation?.title ?? "Conversation"} > Knowledge`,
+        sourcePath: conversation
+          ? `${conversation.title} > Knowledge`
+          : "来源已删除 > Knowledge",
         tags,
         updatedAt: card.updatedAt,
         href: `/knowledge/${card.id}`,
@@ -383,7 +454,10 @@ export class SearchIndexService {
         metadata: {
           proposalId: card.proposalId,
           conversationId,
-          sourceRoundId: card.sourceRoundId,
+          sourceRoundId,
+          sourceReferenceMissing: Boolean(
+            referencedConversationId && !conversation,
+          ),
           status: card.status,
         },
       };
@@ -540,15 +614,16 @@ export class SearchIndexService {
                 : field === "content" || field === "question" || field === "answer"
                   ? 55
                   : 35;
+              const priority = searchFieldPriority(document, field) * 1_000;
               if (normalizedValue === normalizedQuery) {
-                return [{ field, value, mode: "exact" as const, score: fieldWeight + 55 }];
+                return [{ field, value, mode: "exact" as const, score: priority + fieldWeight + 55 }];
               }
               if (index >= 0) {
                 return [{
                   field,
                   value,
                   mode: "contains" as const,
-                  score: fieldWeight + Math.max(0, 20 - index),
+                  score: priority + fieldWeight + Math.max(0, 20 - index),
                 }];
               }
               if (isSubsequence(normalizedQuery, normalizedValue)) {
@@ -557,7 +632,7 @@ export class SearchIndexService {
                   field,
                   value,
                   mode: "fuzzy" as const,
-                  score: Math.round(fieldWeight * 0.35 + density * 20),
+                  score: priority + Math.round(fieldWeight * 0.35 + density * 20),
                 }];
               }
               return [];
@@ -575,7 +650,7 @@ export class SearchIndexService {
           ),
           matchedFields: matches.map((match) => match.field),
           matchMode: bestMatch?.mode ?? "contains",
-          score: matches.reduce((total, match) => total + match.score, 0),
+          score: (bestMatch?.score ?? 0) + Math.max(0, matches.length - 1),
         } satisfies SearchDocumentMatch;
       })
       .filter((document): document is SearchDocumentMatch => document !== null)

@@ -2,37 +2,47 @@
 
 ## 产品目标
 
-Personal AI Learning OS 面向希望长期整理 AI 对话与学习材料的个人用户。产品要解决的不是“再做一个聊天客户端”，而是把分散的原始内容变成可审核、可追溯、可维护的个人知识。
+PALOS 面向需要与 AI 长期协作的个人用户。产品要解决的不是“再做一个聊天客户端”，而是同时保留对话原始过程、维护当前有效上下文，并把真正长期稳定的信息沉淀为可追溯 Knowledge。
 
 核心原则：
 
-- **Local first**：MVP 数据默认留在当前浏览器。
+- **Local first**：业务数据默认留在当前浏览器 IndexedDB；LocalStorage 仅保留轻量配置、UI 偏好和旧数据迁移兼容。
 - **Source first**：保留原始 Source 或 Message 引用，知识能够回到证据。
 - **Human in the loop**：分析结果先成为 Proposal，用户审核后才能沉淀为 KnowledgeCard。
 - **Replaceable boundaries**：存储和分析能力通过 Contract 隔离，为以后替换实现保留空间。
 - **Small, complete increments**：按 Sprint 完成端到端闭环，不为未确认需求提前扩张架构。
+- **Useful without AI**：关闭 Analyzer / Provider 后，Import、Context、Decision、Task、Search 与 Export 仍然可用。
 
 ## 当前阶段
 
-截至 2026-07-06，运行时进入 v1.0 alpha draft — Second Brain Workspace。Phase2 Epic M–AB 已在 Phase1 Round 基线上实现多层 Workspace/Folder、Conversation Explorer/Workspace Mode、Round/Conversation Summary、Round Knowledge、Import UX、Analyzer UX、Search Anchors、Asset metadata、Recipe、Feedback/Data Health、导航与本地 Export/Restore。
+截至 2026-07-29，v1.8 immutable ChatGPT Conversation Snapshot core、delta projector、canonical writer、legacy migration、ImportWorkbench workflow integration 与 release hardening 已完成。导入内容必须来自本地 saved HTML 或完整 rendered transcript；来源 identity 可选。Snapshot-owned Conversation 的通用 Source / Message mutation 已由 Core guard 阻止，普通 Conversation Restore 的 Round → Message 引用也会随新 Message IDs 自动更新。该路径不修改 IndexedDB schema，也不新增 canonical store。
 
-- Current Version：v1.0 alpha draft
-- Current Focus：Phase2 Epic M–AB implementation complete；alpha manual QA pending
-- Next Recommended Phase：执行 V10 Manual QA 与 Release Review；通过前保持 alpha
+- Current Version：v1.8 release checkpoint complete（`v1.8.0-rc1`）
+- Current Focus：release documentation closure 与最终产品验收
+- Next Recommended Phase：确认最终 `v1.8.0` release；Snapshot lifecycle、read UX 与 Search hardening 继续留在后续已延期范围
 
-当前实现仍是 alpha：自动质量门禁已通过，但人工浏览器 QA 尚未执行，不能标记正式 v1.0 release。
+v1.7 继续把 Conversation 作为 Aggregate Root、Round 作为最小整理单元、Task 作为独立行动实体、Knowledge 作为长期稳定信息。Context 是当前有效状态，不等于所有聊天，也不自动升级为 Knowledge。
+
+v1.7 Final Usability Correction 不扩展领域：每个 Round 卡片内直接显示“我的备注 / 本轮结论 / 下一步”。我的备注、下一步、目标、决定、遗留问题使用同一个版本化 serializer/parser 写入 `Round.note`，本轮结论继续写 `Round.summary`；纯文本、旧分段、`【补充备注】` 和未知旧文本均兼容且编辑单字段不会静默删除其它内容。
+
+每个 Round 拥有独立、revision-aware 的 750ms autosave controller；写入串行，blur、折叠/切换和卸载主动 flush，IndexedDB transaction 完成后才显示“已保存”，失败保留最新 draft 供 retry。动态态显示“当前推荐参考”，不写当前 Round；用户主动确认后显示“已固定参考”，固定 snapshot 与 Round 自有记录都不会被来源后续变化覆盖。Knowledge 只在人工预览确认后创建，同一来源与规范化内容的重复确认不重复建卡。
 
 ## v1.0 Phase2 product language
 
 - Conversation = 可长期追加的长对话线程。
 - Round = 一轮问答，也是最小整理单位。
+- Context = 用户人工维护的当前有效背景、状态、决策、约束与下一步方向。
+- Context Snapshot = 某一 Round 人工确认后当时有效的上下文；可继承、覆盖或排除。
 - Proposal = AI 整理建议 / 草稿；必须人工确认。
 - Knowledge = 已确认知识，可从同一 Round 持续沉淀多条。
 - Workspace / Folder = Conversation 的多层组织树；删除节点不删除 Conversation。
 - Recipe = 本地手动工作流模板，不是 Agent，不自动执行。
 - Task / Today = 可选行动项，不是 Second Brain 主流程。
-- ChatGPT Import = 仅支持 zip 解压后的 `conversations.json` 最小文本导入；不支持附件、图片、tool call、canvas、voice 或 shared link。
+- ChatGPT Export Import = 仅处理 zip 解压后的 `conversations.json` 最小文本；不处理其中的附件、图片、tool call、canvas、voice 或 shared link reference。
+- ChatGPT Conversation Snapshot = 用户必须上传本地 saved HTML 或粘贴完整 rendered transcript；可选提供严格的 ChatGPT share/conversation URL 作为来源 identity。New 无 URL 时生成 PALOS local resourceHash，Existing 无 URL时使用所选 Conversation 的有效 Snapshot history。PALOS 不请求 URL、不读取 cookie/session，preview 后显式确认才写 immutable Snapshot history。
 - 重复 ChatGPT 导入复用已有 Conversation，只追加新 Message；旧 Rounds 不自动覆盖。
+
+v1.7 的信息边界：Conversation 保存“讨论过什么”，Context 表达“现在什么仍然有效”，Knowledge 只保存“值得长期复用且已人工确认的稳定信息”。短期价格讨论、临时尝试和未确认判断不会仅因出现在 Context 或 Conversation 中自动成为 Knowledge。
 
 ## v1.0 Phase1 implementation baseline
 
@@ -74,7 +84,7 @@ MVP 包含：
 - Connection Test：Demo 为 Success，Ollama 请求本地服务，其余为 Not Implemented。
 - Capability 展示与 Proposal / KnowledgeCard 生成能力快照。
 
-MVP 的部署假设是单人、单浏览器、单设备、小数据量。LocalStorage 集合与实体 ID 是当前事实来源。
+MVP 的部署假设是单人、单浏览器、单设备。IndexedDB 中的业务集合与实体 ID 是当前事实来源；LocalStorage 只作为 legacy migration source、轻量配置和调试回退。
 
 ## 非目标
 

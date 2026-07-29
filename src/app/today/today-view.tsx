@@ -12,12 +12,14 @@ import {
 import type { Workspace } from "@/core/entities/workspace";
 import { TaskService } from "@/core/services/task-service";
 import { WorkspaceService } from "@/core/services/workspace-service";
-import { BrowserConversationStorage } from "@/infrastructure/storage/browser-conversation-storage";
-import { BrowserKnowledgeCardStorage } from "@/infrastructure/storage/browser-knowledge-card-storage";
-import { BrowserMessageStorage } from "@/infrastructure/storage/browser-message-storage";
-import { BrowserProposalStorage } from "@/infrastructure/storage/browser-proposal-storage";
 import { BrowserTaskStorage } from "@/infrastructure/storage/browser-task-storage";
 import { BrowserWorkspaceStorage } from "@/infrastructure/storage/browser-workspace-storage";
+import {
+  createConversationStorage,
+  createKnowledgeCardStorage,
+  createMessageStorage,
+  createProposalStorage,
+} from "@/infrastructure/storage/storage-factory";
 
 type TodayTask = Task & {
   sourceMissing: boolean;
@@ -49,14 +51,14 @@ function loadTodayData(): TodayData {
   const taskService = new TaskService(taskStorage, workspaceStorage);
   const workspaces = new WorkspaceService(
     workspaceStorage,
-    new BrowserConversationStorage(),
+    createConversationStorage(),
     taskStorage,
   ).listWorkspaces();
   const sourceStorages = {
-    conversations: new BrowserConversationStorage(),
-    knowledgeCards: new BrowserKnowledgeCardStorage(),
-    messages: new BrowserMessageStorage(),
-    proposals: new BrowserProposalStorage(),
+    conversations: createConversationStorage(),
+    knowledgeCards: createKnowledgeCardStorage(),
+    messages: createMessageStorage(),
+    proposals: createProposalStorage(),
     workspaces: workspaceStorage,
   };
   const decorate = (tasks: Task[]): TodayTask[] =>

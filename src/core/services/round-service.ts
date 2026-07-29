@@ -157,6 +157,7 @@ export class RoundService {
       answer: rightAnswer,
       messageIds: round.messageIds.slice(messageMiddle),
       note: undefined,
+      context: undefined,
       createdAt: timestamp,
       updatedAt: timestamp,
     };

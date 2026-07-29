@@ -4,11 +4,81 @@
 
 ## Current release
 
-- Current Version：v1.0 alpha draft
-- Phase：v1.0 Phase2
-- Current Epic：Second Brain Workspace Epic M–AB（Implementation complete）
-- Current Focus：AC Docs / Alpha Review 与 AD Final Stabilization
-- Next Recommended Phase：执行 V10 Manual QA；在人工验收前保持 alpha
+- Current Version：v1.8 release checkpoint complete（`v1.8.0-rc1`）
+- Phase：Immutable ChatGPT Conversation Snapshot · Phase 2E 与 release hardening 已完成
+- Current Focus：release documentation closure 与最终产品验收
+- Automated Status：Vitest 20 files / 327 tests；Playwright 3/3；lint/build/diff-check passed
+- Next Recommended Phase：确认最终 `v1.8.0` release；已延期 lifecycle、read UX 与 Search hardening 需重新确认范围
+
+## v1.8 — Immutable ChatGPT Conversation Snapshot（release checkpoint complete）
+
+- ImportedSource 承载 immutable Snapshot history；resourceHash 作为持久 identity，raw share URL/share token 不进入 canonical data。
+- assistant-only delta projector、hardened canonical writer、reload verification 与 legacy metadata pure migration helper 已完成。
+- ImportWorkbench 第四个 input mode 为 Conversation Snapshot；content 必须来自 uploaded saved HTML / pasted full rendered transcript，来源 URL 可选。New 可生成 local identity，Existing 可复用所选 Conversation history；不 fetch chatgpt.com，不访问 cookie/session。
+- UI 已连接 parser → comparator → preview → explicit confirm → canonical writer；same/blocked 零写入，append 显示 Message delta、Round extend/create impact 与 preserved fields。
+- Snapshot-owned Conversation 的 Source overwrite、Message edit/replace、普通 Existing import、ChatGPT Export append、Merge、Duplicate 与 Version Restore 均由 immutable mutation guard 阻止；canonical Snapshot writer 保持唯一 transcript mutation authority。
+- 普通 Conversation Version Restore 继续生成新 Message IDs，同时重映射 `Round.messageIds`；连续 Restore 与 reload 后引用保持有效。
+- 不新增 ShareResourceBinding/store，不修改 IndexedDB schema、Snapshot model、Search 或 rendering virtualization。
+
+## v1.7 — Personal AI Context Management（final QA passed, release commit pending）
+
+- Conversation 复用既有 Aggregate，新增人工可编辑 Context：长期背景、当前状态、决策记录、约束条件与下一步行动。
+- 既有 `note`、`summary`、`conclusion`、`pendingQuestions` 全部保留；Note 是自由长期备注，Summary 是压缩概览，Conclusion 是最终结论，Pending Questions 是未解决问题。
+- Round 继续是最小整理单元；默认只读引用最近有效前序 Round，跳过空 Round并回退 Conversation Overview；高级 Override/Exclude 与旧 confirmed snapshot 保持兼容。
+- Context Timeline 复用 ConversationVersion/Snapshot 追加历史，不创建 Event 系统，不覆盖旧决策。
+- Conversation 内 Next Actions 复用既有 Task + Conversation SourceRef；不扩展 GTD、Calendar、Reminder、Habit 或自动执行。
+- Search 保持关键词 + fuzzy，优先 Context、Summary、Conclusion、Knowledge、Round Note、Message。
+- 新增稳定 `palos-context-export` v1.0 JSON；包含 Conversation、Context、Decision history、关联 Task 与 Round summary/context snapshot，不调用模型。
+- Rounds 后提供紧凑 Conversation Overview，默认三个字段自动保存；Conversation Note、Summary、Conclusion、Pending Questions 与旧 Context 字段继续安全读取。
+- 每个展开 Round 在卡片内以桌面双栏/窄屏上下布局直接展示“我的备注 / 本轮结论 / 下一步”；高级字段折叠，页面级 Inspector 和手动保存按钮移除。
+- Round 与 Overview 均为 750ms、per-controller revision-aware autosave，blur/切换/卸载 flush；只有 IndexedDB transaction 成功后显示 saved，失败 retry 使用最新 draft。
+- Round Note 使用唯一版本化 serializer/parser；五类结构化字段和未知 legacy text 可逆保留，Search/Continue Topic 可区分备注与下一步。
+- 动态态是“当前推荐参考”且不写数据；人工确认后是“已固定参考”，固定 snapshot 与 Round own record 不被 live source 覆盖。
+- Knowledge 与 reference 完全分离，只能从结论或 Overview 经预览确认后人工创建；同来源+内容重复确认幂等，不会由 autosave/reference 自动生成 Proposal 或 Knowledge。
+- v1.7 当前 9 files / 213 tests 与 Playwright 2/2；旧 v1.6.5 数据缺少 optional Context 字段时继续读取和导出。
+- “PALOS开发迭代记录”真实 Demo 覆盖 6 Messages / 3 Rounds、Context、Task、Round Snapshot、继续文本与 Timeline；浏览器 QA 通过。
+- 未修改 IndexedDB schema、canonical store 集合、Provider、Analyzer/Review/Knowledge 边界。
+
+### v1.7 explicit non-goals
+
+- Agent、Tool Calling、MCP、RAG、Embedding、Vector Database。
+- OpenAI、DeepSeek、Claude 或其它云 Provider 扩展。
+- Cloud Sync、Mobile App、多人协作。
+- Task OS、Calendar、Reminder、Habit、自动执行。
+- Storage rewrite、新大型 Aggregate 或 IndexedDB schema migration。
+
+## v1.6.5 — Stable candidate（implemented, release commit pending）
+
+- v1.6.4 dirty worktree 已由 checkpoint commit `9ed8feb` 保护；本轮不重写 v1.6.4、不新增产品能力。
+- 指定业务页面对 Conversation、Message、Round、Source、Proposal、KnowledgeCard、ConversationVersion 的访问已统一走 canonical storage factory。
+- Task、Workspace、Asset、AnalyzerRun、Tag 与其它 sidecar 保持原存储边界。
+- App Data restore 增加写前预校验、操作内备份、写后 ID/内容验证和可验证回滚；不实现 journal recovery。
+- Playwright 覆盖 create → TXT import → reload → search → export → delete/reload → restore → search。
+- E2E 修复了 URL 直达 TXT 模式时 parser 初始化仍为 ChatGPT 的 candidate blocker。
+- 当前只形成 candidate working tree；没有最终 release commit，也没有 push。
+
+## v1.6.4 — Known Issues Closure（completed, checkpointed）
+
+- New / Existing × ChatGPT Export / Paste Text / TXT File / ChatGPT Conversation Snapshot 形成统一 Import mode matrix；Existing 始终只有一个 target selector。
+- Existing + TXT 复用 text/TXT parser pipeline，保存文件名与 Source metadata，只追加实际解析出的 Messages/Rounds；success 前完成 flush、cache reload 与 ID/reference/count verification。
+- Import phase/counters 覆盖 parsing、preview、confirm、importing、flushing、verifying、success、failed、quota-stopped；批量进度按 Conversation 节流。
+- Quota 超阈值改为 warning + explicit confirmation，不再通过 disabled button 形成不可达确认路径；quota stop 报告 durable success 与未处理数量。
+- ChatGPT Existing append 从“任一 ID 相交就整源跳过”改为 message identity 去重，因此同一 ChatGPT Conversation 后续更新可增量追加；不同 source 同内容不按 content hash 全局误删。
+- Bulk diagnostics 默认普通用户不可见；`NEXT_PUBLIC_PALOS_DIAGNOSTICS=1` 与 Analyzer 的独立 flag 不混用；长 ID 数组只记录 count + limited sample。
+- Quick filter、Round draft edge cases、invalid TXT、mode state、progress、diagnostics gate 与 Existing TXT reload durability 已补回归。
+- 保持 v1.6.1 canonical delete、v1.6.2 structured import 与 v1.6.3 referential integrity，不改 IndexedDB schema。
+
+### Future backlog（not implemented）
+
+- ChatGPT share-link import。
+- Update an existing Conversation from a share link。
+- Mobile / PWA。
+- Cloud / multi-device sync。
+- Multi-user / family sharing。
+- Attachment / voice / canvas / tool nodes。
+- Import transaction fan-out optimization（当前仍约每 Conversation 多次 pending writes，最终 flush durable）。
+- Advanced cross-source semantic dedup。
+- AI / RAG / Embedding。
 
 ## v1.0 Phase2 — Second Brain Workspace（M–AB implemented）
 

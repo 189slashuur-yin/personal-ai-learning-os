@@ -1,10 +1,21 @@
-import type { Conversation } from "@/core/entities/conversation";
+import type {
+  Conversation,
+  ConversationContextField,
+} from "@/core/entities/conversation";
 import type { Message } from "@/core/entities/message";
 
 export type ConversationSnapshotData = {
   conversation: Conversation;
   messages: Message[];
 };
+
+export type ConversationContextChange = {
+  field: ConversationContextField;
+  previousValue?: string;
+  nextValue?: string;
+};
+
+export type ConversationVersionKind = "manual" | "automatic" | "context";
 
 export type ConversationVersion = {
   id: string;
@@ -15,4 +26,6 @@ export type ConversationVersion = {
   sourceVersion: number;
   messageCount: number;
   snapshotData: ConversationSnapshotData;
+  kind?: ConversationVersionKind;
+  contextChanges?: ConversationContextChange[];
 };

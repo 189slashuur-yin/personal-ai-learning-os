@@ -4,9 +4,14 @@ const concepts = [
   // === 核心数据模型 ===
   ["Conversation（对话线程）", "一个可长期追加的完整对话线程。可能包含多轮问答、多次 Import 追加，是 Workspace 下的顶层组织单位。可以在 Workspace Mode 中按 Round 持续整理。"],
   ["Round（轮次）", "一轮/一组问答，是整理的最小单位。每个 Round 包含 Question、Answer，以及 Summary、Note、关联的 Proposal、Knowledge、Assets。Round 是默认的阅读与操作入口。"],
-  ["Round Summary（本轮摘要）", "这一轮说了什么——由你手动总结本轮要点，保存在 Round 上。Analyzer 只生成 Proposal 草稿，不会自动覆盖 Summary。"],
-  ["Round Note（本轮备注）", "我的备注、待办或判断——记录你对本轮的私有批注，不会写入 Proposal 或 Knowledge。可全文搜索。"],
-  ["Conversation Summary（对话总摘要）", "整个对话的总结、最终结论与待确认点，由你手动确认保存。Analyzer 可生成 Summary Proposal 草稿，但最终由你决定。"],
+  ["本轮记录", "每个 Round 的人工收尾入口：本轮目标、本轮结论、新增决定、遗留问题、下一步行动。它复用现有 Round Summary / Round Note，不新增数据实体。"],
+  ["Round Summary（本轮结论）", "这一轮目前得出的结论，保存在既有 Round Summary 上。Analyzer 只生成 Proposal 草稿，不会自动覆盖。"],
+  ["Round Note（本轮备注）", "本轮目标、决定、遗留问题、下一步与补充备注的人工记录。可全文搜索，不会自动写入 Proposal 或 Knowledge。"],
+  ["Conversation Note（普通备注）", "临时想法、补充说明或私人备注；不作为长期 Context。"],
+  ["Summary / Conclusion / Pending Questions", "Summary 是对话摘要；Conclusion 是当前结论；Pending Questions 是未解决问题。三者分别保存，不与长期 Context 混用。"],
+  ["Conversation Context（当前有效上下文）", "人工维护长期背景、当前状态、决策记录、约束条件与下一步行动。它不依赖 AI，也不等于 Conversation Note、Summary 或 Knowledge。"],
+  ["Context Snapshot / Timeline", "Round Snapshot 是一次讨论时人工确认的有效 Context；Round 之间不是自动 AI 记忆，可对来源字段执行保留、删除、修改。Timeline 复用版本记录追加变化，旧决定不会被覆盖。"],
+  ["继续这个主题", "生成可复制的人工继续文本，包含 Conversation Context、最近 Rounds、Pending Questions 与 Next Actions；不调用 AI。"],
   // === AI 相关 ===
   ["Proposal / AI 整理建议（可选）", "AI 生成的整理草稿，**可选、不是必经流程**。你可以保留、拒绝或确认它，但它不会自动写入知识库。没有 Proposal 也可以直接手动创建 Knowledge。"],
   ["Review / 确认加入知识库", "人工审核 Proposal。只有你接受后，系统才会创建 Knowledge。这是人类把关的关键步骤。"],
@@ -35,13 +40,13 @@ const concepts = [
 ] as const;
 
 const flow = [
-  "Import",
-  "浏览 Rounds",
-  "写 Summary/Note",
-  "可选 Analyze",
-  "可选 Review",
-  "Knowledge",
-  "Search",
+  "AI 对话 / Import",
+  "Conversation",
+  "Round",
+  "本轮记录",
+  "Context",
+  "Decision / Task",
+  "未来继续",
 ] as const;
 
 export default function HelpPage() {
@@ -50,9 +55,9 @@ export default function HelpPage() {
       <p className="eyebrow">Product Help</p>
       <h1 className="page-title">操作手册</h1>
       <p className="page-description max-w-3xl">
-        Learning OS 把外部对话或材料变成可审核、可追溯的长期知识。第一次使用时，按下面的推荐流程走一遍即可。
+        PALOS 保留外部对话原始过程，并帮助你人工维护当前有效上下文、决策、下一步行动与长期知识。关闭 Analyzer 后，核心整理流程仍可使用。
       </p>
-      <section className="mt-6 rounded-xl border border-sky-200 bg-sky-50 p-5"><h2 className="font-semibold text-sky-950">Context Help</h2><p className="mt-2 text-sm text-sky-800">每个主页面右上角的“?”回到这里。推荐流程：Import 导入 → 浏览 Rounds → 写 Summary/Note → 可选 Analyze → 可选 Review → Knowledge → Search。常见误区：Proposal 是 AI 建议，不是已确认知识，也不是必经流程；Recipe 不是 Agent；附件路径不代表文件已复制；Message Timeline 是高级原始数据，日常用 Round 即可。</p></section>
+      <section className="mt-6 rounded-xl border border-sky-200 bg-sky-50 p-5"><h2 className="font-semibold text-sky-950">Context Help</h2><p className="mt-2 text-sm text-sky-800">每个主页面右上角的“?”回到这里。推荐流程：AI 对话 / Import → Conversation → Round → 本轮记录 → Context → Decision / Task → 未来继续。常见误区：Context 不是自动 AI 记忆；Conversation Note 只是普通备注；Proposal 是可选 AI 建议，不是已确认知识；Recipe 不是 Agent。</p></section>
 
       <section className="mt-10 rounded-2xl border border-sky-200 bg-sky-50 p-6">
         <p className="text-sm font-semibold text-sky-950">推荐流程</p>
@@ -67,7 +72,7 @@ export default function HelpPage() {
           ))}
         </ol>
         <p className="mt-4 text-sm leading-6 text-sky-900">
-          推荐整理流程：<strong>Import 导入</strong> → 在 Conversation 中<strong>浏览 Rounds</strong> → 为每个 Round <strong>写 Summary/Note</strong> → 如需 AI 辅助，<strong>可选 Analyze</strong> 生成 Proposal → <strong>可选 Review</strong> 审核 Proposal → 确认后沉淀为 <strong>Knowledge</strong> → 通过 <strong>Search</strong> 检索。Round 是默认阅读入口；Message Timeline 是高级/原始数据，日常不用；Proposal 是 AI 整理建议，可选，不是必经流程。
+          推荐整理流程：保留 <strong>AI 对话</strong> 到 Conversation → 按 <strong>Round</strong> 阅读 → 离开前填写<strong>本轮记录</strong> → 把下次仍有效的内容维护到顶部 <strong>Context Dashboard</strong> → 用 Decision / Task 表达决定和行动 → 下次通过<strong>继续这个主题</strong>恢复工作。Knowledge、Analyze 与 Review 仍可用，但不是 Context 主流程的前提。
         </p>
         <div className="mt-5 flex flex-wrap gap-3">
           <Link className="rounded-lg bg-sky-950 px-4 py-2.5 text-sm font-medium text-white" href="/import">
@@ -88,6 +93,19 @@ export default function HelpPage() {
               <p className="mt-2 text-sm leading-6 text-zinc-600">{description}</p>
             </article>
           ))}
+        </div>
+      </section>
+
+      <section className="mt-10 rounded-xl border border-violet-200 bg-violet-50 p-5">
+        <h2 className="font-semibold text-violet-950">v1.7 Personal AI Context Management</h2>
+        <div className="mt-2 space-y-2 text-sm leading-6 text-violet-900">
+          <p><strong>Conversation Context：</strong>人工维护长期背景、当前状态、决策、约束与下一步行动。</p>
+          <p><strong>Context Dashboard：</strong>Conversation 顶部直接展示当前状态、已确认决策、约束和下一步；不需要先滚动查找。</p>
+          <p><strong>Round Context：</strong>推荐最近有效 Context；用户选择来源，对字段保留、删除、修改并人工确认，也可以取消继承。</p>
+          <p><strong>本轮记录：</strong>记录本轮目标、结论、决定、遗留问题和下一步，复用 Round Summary / Note。</p>
+          <p><strong>Context Timeline：</strong>明显的 History / Timeline 入口展示什么时候修改了什么。</p>
+          <p><strong>Next Actions：</strong>继续复用 Conversation-linked Task，不增加 Calendar、Reminder 或自动执行。</p>
+          <p><strong>继续这个主题 / Export：</strong>可复制人工继续文本，也可导出稳定 JSON；本版本不调用 Agent、RAG 或模型。</p>
         </div>
       </section>
 
@@ -115,10 +133,10 @@ export default function HelpPage() {
       <section className="mt-10 rounded-xl border border-emerald-200 bg-emerald-50 p-5">
         <h2 className="font-semibold text-emerald-950">数据保存与备份</h2>
         <div className="mt-2 space-y-2 text-sm leading-6 text-emerald-900">
-          <p>结构化数据主要保存在当前浏览器 LocalStorage；清除站点数据会删除这些记录。</p>
+          <p>Conversation、Message、Round、Source、Proposal、Knowledge 与 Version 等 canonical 数据默认保存在当前浏览器 IndexedDB；LocalStorage 只保留轻量配置、UI 偏好和旧数据迁移兼容。</p>
           <p>Asset 目前只记录文件名、路径和备注等 metadata，不复制或读取本机文件。</p>
           <p>在项目目录运行 <code className="font-semibold">node scripts/backup-local-data.mjs</code> 可备份文档及存在时的项目内 data/。</p>
-          <p>该脚本目前不导出浏览器 LocalStorage；完整数据导入/导出仍是后续能力。</p>
+          <p>完整 PALOS 数据请使用 Settings 中的 App Data Export / Restore；清除站点数据仍会删除当前浏览器中的本地记录。</p>
         </div>
         <Link className="mt-4 inline-block text-sm font-semibold text-emerald-950 underline" href="/settings">
           查看 Data Management

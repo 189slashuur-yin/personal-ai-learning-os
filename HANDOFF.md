@@ -1,3 +1,1345 @@
+# PALOS v1.8 — ChatGPT Conversation Snapshot Handoff
+
+## 2026-07-29 v1.8 release documentation closure
+
+PALOS v1.8 immutable ChatGPT Conversation Snapshot 已达到 **release checkpoint complete**。当前 release candidate 基线为 `d8a8544 release: finalize v1.8 share snapshot checkpoint` / `v1.8.0-rc1`；本节只对齐最终文档状态，没有修改产品代码、Snapshot schema/model、workflow、canonical writer、storage、IndexedDB schema/store 或 import 行为，也没有 commit 或 push。
+
+### Final checkpoint
+
+- immutable Snapshot history、resourceHash identity、versioned saved HTML / rendered transcript parser、comparator、assistant-tail delta projector、canonical writer、reload verification、legacy migration 与 Phase 2E ImportWorkbench workflow 已落地。
+- Snapshot-owned Conversation 的通用 Source overwrite、Message edit/replace、普通 Existing import、ChatGPT Export append、Merge、Duplicate 与 Conversation Version Restore 已由 Core mutation guard 阻止；canonical Snapshot writer 是唯一 transcript mutation authority。
+- 普通 Conversation Restore 的既有 Message identity regeneration 语义保持不变；`Round.messageIds` 会自动重映射到当前 restored Messages，Round 内容/顺序/enrichment 保持，连续 Restore 与 reload 后引用一致。
+- 最终 browser smoke 已覆盖普通 Conversation 两次 Restore + reload、Snapshot-owned mutation guard、Snapshot New import 与 Existing append，未发现 release blocker。
+- Final automated gate：`npm run lint` passed；`npm run build` passed（19 routes）；`npm test -- --run` passed（20 files / 327 tests）；`npm run test:e2e` passed（Playwright 3/3）；`git diff --check` passed。
+
+### Release boundary
+
+- v1.8 不 fetch chatgpt.com，不读取 cookie/session/internal API，不接入真实云 Provider，不自动生成 Proposal/Knowledge。
+- v1.8 不新增 canonical store，不修改 IndexedDB schema、Snapshot metadata schema 或 Conversation aggregate boundary。
+- Snapshot history timeline、resolver-confirmed head read UX、Search integration、Copy/Merge/Restore lifecycle semantics 扩展与 conflict replace/rebase 继续延期，必须在后续版本重新确认范围。
+- 当前代码与 QA 已达到 release checkpoint；下一步只需产品负责人确认最终 `v1.8.0` release。
+
+---
+
+## 2026-07-29 Snapshot import E2E selector hardening
+
+- 修复 `tests/e2e/share-snapshot-import.spec.ts` 对旧英文按钮文案 `Uploaded saved HTML` 的依赖。
+- saved HTML 模式按钮新增稳定的 `data-testid="share-snapshot-saved-html-mode"`；E2E 的 New import 与 Existing append 两处均改用 `getByTestId()`。
+- 未修改 Snapshot import 状态、parser、comparator、canonical writer 或产品流程。
+- 验证通过：`npm run lint`、`npm run build`、`npm test -- --run`（20 files / 327 tests）、`npm run test:e2e`（3 tests）和 `git diff --check`。
+- 本次未 commit 或 push。
+
+---
+
+## 2026-07-29 P0 Conversation Restore referential integrity
+
+本节修复 browser smoke 发现的 release blocker：普通 Conversation Version Restore 会为恢复后的 Messages 生成新 ID，但既有 `Round.messageIds` 仍引用恢复前的 ID，reload 后 Round 原文显示“原始 Message 当前不可用”。修复只覆盖 Conversation Version Restore 的引用一致性；没有修改 Snapshot schema、Import workflow、immutable mutation guard、IndexedDB schema/store 或其它 Restore 语义，也没有新增功能、commit 或 push。
+
+### Restore path audit
+
+- 产品中的 Conversation snapshot Restore 只有一条数据流：Conversation Detail → `ConversationVersionService.restoreSnapshot()`。
+- Settings App Data Restore 是完整 store bundle 的验证/替换；Task 和 Workspace Restore 只恢复各自 archive 状态。它们不使用 Conversation Version snapshot，也不在本修复范围。
+- Version snapshot 仍只包含 Conversation + Messages。现有 Rounds 不进入 snapshot、不被重建；Restore 只允许更新其 Message references。
+
+### Fix
+
+- `restoreSnapshot()` 现在显式要求 `SourceStorage + RoundStorage`。SourceStorage 继续只用于既有 immutable ownership guard；guard 本身未修改。
+- 恢复后的 Messages 继续生成新 ID，并保持 snapshot content/order/provenance。
+- Service 建立 current/snapshot Message reference → restored Message ID 映射：
+  - 首次 Restore 可从 snapshot Message ID 映射；
+  - 重复 Restore 可从当前 Message ID 经 `order` 映射到再次生成的新 ID。
+- 所有当前 Rounds 保持 ID、conversationId、order、title、question、answer、note、summary、context、createdAt 和 updatedAt；仅 `messageIds` 替换为当前有效 Message IDs。目标版本不存在的 Message reference 会被移除，因此不会留下 dangling reference。
+- Conversation Detail 在成功 Restore 后局部 remount RoundWorkspace，使当前页面立即重新读取 restored Messages/Rounds，不再需要手工 reload 才消除 stale raw-message view。
+
+### Regression coverage
+
+- In-memory：Message identity 在 Restore 前后变化；canonical content/order 正确；Round fields/order 保持且 references 自动更新。
+- Repeated Restore：第二次生成的 Message IDs 再次变化，Round references 跟随第二组当前 IDs。
+- IndexedDB durable reload：flush、clear cache、preload 后 Message content/identity 与 Round references 仍一致，所有 `Round.messageIds` 都能在当前 Messages 中解析。
+- UI boundary：Detail 成功 Restore 后递增 RoundWorkspace revision，Classic / Workspace 两种入口都会重新挂载。
+- Snapshot-owned Restore 继续由原 mutation guard regression 阻止。
+
+### Validation
+
+- 定向：`npm test -- --run tests/conversation-version-restore.test.ts tests/share-snapshot-mutation-guard.test.ts tests/indexeddb-reliability.test.ts` passed（3 files / 78 tests）
+- `npm run lint`：passed
+- `npm run build`：passed（19 routes）
+- `npm test -- --run`：passed（20 files / 327 tests）
+- `git diff --check`：passed
+
+### Key files / next step
+
+- Service：`src/core/services/conversation-version-service.ts`
+- Detail refresh：`src/app/conversation/[id]/conversation-detail.tsx`
+- Unit/UI regression：`tests/conversation-version-restore.test.ts`
+- Durable reload regression：`tests/indexeddb-reliability.test.ts`
+- Guard compatibility：`tests/share-snapshot-mutation-guard.test.ts`
+
+下一步只需重跑上次 ordinary Conversation Restore browser smoke：确认 Restore 后顶部 Raw Timeline 与 Round 内“展开原文”立即显示同一组恢复内容，reload 后引用仍有效。通过后再评估 release checkpoint；不要在该验证中扩展 Snapshot timeline、Import 或 schema。
+
+---
+
+## 2026-07-28 P0 immutable Snapshot boundary hardening
+
+本节修复下方 completion audit 已记录的 P0：Conversation Detail 和既有通用 Conversation 用例可以绕过 canonical Snapshot writer 改写 Source/Message。修复基线为 `HEAD=2373aa1 feat: integrate share snapshot import UI`；只做 ownership guard、必要的只读 UI 状态与回归测试，没有修改 Snapshot model、IndexedDB schema/store 或 Import workflow，也没有新增功能、commit 或 push。本节结论覆盖下方 audit 中“mutation boundary incomplete”的旧状态。
+
+### Mutation inventory and protection
+
+| Existing write path | Previous bypass | Current boundary |
+| --- | --- | --- |
+| Conversation Detail Source autosave | 直接 `SourceStorage.save()` 覆盖 Source，并丢失 `shareSnapshot` metadata | load 时识别 schema v1/v2 ownership；textarea 只读；autosave timer 写前再次检查 ownership |
+| Conversation Detail “从原始文本生成 Messages” | 直接 `replaceByConversationId()` | Snapshot-owned Conversation 禁用并在 handler fail closed |
+| Conversation Detail Message Edit | `editMessage()` 直接保存 Message/Conversation | Core editing service 在任何写入前要求 Source ownership check；普通 Conversation 保持可编辑 |
+| Conversation Version Restore | 直接替换 Conversation/Messages 并生成新 Message ID | restore API 强制传入 SourceStorage，并在任何写入前检查 ownership；Detail Restore 禁用 |
+| Paste/TXT Existing import | `ImportService.appendToConversation()` 新增 Source/Message/Round | service 在生成 ID 或写入前检查目标 ownership |
+| ChatGPT Export existing/update | existing import 与 explicit append 直接新增 Message/Source/Round | 两条 service path 都在任何写入前检查目标 ownership |
+| ImportWorkbench Merge | 直接把源 Messages/Rounds 复制到目标 | confirm 时先检查 source 与 target；任一由 Snapshot 管理即零写入失败 |
+| Conversation Duplicate | 复制 Snapshot Source/Message 并保留不安全 provenance | workspace service 在创建 duplicate 前检查 ownership；普通 Conversation Copy 行为不变 |
+
+统一边界位于 `share-snapshot-mutation-guard.ts`：只要 Conversation 拥有任意合法 schema v1 或 v2 `shareSnapshot` Source，通用 transcript mutation 就抛出 `ShareSnapshotMutationBlockedError`，提示必须使用 canonical Snapshot writer。保护放在 Core use-case boundary，不下沉到通用 Storage，因此不会阻止 canonical writer、App Data restore/test seeding 等权威数据装载。删除整个 Conversation 仍属于显式 aggregate deletion，不被误当成 transcript edit。
+
+### Regression coverage
+
+- schema v1/v2 ownership 都能识别；普通 Source 不会误判。
+- Snapshot-owned Message edit、generic Existing import、ChatGPT Export existing/append、Version Restore 与 Duplicate 都在首个写入前失败，并验证 Conversation/Source/Message/Round 零变化。
+- 普通 Conversation 单条 Message 编辑仍成功；既有完整 import suite 继续覆盖普通 Existing append。
+- UI boundary test 锁定 Detail 的只读/disabled 状态、SourceStorage dependency 与 Workbench source/target 双 guard。
+- 既有 Snapshot workflow/canonical writer tests 全部继续通过，证明 canonical path 未被 guard 拦截。
+
+### Validation
+
+- `npm run lint`：passed
+- `npm run build`：passed（19 routes）
+- `npm test -- --run`：passed（19 files / 323 tests）
+- 定向 regression：passed（2 files / 14 tests）
+- `git diff --check`：passed
+
+### Key files
+
+- Core guard：`src/core/services/share-snapshot-mutation-guard.ts`
+- Core callers：`message-editing.ts`、`conversation-version-service.ts`、`import-service.ts`、`chatgpt-export-import.ts`、`conversation-workspace.ts`
+- App callers：`src/app/conversation/[id]/conversation-detail.tsx`、`src/app/conversation/conversation-list.tsx`、`src/app/import/import-workbench.tsx`
+- Tests：`tests/share-snapshot-mutation-guard.test.ts`、`tests/chatgpt-share-snapshot-ui.test.ts`
+
+### Remaining limitations / next step
+
+- 本轮只关闭 mutation bypass；Conversation Detail 读 Source 仍使用既有 `getByConversationId()`，没有改成 history resolver-confirmed head。由于所有 Snapshot transcript 编辑已只读，这不再是写入完整性 P0，但仍是后续 read-path QA 风险。
+- guard 是 Core use-case invariant；底层 Storage 仍保持通用，以支持 canonical operation 与恢复装载。未来新增 Source/Message 写入用例必须显式复用该 guard，并增加对应 regression。
+- 下一步只需做一次浏览器 smoke：打开 Snapshot-owned 与普通 Conversation，分别验证只读/disabled 和普通编辑/保存；通过后审阅当前 dirty worktree，再由用户决定是否 commit。不要在此 P0 中扩展 Snapshot timeline、Search、schema 或 lifecycle 语义。
+
+---
+
+## 2026-07-28 Snapshot Import UX correction
+
+本节覆盖下方历史记录中旧的 “ChatGPT Share Snapshot” 产品命名与“必须提供 share URL”的输入假设；immutable Snapshot domain model、comparison/projection/write contract 均未改变。本轮基线为 `HEAD=2373aa1 feat: integrate share snapshot import UI`，改动尚未 commit。
+
+### Approved behavior now implemented
+
+- 第四种 ImportWorkbench 模式的用户可见名称改为 **ChatGPT Conversation Snapshot**。
+- Conversation content 是必需输入，并且一次只能来自一种本地来源：uploaded saved HTML 或 pasted full rendered transcript。切换输入种类会清除另一种内容以及旧 preview。
+- Source identity 是可选输入：
+  - `https://chatgpt.com/share/<id>` 和 `https://chatgpt.com/c/<id>` 都只在 capture request 内存中规范化并计算 SHA-256 `resourceHash`；
+  - New 且不提供 URL 时，使用 namespaced Conversation ID 计算稳定 PALOS local `resourceHash`；
+  - Existing 且不提供 URL 时，使用所选 Conversation 唯一、有效的 v2 Snapshot resource history 作为比较基线。
+- raw URL、ChatGPT token、PALOS local identity namespace 都不进入 Source metadata、preview、result、writer command 或 diagnostics。PALOS 不 fetch URL、不访问 cookie/session/internal API。
+- URL-only 输入不会进入 parser，界面分两行提示：`链接只用于识别来源，不能单独导入对话。` / `请上传已保存的网页 HTML，或粘贴完整对话内容。`
+- UI 顺序固定为 A. required content → B. optional identity → C. target Conversation → D. preview，并继续复用单一 target selector。
+- saved HTML parser `1.1.0` 支持 synthetic public share-page 与 logged-in conversation-page 的 semantic `data-message-author-role` 容器；跳过 script、style、template、nav、aside、button、SVG 和 page chrome，不读取 internal payload。缺少受支持结构或 speaker labels 时返回可操作中文错误并零写入。
+- 老的 Share URL 规范化值及其 SHA-256 不变，因此已有 v2 Share Snapshot history 可以在 Existing 模式下不重新输入 URL 继续 append。
+- durable integration 覆盖 New no-URL import 与 Existing no-URL append；append 后 Conversation note/summary/context、tail Round ID/note/summary/context 与 KnowledgeCard 保持不变。
+
+### Scope guard
+
+本轮没有修改 Snapshot entity/metadata schema、history resolver、comparator、delta projector、canonical writer/operation、IndexedDB schema/store、Copy/Merge/Restore、Search 或 rendering virtualization。内部文件和类型的历史名称暂时保留，以减少非必要重命名；用户可见文案已统一为 Conversation Snapshot。
+
+### Validation status
+
+- `npm run lint`：passed
+- `npm run build`：passed
+- `npm test -- --run`：passed（18 files / 317 tests）
+- `git diff --check`：passed
+- `npm run test:e2e`：本轮已尝试，但 Playwright web server 需要监听 `127.0.0.1:3100`，sandbox 外执行审批因当前环境 usage limit 被拒绝。没有绕过权限限制；修正后的 E2E spec 已准备，仍需在允许本地端口监听的环境中执行。
+
+### Required browser QA
+
+1. URL-only：选择 New/Existing，仅输入 `/share/` 或 `/c/` URL；确认出现指定中文提示、Preview disabled、零 canonical write、Network 无 chatgpt.com request。
+2. New + public saved HTML、无 URL：preview 为 `new`，确认后形成 sequence 1 local resource history；reload 后 Source/Message/Round ownership 正确。
+3. New + logged-in saved HTML、无 URL：只导入 semantic User/Assistant 内容；导航、账号菜单、script/internal payload 不出现在 preview 或 storage。
+4. Existing + newer HTML、无 URL：自动使用所选 Conversation history，preview 为 `append`；assistant-only suffix 保持 tail Round ID 与 note/summary/context，KnowledgeCard 与 Conversation enrichment 不变。
+5. Optional identity：分别输入 `/share/` 与 `/c/` URL；仅显示 fingerprint，不显示或持久化 raw URL/token，Network 无远端请求。
+6. Incomplete pasted text/unsupported HTML：显示可操作中文错误，Confirm 不可用，四个 canonical stores 不变化。
+7. 模式/内容/identity/target 切换：旧 preview 和 confirm capability 立即失效；完成写入并 reload 后 chain、sequence、Message ordinal 和 Round references 仍通过验证。
+
+### Remaining limitations
+
+- HTML 兼容依赖 saved page 中稳定的 semantic role attributes；ChatGPT DOM 将来变化时会 fail closed，不会尝试读取 script 或 hydration/internal payload 兜底。
+- local identity 绑定 PALOS Conversation ID：同一份无 URL 内容分别以两个 New Conversation 导入会形成两条独立 history，系统不会用 transcript hash 猜测它们是同一远端资源。
+- Existing 无 URL 要求目标拥有且仅拥有一个有效 v2 `resourceHash`；legacy-only、无 history 或多 identity 会 blocked，且不会自动迁移/合并。
+- 不提供 URL 时无法在不同 PALOS Conversation 之间自动关联同一 ChatGPT origin；要跨目标保持 source identity，需要用户提供同一可接受 URL，或等待未来经 ADR 批准的 lifecycle binding。
+- 不保存 raw saved HTML；页面结构变化后的 replay/debug 只能依靠 synthetic fixtures、parser version 和 canonical transcript。
+- 自动访问 chatgpt.com、cookie/session、internal API、Copy/Merge/Restore provenance、Snapshot-aware Search 与 schema migration 仍明确不在本轮范围。
+
+---
+
+## 2026-07-28 v1.8 completion audit
+
+本节是完成度审计，不包含生产代码改动。审计基线为当前 `HEAD=2373aa1 feat: integrate share snapshot import UI`，前序 immutable core / delta projector commits 为 `ad36c0a`、`fc21e4e`。当前 worktree 另有尚未提交的 Phase 2F validation tests、fixtures、helper 和本文件记录；因此结论是：**冻结的 Share Snapshot import vertical slice 已实现并验证，但 v1.8 尚不是 clean release checkpoint，Snapshot lifecycle 与既有 Conversation Detail 写入口也尚未完成 hardening。**
+
+### Scope authority
+
+- 当前有效范围以已经冻结并实际实现的决定为准：`ImportedSource` 继续作为 immutable Snapshot carrier；只持久化 `resourceHash`；assistant-only delta 使用 projector；不新增 `ShareResourceBinding`、canonical store 或 IndexedDB schema migration；Copy/Merge/Restore provenance 延期。
+- `docs/design/PALOS-v1.8-ChatGPT-Share-Snapshot.md` 是 decision freeze 之前的 proposal，其中 `Conversation.shareOrigin`、masked/retained URL、纯文本限定、Snapshot timeline 属于旧提案，部分已被后续 approved scope 或实现替代，不能单独作为当前验收 contract。
+- `PROJECT.md`、`ARCHITECTURE.md`、`ROADMAP.md` 仍把 Current Focus 写为 Phase 2E；当前 worktree 已有 Phase 2F validation，存在文档阶段标签滞后。本轮按要求只更新 `HANDOFF.md`。
+
+### 1. Implemented in v1.8
+
+| Area | Current implementation | Status |
+| --- | --- | --- |
+| Local capture | ImportWorkbench 增加第四种 `ChatGPT Share Snapshot` input mode，复用唯一 New / Existing target selector；接受 uploaded saved HTML 或 pasted rendered text | implemented |
+| URL boundary | 严格规范化 `https://chatgpt.com/share/<id>`；URL 只存在于 capture/request memory；canonical identity 为 `SHA-256(normalized URL)` 的 `resourceHash` | implemented |
+| URL/privacy redaction | Source metadata、preview、workflow result 和测试 diagnostics 不保留 raw URL、share token、`shareId` 或 `normalizedShareUrl`；不请求 chatgpt.com，不读取 cookie/session | implemented |
+| Parser/artifact policy | pure/versioned parser 从 saved HTML semantic transcript 或 rendered text 提取 User/Assistant Messages；canonical Source 只保存规范化 transcript，不保存 HTML、script、page chrome 或 account state | implemented |
+| Immutable Snapshot model | 每次 confirmed changed capture 创建新 Source ID；旧 Source content/hash/capturedAt/metadata 不变；同内容为 `same` 且零写入；append 使用 `previousSnapshotSourceId + snapshotSequence` | implemented |
+| History resolution | pure resolver 按 `conversationId + resourceHash + previousSnapshotSourceId` 解析 chain/head；阻止 ambiguous resource、multiple heads、cycle、missing previous 和 ownership mismatch，不依赖 `updatedAt` 选 head | implemented |
+| Comparator | incoming transcript 与 resolved head 比较，同时验证 canonical Message projection；输出 same、append、blocked-shorter、blocked-diverged、blocked-projection-diverged、invalid | implemented |
+| Message provenance | 既有 Message 不重写；`sourceId` 表示该 Message 首次出现的 immutable Snapshot Source，`sourceOrdinal` 是完整 Snapshot transcript 的绝对 ordinal | implemented |
+| Delta projector | assistant-only suffix 可在 baseline、ownership、tail membership 和 ordinal 连续时扩展 unanswered tail Round；保持 Round ID、note、summary、context、question/title；mixed suffix 只对 genuinely new rounds 调用既有 derivation | implemented |
+| Workflow | capture request → resource target resolution → preview → explicit confirm → freshness guard → canonical writer → reload verification；input/target/content 变化清除 stale preview | implemented |
+| Canonical writer | append 在一个 `putStores` transaction 内写 Source、Message、Round、Conversation；不改旧 Source、不改旧 Message provenance、不重建既有 Round ID；写前验证 chain/sequence/baseline，写后 reload 验证 references 和 pending writes | implemented |
+| Legacy compatibility | pure migration helper 将可验证的 legacy mutable metadata 转为 sequence 1/resourceHash metadata，保留 Source/Message ID 和 provenance；失败返回 blocked，不自动迁移、不伪造历史 | implemented |
+| Verification | committed unit/integration coverage 加上当前未提交 Phase 2F saved-HTML durable/E2E validation，覆盖 initial、append、assistant extension、same、duplicate head、sequence mismatch、stale baseline、rollback、redaction和 no-network | implemented, Phase 2F assets uncommitted |
+
+当前 v1.8 的关键产品限制也已按设计生效：
+
+- 新 resource 只能创建新的 Snapshot Conversation；Existing target 尚无同 resource history 时 fail closed，不把 share identity 任意附着到已有 Conversation。
+- blocked/conflict 不提供 overwrite/rebase；不自动 Analyzer、不自动生成 Proposal/Knowledge。
+- capture draft、URL 和 preview registry 都是 process-local；reload 后需重新输入并 preview。
+
+### 2. Designed or identified, but not implemented
+
+| Item | Current position |
+| --- | --- |
+| Snapshot badge / “last captured” / sequence / parser version / history timeline / update link in Conversation Detail | 设计中；不在已完成的 Phase 2E Import UI scope |
+| Snapshot detail and bounded conflict diff viewer | deferred lifecycle UX |
+| edited/shorter/reordered transcript 的人工 replace/rebase/detached-import plan | deferred；当前只 blocked，绝不覆盖 |
+| Copy/Merge/Restore 的 Snapshot/Message/Round provenance redesign | explicitly deferred；现有通用行为未获得 Snapshot-safe 语义 |
+| Legacy migration 的用户入口、批量预检和原子执行 | helper 已有；runtime automatic migration 未实现 |
+| Durable capture draft、confirmation journal、crash recovery journal、cross-tab writer exclusion | deferred lifecycle hardening |
+| Snapshot retention/delete impact preview 和 optional Proposal/Knowledge snapshot provenance | deferred |
+| Snapshot-aware Search policy、resource/sequence filter、Snapshot deep link | 未实现；Search 在 v1.8 scope 中保持不变 |
+| 可靠的 full-transcript Browser Find / collapsed-content reveal | 未实现；现有能力只覆盖当前挂载内容或独立 Message/Round search |
+| 自动 URL fetch/re-fetch/polling、登录、cookies/session、internal API、headless scraping | 明确禁止；只有官方接口/明确许可与隐私合规批准后才可重新立项 |
+| raw saved HTML persistence、完整 URL retention/open-link | v1.8 明确不保存；不是遗漏。当前只保存 canonical transcript 和 resourceHash |
+| `ShareResourceBinding` entity/store、new IndexedDB store/schema migration | v1.8 明确拒绝；不得把它当作默认下一步 |
+| attachments/images/voice/canvas/tool calls、自动 AI 摘要/Knowledge | out of scope |
+
+### 3. Search / Conversation Detail / Browser Find audit
+
+#### Search
+
+- 用户可见 Search 仍是运行时 keyword contains + subsequence fuzzy。默认返回 Conversation、Knowledge、Round、Proposal、Task、Asset；高级模式额外返回 canonical Raw Message。它没有持久化 index、Embedding、RAG 或 Snapshot metadata filter。
+- `SearchIndexService` 会为每个 Source 构建 document，包括每个 immutable historical Snapshot Source；但 `SearchExperience` 的默认类型、advanced 类型和结果 group 都不暴露 `source`。因此**当前用户界面不会把每次完整 Snapshot transcript 重复显示为搜索结果**，但也无法搜索或定位 Snapshot history。
+- canonical Messages 只在首次出现时写一次，所以高级 Raw Message Search 不会因多个 Snapshot Source 自动重复。Round 结果反映当前 canonical projection，assistant-only extension 后仍使用同一 Round ID。
+- Round result 有 `round` query/hash deep link，可以打开对应 Round。Raw Message result 目前只链接 Conversation 根页面，没有 Message anchor、自动切换 Full timeline 或滚动到命中 Message。
+- 如果未来开放 Source result，必须先冻结 `historical all vs current head only` 规则；直接暴露当前 Source documents 会让同一 transcript prefix 随 Snapshot 数量重复。
+- v1.8 没有 Snapshot-specific Search regression test；现有 Search 测试验证的是 canonical Conversation/Round/Message 等旧读模型。
+
+#### Conversation Detail
+
+- Conversation Detail 能读取最新 canonical Messages/Rounds，显示 Message/Round/Source counts；Round Workspace 默认不使用 virtualization，并带 Round 内容筛选。页面还有折叠的 Raw Timeline，以及 Full Message Timeline 中的 `Search Messages`、上一条/下一条、highlight 和 scroll。
+- 页面没有 Share Snapshot badge、resource fingerprint、capturedAt、snapshotSequence、chain/timeline、head validation、parser version 或“更新 Snapshot”入口。
+- `SourceStorage.getByConversationId()` 仍按 `updatedAt` 排序只返回一个 Source；Conversation Detail 没有调用 Snapshot history resolver。这在正常追加时间单调时通常选到新 Source，但不是 v1.8 chain authority，clock/legacy/corrupt data 下可能选错。
+- 更重要的是，classic detail 仍保留旧的 mutable-source 行为：Source textarea autosave 使用同一 Source ID 写回，而且重建对象时不保留 `shareSnapshot` metadata。对 Snapshot Conversation 编辑该 textarea，可能覆盖 immutable head 并移除 lineage metadata。
+- `从原始文本生成 Messages` 使用 `replaceByConversationId()`；单条 Message Edit 直接改 canonical Message content；ConversationVersion Restore 会替换 Messages 并生成新 ID。这些既有入口都没有经过 Snapshot comparator/writer，也不会同步 Snapshot hash、Round membership 或 provenance。它们是当前最高优先级的 Boundary Hardening 风险，不应被描述为 v1.8 immutable guarantee 的一部分。
+- Source analyzer/task summary 同样只使用上述单 Source 选择结果；没有 Snapshot-head validation。它不会自动修改 Snapshot，但来源选择可能不是 resolver-confirmed head。
+
+#### Browser Find
+
+- 没有自定义 `Cmd/Ctrl+F` interception、find-in-page service、跨折叠内容索引或 Browser Find E2E。
+- Round Workspace 初始展开并一次渲染全部 Rounds，所以 native Browser Find 通常能命中当前挂载的 question/answer/record text；用户折叠 Round 后，完整内容被条件卸载，只剩摘要。
+- 顶部 Raw Timeline 默认关闭，关闭时 Message DOM 不存在；高级 Message Timeline 默认也是 hidden，Preview 只挂载前 5 条，Full 才挂载全部。native Browser Find 因此**不是完整 canonical transcript 的可靠查找方式**。
+- 当前可靠的页面内 Message 查找是先进入 Full Message Timeline，再使用 `Search Messages`；Round 查找使用 Round Workspace 的“搜索 Rounds”。两者是独立 UI，不是浏览器原生 Find，也没有统一跨 Conversation fields / Context / Snapshot history 的结果导航。
+
+### 4. Recommended next roadmap
+
+1. **Release closure（不扩架构）**
+   - 审阅并提交当前 Phase 2F tests/fixtures/helper；用用户有权处理的最新 saved HTML 做一次手工 smoke test。
+   - 对齐 PROJECT/ARCHITECTURE/ROADMAP 的 phase 标签，并明确 pre-freeze design proposal 已被 final scope supersede 的章节。
+
+2. **P0 — Snapshot boundary hardening**
+   - Conversation Detail 使用 history resolver 选择/验证 head，不再按 `updatedAt` 推断。
+   - 对 Snapshot-owned Conversation 禁止通用 Source overwrite、Message replace/edit 和旧 Restore 路径，或先批准明确的 detached/local-edit domain semantics；所有允许的变更必须保持 immutable history 与 canonical projection。
+   - 增加从 Detail mutation attempts 到后续 append/blocked 的回归测试。这个阶段不需要 `ShareResourceBinding` 或 schema migration。
+
+3. **P1 — Snapshot read UX**
+   - 增加只读 badge、last captured、sequence、parser version、valid chain summary、history timeline 和“回到 Import 更新”入口。
+   - conflict 先提供 bounded diagnostic/diff；replace/rebase 继续独立 decision，不与只读 timeline 混做。
+
+4. **P1 — Search and in-page find hardening**
+   - 冻结 Search 只索引 canonical Conversation/Round/Message，或只暴露 resolver-confirmed head Source；默认不得重复索引全部 historical transcripts。
+   - 给 Raw Message result 增加可验证 deep link，打开 Full timeline、展开目标并定位；为 collapsed Round/Message 提供统一的 canonical in-page find，而不是依赖浏览器当前 DOM。
+   - 增加 Snapshot append 后 Search 命中一次、Round stable link、native/应用内 Find 边界的 E2E。
+
+5. **P2 — Lifecycle and provenance**
+   - 单独冻结 Copy/Merge/Restore、migration execution、retention/delete、crash/cross-tab recovery 和 optional Knowledge provenance。
+   - 只有在生命周期语义批准后实现；继续保持现有 stores/schema，除非新的 ADR 明确证明必须迁移。
+
+6. **Compliance-gated future capture**
+   - 自动 Share URL capture 只有在官方 documented mechanism 或明确许可、法律/隐私/部署评审完成后才进入 roadmap；不得使用 cookies、session、internal endpoint 或 scraping 作为过渡方案。
+
+### Completion verdict
+
+- **Snapshot core + import workflow：complete for frozen v1.8 scope.**
+- **Phase 2F validation：implemented and green, but current assets are not committed.**
+- **Search：existing canonical search remains available; Snapshot history/search integration is not implemented.**
+- **Conversation Detail：read path is usable, but Snapshot-aware display and mutation boundary are incomplete; generic edit/restore paths can violate immutable assumptions.**
+- **Browser Find：no full-transcript guarantee; use current Full Message Search/Round Search until dedicated hardening is implemented.**
+
+本次审计门禁：`npm run lint` passed；`npm run build` passed（19 routes）；`npm test -- --run` passed（18 files / 308 tests）；`npm run test:e2e` passed（Playwright 3/3）；`git diff --check` passed。Playwright 首次在 restricted sandbox 内因 `listen EPERM 127.0.0.1:3100` 无法启动，获准在本地测试环境重跑后全部通过，不是应用失败。
+
+---
+
+## 2026-07-27 Phase 2F saved HTML canonical validation
+
+本轮只增加验证资产、test harness、durable integration scenarios 与本节记录；没有新增架构功能，也没有修改 Snapshot model、生产 parser/comparator/projector/workflow/writer、IndexedDB schema/store、Copy/Merge/Restore、Search 或 rendering virtualization。测试不访问 chatgpt.com，不读取 cookie/session。
+
+### Validation plan
+
+| Boundary | Input / setup | Expected evidence |
+| --- | --- | --- |
+| Initial capture | sanitized、真实 ChatGPT saved-page DOM 形态的 3-Message HTML；尾部 User 未回答 | workflow preview=`new`；confirm 前零写入；confirm 后 1 immutable Source、3 Messages、2 Rounds；reload 后 ownership、sourceId/sourceOrdinal、resourceHash、sequence=1 与 references 全部成立 |
+| Incremental capture | 同一 share URL 的 4-Message saved HTML，只新增尾部 Assistant；确认前给 unanswered tail Round 加入 note/summary/context | comparator=`append`；newMessageCount=1/newRoundCount=0；delta projector 保持 Round ID 并扩展 answer/messageIds；旧 Source/Messages 与 Round enrichment reload 后不变 |
+| Different identity | 已有 resource A，用户在 Existing target 下提供 resource B | Core 正确解析为新的 resource/`new` target；Phase 2E Existing target-intent guard 阻止 confirm；canonical stores 零变化 |
+| Duplicate head | 同 conversation/resourceHash 人工构造两个 head | workflow=`blocked`、reason=`multiple-heads`；preview 零写入 |
+| Sequence mismatch | 从 saved HTML 生成有效 append canonical plan，再把 incoming sequence 改为 7 | canonical operation 在 transaction 前拒绝，expected sequence=2；四个 canonical stores 零变化 |
+| Stale baseline | saved HTML append preview 后，authoritative Conversation 被 durable 修改 | writer 返回 typed `stale`；Snapshot chain/Message/Round 数量不变，外部 durable 修改保留 |
+
+### Test assistance
+
+- 新增两份不含真实聊天、账号、share token 或个人信息的 saved-page fixture：initial 版本为 `User → Assistant → User`，later 版本只增加尾部 Assistant。结构保留实际页面常见的 `article[data-testid=conversation-turn-*]`、`data-message-author-role`、nav/button/footer 和 embedded script chrome，用于证明 parser 只导入 semantic transcript。
+- 新增 `tests/helpers/share-snapshot-validation.ts`，集中提供 fixture loader、严格但虚构的 share URL、canonical Conversation draft，以及 deterministic IndexedDB workflow/ID/time factories。helper 只服务测试，不进入 production bundle。
+- `tests/share-snapshot-persistence.test.ts` 新增 6 个 Phase 2F durable scenarios，复用既有 atomic fake IndexedDB，完整经过 parser → comparator → delta projector → workflow preview/confirm → canonical writer → reload。
+- 新增 Share Snapshot 专用 Playwright：从 ImportWorkbench 的 saved HTML file picker 执行 NEW → confirm → browser IndexedDB read，再用同一 URL 执行 APPEND → confirm；验证 Source 1→2、Message 3→4、Round 保持 2 且 tail Round ID 不变，并监听所有 browser requests 证明没有 chatgpt.com 请求。
+
+### Findings
+
+- 首轮验证发现 test assertion 把“`previousSnapshotSourceId` 语义为 `undefined`”误写成“属性必须物理不存在”。IndexedDB structured record 可以保留显式 undefined；这符合冻结 contract，已修正测试，未修改 Snapshot model。
+- `different resourceHash` 本身不是 corrupt history：Core 必须把它解析为新 resource，而不是返回 history blocked。只有用户同时选择 Existing target 时，Phase 2E intent guard 才应阻止静默写入现有 Conversation；新增测试已冻结这条分层语义。
+- saved HTML canonical Source 只保留规范化 transcript；nav、buttons、footer、embedded account-state script 与 HTML markup 均未进入 Source/Message。metadata 只有 resourceHash，不包含 shareId/normalizedShareUrl。
+- 当前 fixture 是去隐私的真实 DOM 形态样本，不是用户私有页面的逐字归档。ChatGPT 将来改变 semantic attributes 时，parser 会 fail closed；实际产品验收仍应使用用户有权处理的最新 saved HTML 做一次手工 smoke test。
+
+### Verification
+
+- 定向：`npm test -- --run tests/share-snapshot-persistence.test.ts` passed（30/30）。
+- 浏览器定向：`npm run test:e2e -- tests/e2e/share-snapshot-import.spec.ts` passed（1/1）。
+- Final gate：`npm run lint` passed；`npm run build` passed（19 routes）；`npm test -- --run` passed（18 files / 308 tests）；`npm run test:e2e` passed（Playwright 3/3）；`git diff --check` passed。
+
+### Main Phase 2F files
+
+- Fixtures：`tests/fixtures/chatgpt-share-snapshot-initial.html`、`tests/fixtures/chatgpt-share-snapshot-assistant-append.html`
+- Helper：`tests/helpers/share-snapshot-validation.ts`
+- Durable validation：`tests/share-snapshot-persistence.test.ts`
+- Browser validation：`tests/e2e/share-snapshot-import.spec.ts`
+- Findings：`HANDOFF.md`
+
+---
+
+## 2026-07-27 Phase 2E user workflow integration
+
+本轮在已完成的 immutable Snapshot history、resourceHash identity、assistant-only delta projector、canonical writer hardening 与 legacy migration 上增加产品入口。范围只包含 ImportWorkbench 第四种 input mode 与对应测试/文档；没有修改 Snapshot model、IndexedDB schema/version/store、Copy/Merge/Restore、Search 或 rendering virtualization。最终按要求创建 `feat: integrate share snapshot import UI` commit，不 push，也不 squash 或改写前序 commit。
+
+### ImportWorkbench integration
+
+- `ImportInputMode` 新增 `share`，仍复用页面唯一的 New / Existing target selector；没有在 Share panel 内新增 Conversation selector。
+- Share panel 接受两种本地内容：UTF-8 saved HTML upload 或 rendered text paste。严格 ChatGPT share URL 只在 component capture state 与一次 workflow request 中存在，用于 normalization/resourceHash；没有 fetch、XHR、cookie/session access、console/log persistence 或 URL retention。
+- IndexedDB caches ready 后，UI 创建 process-local `ChatGPTShareSnapshotWorkflow`，依次调用公开 preview 与 explicit confirm；writer 使用既有 `IndexedDBShareSnapshotCanonicalWriter`。UI 不访问 canonical plan，也不直接调用 Phase 2B operation。
+- resourceHash resolution 继续决定实际 owner。已有 New / Existing selector 作为 intent guard：未匹配、resolved owner 不同或 target 未选择时只显示错误并禁用 confirm，不静默写入其它 Conversation。
+- Share 输入、内容类型、URL、title、Workspace 或 target 改变时清除 prepared preview 和 workflow instance；异步 HTML read/preview 通过 revision guard 丢弃 stale completion。
+
+### Preview and confirmation
+
+- preview card 显示 NEW / APPEND / SAME / BLOCKED、existing/snapshot/new Message counts、Round extend/create/total impact，以及 append 时明确保留的 Conversation fields、Message ID/sourceId/sourceOrdinal 与 Round ID/enrichment。
+- SAME 明确显示 zero writes；blocked/invalid/ambiguous 或 target mismatch 不提供 confirm。new/append 只有在 baseline、target intent 与 IndexedDB readiness 全部有效时才可显式确认。
+- confirm 后仍由 hardened writer 完成单事务 canonical write、cache reload 与 verification。成功报告不包含 URL/share token；component 随即清除 URL 与 raw input state。
+
+### Tests and verification
+
+- 新增 UI integration tests，覆盖第四 mode URL round-trip与 target preservation、input/target/content stale cleanup、append/same/blocked preview rendering、assistant tail Round impact、preserved fields、target ownership mismatch、preview 零写入、explicit confirm 后才调用 writer，以及 fetch spy / source contract 证明无 chatgpt.com network 或 credential access。
+- 既有 import page state 与 v1.6.4 mode tests 扩展到第四 mode。
+- Final gate：`npm run lint` passed；`npm run build` passed（19 routes）；`npm test -- --run` passed（18 files / 302 tests）；`npm run test:e2e` passed（Playwright 2/2）；`git diff --check` passed。E2E 首次在受限 sandbox 内因无法监听 `127.0.0.1:3100` 返回 EPERM，允许本地测试 server 后按原命令重跑通过；不是产品代码失败。
+
+### Remaining risks / next boundary
+
+- v1.8 canonical writer 只支持首次 Snapshot 创建新 Conversation；因此 Existing + 尚无 resourceHash history 会在 UI fail closed，不能把 share identity 附着到任意已有 Conversation。扩大该语义需要单独 domain decision，不应在 UI 层绕过。
+- preview registry 与 raw URL/content 都是 component/process-local；页面 reload 后必须重新输入并 preview。没有 durable capture draft 或 confirmation journal。
+- 本轮没有新增 Share Snapshot 专用浏览器 E2E；既有完整 Playwright 2/2 通过，unit/integration 覆盖真实 pure workflow 边界。最终产品验收仍建议手工检查 saved HTML file picker、target switch 与 reload 后 Conversation 内容。
+
+### Main Phase 2E files
+
+- UI：`src/app/import/chatgpt-share-snapshot-import.tsx`、`import-workbench.tsx`、`page.tsx`
+- State：`src/core/services/import-page-state.ts`
+- Tests：`tests/chatgpt-share-snapshot-ui.test.ts`、`tests/import-page-state.test.ts`、`tests/v164-known-issues.test.ts`
+- Docs：`PROJECT.md`、`ARCHITECTURE.md`、`ROADMAP.md`、`HANDOFF.md`
+
+---
+
+## 2026-07-27 v1.8 compatibility hardening
+
+本轮在已验证但尚未提交的 Phase 2C-3C worktree 上继续，只加固 legacy mutable Share Snapshot metadata 的显式迁移兼容。没有修改 UI、Copy/Merge/Restore、Search、IndexedDB schema/version/store、canonical writer、Snapshot History、Delta Projector 或 Message provenance；没有自动迁移、commit 或 push。
+
+### Explicit pure migration boundary
+
+- `migrateLegacyMutableShareSnapshotSource()` 现在显式接收 Source、canonical Messages 与 Source collection，返回 `migrated | noop | blocked`。它不访问 Storage、不写 IndexedDB、不修改输入对象，只在全部校验成功后返回同 ID Source 的新 metadata 投影。
+- legacy schema v1 的 `shareId + normalizedShareUrl` 只在调用期间用于 canonical normalization 与 SHA-256 resourceHash；成功结果使用 schema v2、`snapshotSequence=1`，省略 `previousSnapshotSourceId`，并完全移除 URL/share token 字段。
+- Source ID、content/name/timestamps 与所有 Messages 保持原值；helper 不返回 Message write plan，也不改 Message ID、sourceId 或 sourceOrdinal。无法证明历史时直接 blocked，不把其它 Source 猜成 previous Snapshot。
+- 已是有效 immutable metadata 的 Source 返回 noop；不会重复迁移或改写 sequence/history。
+
+### Runtime validation
+
+- legacy metadata 必须包含有效 normalized ChatGPT Share URL，URL 规范化结果必须与存储值完全一致，且 path share ID 必须与 legacy `shareId` 相同。
+- 只支持 `sha256-json-role-content-v1`；metadata count/timestamp/parser/input kind/hash 必须有效，Source 必须具有 owning Conversation。
+- canonical Messages 必须按 order 连续、sourceOrdinal 从 0 绝对连续、ID 唯一，并继续归属于原 legacy Source；任何 provenance 缺失/变化都会 blocked，不自动修补。
+- Source.content 会重新经过 Share parser；role/content/count 与 canonical Messages 必须逐 ordinal 一致，重新计算的 transcript hash 也必须等于 legacy snapshotHash。
+- migration 前会 transiently hash Source collection 中的 v1/v2 resource identity；同 resourceHash 出现在其它 Conversation 时返回 `resource-hash-collision`。同 Conversation 已存在其它 Snapshot 时返回 history conflict，而不是伪造 lineage。
+- blocked result 只有 reason/error，不包含可写 Source；输入 Source/Messages/collection 保持 byte-for-byte 可比较的原状态。
+
+### Tests and verification
+
+- 新增独立 migration tests，覆盖成功迁移、already migrated no-op、Source/Message ID 与 provenance preservation、invalid metadata、unsupported algorithm、invalid URL/shareId、missing ownership、broken sourceOrdinal、transcript/provenance divergence、cross-Conversation collision，以及 blocked 后 canonical input untouched。
+- 原 history resolver tests 恢复为只验证 history；legacy migration coverage 移入专用文件。
+- Final gate：`npm run lint` passed；`npm run build` passed（19 routes）；`npm test -- --run` passed（17 files / 292 tests）；`git diff --check` passed。按本阶段要求未运行 E2E。
+
+### Remaining risks / next boundary
+
+- 本阶段提供显式 pure migration plan，不自动持久化；未来若增加 migration command，仍需单独定义 freshness、单 Source transaction、reload verification 与用户触发边界。
+- malformed legacy records 只会 blocked，不进行启发式修复；这保留 provenance，但需要未来诊断/人工处理流程。
+
+### Main compatibility files
+
+- Core：`src/core/services/chatgpt-share-snapshot-migration.ts`
+- Tests：`tests/chatgpt-share-snapshot-migration.test.ts`、`tests/chatgpt-share-snapshot-history.test.ts`
+- Docs：`HANDOFF.md`
+
+---
+
+## 2026-07-27 Phase 2C-3C canonical writer hardening
+
+本轮从 clean checkpoint `fc21e4e feat: add share snapshot delta projector` 继续，只加固 immutable Share Snapshot canonical write path。没有修改 UI、Copy/Merge/Restore、Search、IndexedDB schema/version/store、Snapshot History Core、Delta Projector 或全局 Round derivation；没有 commit / push。
+
+### Pre-transaction immutable plan validation
+
+- canonical operation 在写入前用一个四-store readonly transaction 读取 authoritative Conversation/Source/Message/Round state；pending writes 仍先 drain，校验失败时不调用 `putStores()`。
+- incoming Source 必须是从未持久化的新 immutable Snapshot Source；metadata/resourceHash/capturedAt/timestamps 有效，`previousSnapshotSourceId` 必须存在并等于当前唯一 head，`snapshotSequence` 必须精确加一。初始 Snapshot 必须 sequence 1 且不能为已有 resource 创建第二个 head。
+- current 与 expected Source chain 都通过纯 history resolver；跨 Conversation resource、missing previous、multiple heads、cycle、ownership mismatch 或 sequence gap 全部 fail closed。
+- plan Messages 必须使用全新 ID、统一指向 incoming Snapshot Source、归属目标 Conversation，并同时连续扩展 Message.order 与 absolute sourceOrdinal。既有 Message ID 即使 owner 相同也禁止 upsert，因此不能改写历史 sourceId/provenance。
+- append Conversation write 会从 persisted record 只复制并更新 `updatedAt`，避免 storage adapter 的 default workspace normalization 被误写回；title/note/context/其它字段变化会拒绝。
+- plan 中现有 Round ID 只允许出现一次且必须是 canonical tail extension。writer 重新推导 persisted tail baseline，要求 membership/question/answer 一致；只允许 answer/messageIds/updatedAt 改变，title/order/question/note/summary/context/createdAt 必须保持。
+- Assistant prefix 必须完整、按顺序且只归属被扩展 Round；真正的新 Rounds 必须使用新 ID、连续 order，并只引用未用于 extension 的 suffix Messages。每条 appended Message 必须且只能归属一个 Round，禁止 orphan 或交叉重复引用。
+
+### Atomic write and reload verification
+
+- 写入仍只调用一次既有 `putStores()`，单个 readwrite transaction 精确包含 conversations、sources、messages、rounds；不使用 replaceStores、clear、单 Message transaction 或单 Round transaction。
+- batch 只包含 sanitized Conversation update、新 Snapshot Source、suffix Messages、被扩展 Round 和真正的新 Rounds；previous Snapshot Sources、既有 Messages 与其它 Rounds 不进入 batch。
+- reload 后继续核对四个完整 store，并重新验证 Source chain/metadata、Message ownership/sourceId/sourceOrdinal、全 Round references 与 pending writes。新增显式 verification flags：`messageOwnershipVerified`、`immutableRecordsPreserved`、`roundExtensionPreserved`。
+- previous Snapshot Sources 必须与写前对象完全相等；Round extension 必须与 plan 完全相等，同时再次确认除 answer/messageIds/updatedAt 外的字段未变化。
+
+### Tests and verification
+
+- IndexedDB integration 新增/增强覆盖：append 创建第二个 immutable Source、旧 Source 不变、assistant extension 保持 Round ID/context、四 store 单次 readwrite transaction、existing Message rewrite 拒绝、duplicate head 拒绝、wrong sequence/missing previous 拒绝、Round enrichment/baseline divergence 拒绝、extension transaction abort 四 store 回滚，以及 initial Assistant-only 的既有 derivation 行为不受 append policy 影响。
+- 既有 authoritative writer baseline test 继续验证 durable stale state 返回 stale、零 canonical write；成功路径继续通过 reload verification。
+- Final gate：`npm run lint` passed；`npm run build` passed（19 routes）；`npm test -- --run` passed（16 files / 284 tests）；`git diff --check` passed。按本阶段要求未运行 E2E。
+
+### Remaining risks / next boundary
+
+- writer adapter 的 authoritative fingerprint read 与 canonical operation 的 validation/readwrite transaction 之间仍是两个阶段；operation 会重新验证 domain invariants，但极窄的跨 tab TOCTOU 仍不能被 `putStores()` 的现有 API 完全关闭。
+- readwrite commit 后若 cache preload/reload verification 失败，仍没有 durable recovery journal 或 compensating rollback；transaction abort 本身已验证原子回滚。
+- field-level Round extension policy 目前属于 Share Snapshot canonical operation，不改变其它 Round storage/save 路径。
+
+### Main Phase 2C-3C files
+
+- Infrastructure：`src/infrastructure/storage/indexeddb/share-snapshot-operation.ts`
+- Tests：`tests/share-snapshot-persistence.test.ts`
+- Docs：`HANDOFF.md`
+
+---
+
+## 2026-07-27 Phase 2C-3B assistant-only delta projector
+
+本轮从 clean checkpoint `ad36c0a feat: implement v1.8 immutable share snapshot core` 继续，只实现 immutable Share Snapshot append 的 Round delta projection。没有修改 UI、Copy/Merge/Restore、IndexedDB schema/version/store、`ShareResourceBinding`、全局 `deriveRoundDrafts()` 语义或 Phase 2C-3A Snapshot History Core；没有 commit / push。
+
+### Pure projection contract
+
+- 新增纯服务 `projectChatGPTShareSnapshotDelta()`，输入完整 canonical Messages、现有 Rounds、已物化 append suffix Messages 与 comparator baseline，返回 `projected` 或明确 blocked reason。
+- blocked reasons 冻结为 `no-unanswered-tail-round`、`tail-round-mismatch`、`message-order-mismatch`、`ownership-mismatch` 与 `projection-divergence`。校验不依赖 `updatedAt` 排序。
+- Assistant 开头的 suffix 只有在 target Round 存在、是 canonical conversation tail、answer 未完成、message membership 与现有 baseline 一致，且新 Message 的 `order/sourceOrdinal` 精确连续时才能扩展。
+- 扩展保留 Round ID、title、question、note、summary、context、createdAt；只更新 answer、messageIds 与 updatedAt。Assistant-only suffix 不调用通用 derivation 创建 orphan Round。
+- 对 `Assistant → User → Assistant`，只把首段 Assistant 投影到 unanswered tail；从第一个 User 起的剩余 suffix 才调用既有 `deriveRoundDrafts()`，且 draft message indexes 继续指向完整 suffix。
+- User 开头的正常 append 继续复用既有 derivation。全局 `deriveRoundDrafts()` 本身未修改。
+
+### Service and persistence integration
+
+- `prepareChatGPTShareSnapshot()` 在 append canonical materialization 内调用 projector。成功计划可同时包含同 ID 的 tail Round 更新与真正的新 Rounds；preview/import plan 的 `importedRoundCount` 只统计新 Round，不把被扩展的 Round 计为新增。
+- projection blocked 返回 `status=blocked`、详细 `deltaProjectionBlockedReason`，不生成 canonical plan，因此不会进入 writer。
+- canonical plan、writer contract 与 IndexedDB operation 均未扩展。既有 put-only operation 已支持同 owner Round upsert；集成测试验证 transaction、reload verification、旧 Snapshot Source immutability 以及 Round enrichment preservation。
+
+### Tests and verification
+
+- 新增 projector 纯单元测试，覆盖 valid assistant-only extension、无 tail、answered tail、ownership、ordinal、Round ID/enrichment preservation、later User derivation、无 orphan Round、tail membership 与 baseline divergence。
+- Share Snapshot service tests 覆盖 assistant-only canonical plan、混合 suffix 以及 answered tail zero-plan block；IndexedDB integration 覆盖同 ID tail Round 的 durable update/reload。
+- Final gate：`npm run lint` passed；`npm run build` passed（19 routes）；`npm test -- --run` passed（16 files / 277 tests）；`git diff --check` passed。按本阶段要求未运行 E2E。
+
+### Remaining risks / next boundary
+
+- Projector 依赖 Phase 2C-3A comparator 已验证完整 canonical Message stream；Round tail 只允许 exact membership/question projection，任何人工或旧数据偏差都会 fail closed，不会猜测修复。
+- Phase 2C-3B 只负责 Round projection，不改变 Copy/Merge/Restore provenance、UI capture/confirm 入口、legacy migration execution、cross-tab TOCTOU 或 post-commit recovery journal。
+- 当前 canonical writer 信任 Core 生成的 Round update shape；projector tests 已冻结“只改 answer/messageIds/updatedAt”，但 Infrastructure 尚未增加独立的 field-level Round mutation policy。
+
+### Main Phase 2C-3B files
+
+- Core：`src/core/services/chatgpt-share-snapshot-delta-projector.ts`、`chatgpt-share-snapshot-service.ts`、`chatgpt-share-snapshot-import.ts`
+- Tests：`tests/chatgpt-share-snapshot-delta-projector.test.ts`、`chatgpt-share-snapshot-service.test.ts`、`share-snapshot-persistence.test.ts`
+- Docs：`HANDOFF.md`
+
+---
+
+## 2026-07-27 Phase 2C-2 headless application workflow
+
+本轮在未提交的 Phase 2A / 2B / 2C-1 worktree 上原地继续，新增无 UI 的 application boundary：
+
+`capture request → exact target resolution → preview → explicit confirm → freshness guard → canonical writer → typed result`
+
+没有修改 React、ImportWorkbench、copy/merge、Round derivation、Phase 2B canonical operation、IndexedDB schema/version/store、Analyzer、Proposal 或 Knowledge；没有访问网络、抓取 URL、读取 cookie，也没有 commit / push。
+
+### Layer boundary and lifecycle
+
+- `ChatGPTShareSnapshotWorkflow` 是 application orchestration，不是新的 domain service。它读取 Storage contracts、解析 Source target、调用 Phase 2C-1 pure service、保存 process-local preview state，并在有效 confirmation 后调用 writer。
+- 公开 `ShareSnapshotPreview` 只包含 preview identity、`new | append | same | ambiguous | invalid | blocked` 状态、resolved target、delta counts、baseline fingerprint、confirmable flag 和 warnings/errors；canonical plan 与完整 baseline 只保存在 workflow 的 private map，不通过 preview 暴露。
+- Target resolution 对 `shareId + normalizedShareUrl` 做精确匹配：0 个为 new，1 个为 existing，多个为 ambiguous；不依赖数组顺序和 latest heuristic。dangling Source、跨 Conversation source lineage 或 new Conversation ID collision 返回 invalid，全部零写入。
+- Confirm 要求 `previewId + baselineFingerprint`。`new/append` 在 freshness 通过后执行 writer；`same` 返回 typed noop 且不调用 writer；ambiguous/invalid/blocked 返回 typed terminal result；baseline 改变返回 stale；writer 异常被收敛为不泄漏底层数据的 write-failed。preview 在成功、stale、noop 或失败后消费，重复/并发确认不能再次执行同一 plan。
+
+### Deterministic freshness and writer adapter
+
+- Baseline 不新增 revision 字段。SHA-256 deterministic fingerprint 覆盖 Conversation identity/title/note/summary/conclusion/pending/context、Source identity/ownership/content/shareSnapshot metadata、Message IDs/order/role/content/external provenance/share provenance，以及 Round IDs/order/content/messageIds/note/summary/context。
+- Fingerprint 明确排除 `updatedAt`、`lastOpenedAt`、`Conversation.workspaceId/order` 等无关时间或 UI metadata，避免仅 UI 活动导致 stale；Message/Round 先按 canonical order + ID 排序，identity matching Source IDs 也排序。
+- Workflow confirm 先对当前 Storage view 重算 baseline。`IndexedDBShareSnapshotCanonicalWriter` 随后 drain pending writes，并在一个四-store readonly transaction 中读取持久化 Conversation/Source/Message/Round，重算 authoritative baseline；不匹配直接返回 stale，零 canonical 写入。
+- Baseline 匹配时，adapter 才调用原封不动的 Phase 2B `executeShareSnapshotCanonicalOperation(plan)`。put-only transaction、cache clear、preload、reload/source-lineage/reference/pending-write verification 仍由 Phase 2B operation 独占；adapter 只做 freshness boundary 与 typed receipt 映射。
+
+### Tests and verification
+
+- 新增 `tests/chatgpt-share-snapshot-workflow.test.ts` 9 项，覆盖 new、append/same、duplicate identity ambiguous、dangling/cross-owner invalid、preview 零写入、explicit confirm、stale baseline、duplicate confirm、writer stale/failure，以及 capture input/local enrichment immutability。
+- `tests/share-snapshot-persistence.test.ts` 新增 4 个真实 IndexedDB workflow integration：new 与 append 均完成 writer → Phase 2B operation → reload verification；adapter 能发现 cache 未变但 durable state 已变的 stale；readwrite abort 返回 typed write-failed 且四 store 原子保留。重复 confirm 不增加第二份 records，成功 receipt 证明 `pendingWriteCount === 0`。
+- 定向 gate：2 files / 25 tests passed，lint 与 `git diff --check` passed。
+- Final gate：`npm run lint` passed；`npm run build` passed（19 routes；沙箱首次禁止 Turbopack 临时端口，获准按相同命令重跑成功）；`npm test -- --run` passed（14 files / 258 tests）；`git diff --check` passed。按范围未运行 E2E。
+
+### Remaining risks / next boundary
+
+- Workflow preview registry 是进程内、单次使用状态；页面或应用 reload 后旧 preview 必须视为 stale，当前没有 durable preview/confirmation journal。
+- Writer 的 authoritative baseline read 是一致的单 readonly transaction，但 Phase 2B operation 保持既有 plan-only contract，因此 baseline transaction 完成到 Phase 2B readwrite transaction 开始之间仍存在很小的跨 tab/process TOCTOU 窗口。彻底关闭该窗口需要未来单独批准 expected-baseline-in-transaction 语义，不能在本阶段偷偷改变 Phase 2B operation。
+- Phase 2B 在 transaction commit 后若 preload/reload verification 因环境异常失败，仍没有 durable recovery journal；write-failed 不代表已 commit 的 transaction 可自动补偿。
+- 本阶段没有 UI wiring，因此 Share Snapshot 尚无产品入口。未来 UI 只能消费公开 preview/result，并在用户 explicit confirm 后调用 workflow；不得直接获取 plan 或调用 Phase 2B operation。
+- ImportWorkbench Merge provenance cleanup 与 `duplicateConversationWorkspace()` Source remap/share identity cleanup 继续延期，本轮没有修改相关代码。
+
+### Main Phase 2C-2 files
+
+- Core contract/models：`src/core/contracts/share-snapshot-canonical-writer.ts`、`src/core/models/share-snapshot-baseline.ts`、`src/core/models/share-snapshot-preview.ts`、`src/core/models/share-snapshot-workflow-result.ts`
+- Application：`src/core/services/chatgpt-share-snapshot-workflow.ts`
+- Infrastructure adapter：`src/infrastructure/storage/indexeddb/idb-share-snapshot-canonical-writer.ts`、`src/infrastructure/storage/indexeddb/index.ts`
+- Tests/docs：`tests/chatgpt-share-snapshot-workflow.test.ts`、`tests/share-snapshot-persistence.test.ts`、`HANDOFF.md`
+
+---
+
+## 2026-07-27 Phase 2C-1 pure service integration
+
+本轮继续复用未提交的 Phase 2A parser/comparator/import plan 与 Phase 2B canonical operation，只新增 Core pure service orchestration 和 integration tests。没有修改 React、ImportWorkbench、copy/merge、Search、delete/restore、Round derivation 或 IndexedDB schema，也没有 commit / push。
+
+### Pure service contract
+
+- 新增 `prepareChatGPTShareSnapshot()`，输入严格 share URL、raw Snapshot input、调用方提供的 `capturedAt`、`new | existing` target snapshot，以及可注入的 `createId(kind)`。Service 不读取 BrowserStorage/IndexedDB、不访问网络、不调用 canonical operation、不修改输入对象。
+- Service 依次组合 URL normalization → parser → metadata/SHA-256 → existing identity check → comparator → Phase 2A import plan → canonical plan materialization，返回 `new | append | same | blocked | invalid`。
+- `new/append` 才返回 `ChatGPTShareSnapshotCanonicalPlan`；`same/blocked/invalid` 不返回可执行 plan，也不会分配 canonical IDs。Core 现在拥有 canonical plan DTO，Phase 2B IndexedDB operation 只 import 该 type，依赖方向保持 Core → Infrastructure 单向。
+- ID 与时间不在 pure service 内隐式生成：调用方注入 `createId` 与 `capturedAt`，因此 tests/preview 可确定性重放。Materializer 会拒绝空 ID、同 store ID collision 和无效 Round suffix message index。
+
+### Canonical materialization semantics
+
+- Initial：创建一个 Source、完整 canonical Messages 与 derived Rounds；Message 保存同一 `sourceId` 和 parser absolute `sourceOrdinal`，Round.messageIds 只引用已物化 Message IDs。
+- Append：复用既有 Source ID，只写 suffix Messages/Rounds；Message `order` 从现有最大值继续，Round `order` 从现有最大值继续，sourceOrdinal 保留完整 Snapshot 中的 absolute ordinal。
+- Conversation title/note/summary/conclusion/pending/context、既有 Source name、旧 Messages/Rounds 及 Round enrichment 都不被改写；canonical plan 只更新 Conversation `updatedAt`、Source normalized transcript/metadata/`updatedAt` 和新增 suffix records。
+- Existing update 必须匹配 Source metadata 中的 `shareId + normalizedShareUrl`；source ownership、Message/Round ownership、旧 lineage 异常都会返回 `invalid`，不会形成 executable plan。
+- Source.content 继续使用 Phase 2A `renderChatGPTShareSnapshotTranscript()` 的规范化纯文本，不保存 HTML page chrome、script、DOM、cookie 或页面状态。
+
+### Integration tests and verification
+
+- 新增 `tests/chatgpt-share-snapshot-service.test.ts` 5 项：initial composition、safe append + local enrichment immutability、Same zero plan/zero ID、Diverged/Shorter blocked zero plan，以及 parser/identity invalid zero plan。
+- `tests/share-snapshot-persistence.test.ts` 新增两个跨层闭环：pure Service initial plan → Phase 2B operation → reload/verify，以及 pure Service append plan → Phase 2B operation → reload/verify。两条路径均验证 canonical counts、Source lineage、Round references 与 `pendingWriteCount === 0`。
+- Final gate：`npm run lint` passed；`npm run build` passed（19 routes）；`npm test -- --run` passed（13 files / 245 tests）；`git diff --check` passed。按范围未运行 E2E。
+
+### Remaining risks / next boundary
+
+- Phase 2C-1 只输出纯 preview/result/canonical plan；没有 UI confirm flow。下一阶段接 UI 时必须只在 explicit confirm 后把 `new/append` plan 交给 Phase 2B operation，不能让 parse/preview 自动写入。
+- Assistant-only suffix、Round extension 等规则继续完全沿用已批准的 Phase 2A import plan；本轮没有修改 Round derivation semantics。
+- ImportWorkbench Merge provenance cleanup 与 `duplicateConversationWorkspace()` Source remap/identity cleanup 仍按 Phase 2B 决策延期。
+- Post-commit preload/verification failure 仍没有 durable recovery journal；只有 IndexedDB transaction abort 具备完整原子回滚。
+
+### Main Phase 2C-1 files
+
+- Core：`src/core/services/chatgpt-share-snapshot-service.ts`
+- Infrastructure type integration：`src/infrastructure/storage/indexeddb/share-snapshot-operation.ts`
+- Tests：`tests/chatgpt-share-snapshot-service.test.ts`、`tests/share-snapshot-persistence.test.ts`
+- Docs：`HANDOFF.md`
+
+---
+
+## 2026-07-27 Phase 2B persistence foundation
+
+本轮从现有未提交 Phase 2A worktree 原地继续，没有 reset、discard、stash、commit 或 push。范围只包含 optional provenance persistence、IndexedDB put-only transaction、Share Snapshot canonical operation、reload verification 与 preservation tests；没有修改 UI、ImportWorkbench、Search、delete/restore、Conversation rendering、Round derivation、copy/merge 或 v1.6.1 batch-delete。
+
+### Optional-field compatibility
+
+- `Message.sourceId / sourceOrdinal` 与 `ImportedSource.shareSnapshot` 继续是 optional；没有提升 IndexedDB `DB_VERSION`、没有新增 store、没有 migration，也不回填旧记录。
+- BrowserStorage、IndexedDB Adapter、App Data schema v1 与 `ConversationVersion.snapshotData.messages` 都通过既有对象持久化保留 optional fields。缺失字段读取为 `undefined`，旧 Message / Source 不会被拒绝或改写。
+- App Data export/import 保持 `schemaVersion: 1`，Share Snapshot metadata、Message lineage 和 Version 内的 Message provenance 均可 round-trip。
+
+### Put-only transaction and canonical operation
+
+- `database.ts` 新增 `putStores(batch)`：从非空 batch 建立一个 `readwrite` transaction，只调用各 store 的 `put()`；不调用 `clear()`、`replaceStores()` 或 delete canonical operation。任一 request/transaction abort 时由 IndexedDB 原子语义回滚所有 store，未包含在 batch 的既有记录保持不变。
+- `share-snapshot-operation.ts` 执行已生成的 canonical plan：drain tracked writes（失败会向调用方抛出）→ 检查 pending count 为 0 → 读取 authoritative Conversation/Source/Message/Round state → 校验 ownership、ID collision、统一 sourceId、从 0 连续且唯一的 sourceOrdinal、metadata message count 与 Round.messageIds references → 单次 `putStores()` → clear caches → preload → 对四个完整 store 的预期记录逐 ID/内容核对 → 再验证 metadata、lineage、references 和 `pendingWriteCount === 0`。
+- Operation 是 put-only upsert：Conversation 与 Source metadata 可更新，Messages/Rounds 只执行 plan 中已物化的记录；不会 clear store、删除 Message、重建既有 ID 或调用 fire-and-forget adapters。
+
+### Preservation and Source.content decision
+
+- Integration fixture 从已有 2 Messages / 1 Round 开始，Round 带 `note="important note"`、`summary="summary"` 与 confirmed context；Conversation 带 Note、Overview fields 和完整 Context，旁侧存在 Knowledge 与 Task。
+- 追加后旧 Message IDs、旧 Round ID 及其 note/summary/context 完整不变，只新增 suffix Messages 与 suffix-derived Round；Conversation Context/Overview、Knowledge 和 Task 保持。
+- `ImportedSource.content` 仍保存由 Share parser 输出并规范化后的纯文本 transcript，因为当前 Search、Analyzer、Demo Provider、Conversation Detail 和 Dashboard 都读取该字段。不会保存输入 HTML、`script`、DOM、cookie、页面状态或内部 API payload；HTML 输入只经过 Phase 2A parser 提取 semantic Messages，再渲染为纯文本 Source。
+
+### Tests and verification
+
+- 新增 `tests/share-snapshot-persistence.test.ts` 10 项：Browser/IndexedDB legacy + optional-field round-trip、Conversation Version round-trip、App Data export/import round-trip、单 store put、多 store put、transaction abort atomic rollback、pending write drain、canonical success/reload/source lineage/reference verification、existing Round/enrichment preservation、invalid ordinal zero-write 与 Share operation abort rollback。
+- Phase 2A parser/comparator tests 与新增 persistence tests 定向运行：3 files / 25 tests passed。
+- Final gate：`npm run lint` passed；`npm run build` passed（19 routes）；`npm test -- --run` passed（12 files / 238 tests）；`git diff --check` passed。按本阶段要求未运行 E2E。
+
+### Remaining risks / deferred scope
+
+- `ImportWorkbench` 的 Merge 仍直接复制 Message，可能把原 Conversation 的 `sourceId/sourceOrdinal` 带入目标 Conversation；本轮按明确范围延期，没有修改 `import-workbench.tsx`。
+- `duplicateConversationWorkspace()` 仍先复制 Message、后复制 Source，并保留 Source `shareSnapshot` identity；副本可能继续携带原 Share identity 或无法正确 remap Message sourceId。本轮按明确范围延期，没有修改 copy/merge 代码。
+- IndexedDB transaction abort 可完整回滚；但 transaction 已完成后若 reload/preload 或 verification 因环境异常失败，本阶段没有 durable recovery journal 或 post-commit compensating rollback，调用方会收到失败且不能把状态描述为已验证成功。
+- Phase 2B 只提供 persistence foundation，尚未接 UI confirm flow；不代表 Share Snapshot UI 已可用。
+
+### Main files
+
+- Phase 2A entities/services：`message.ts`、`imported-source.ts`、四个 `chatgpt-share-snapshot-*.ts`
+- Phase 2B infrastructure：`indexeddb/database.ts`、`indexeddb/share-snapshot-operation.ts`、`indexeddb/index.ts`
+- Tests/docs：三个 Share Snapshot Vitest 文件、`HANDOFF.md`
+
+---
+
+## 2026-07-25 design proposal
+
+本轮基于干净的 `feat/v1.8-share-snapshot` / `e55e677 release: PALOS v1.7 round-first context management` 只完成设计审查，没有写产品代码、修改 IndexedDB schema、创建 store、接入 Provider、commit 或 push。
+
+### Architecture conclusion
+
+- Conversation 继续作为 Aggregate Root；Message / Round 继续承载 canonical transcript，Knowledge 继续是人工确认后的独立 Aggregate。
+- 一次已确认的 Share Snapshot 建议复用现有 Source store，使用 optional metadata 保存 parser version、SHA-256 transcript hash、message manifest、前序 Snapshot Source ID 和 capture time；MVP 不新增第 8 个 canonical store。
+- `ConversationVersion` 是 PALOS 本地恢复点，只包含 Conversation + Messages，不适合作为外部 Share Snapshot 历史。
+- 当前 Export append 已有 `externalConversationId / externalMessageId / contentHash` seam，但不能处理分享文本缺少稳定 ID、中间编辑、截短、重排或 Assistant-only suffix 扩展最后 unanswered Round。
+- local enrichment 明确定义为 Conversation / Round 的人工记录、Context、Task、Proposal、Knowledge 和 Tags；Snapshot 更新不得覆盖或自动重算这些内容。
+
+### Compliance decision
+
+- OpenAI 官方 Shared Links FAQ 说明普通分享链接是持链接可见的 Snapshot，只有分享者主动更新后才包含后续完成消息；Enterprise link 还可能受 workspace 权限限制。
+- OpenAI 当前 Terms of Use 明确限制自动或程序化提取数据或 Output。没有官方 Share Link Import / Delta API、明确许可或专项合规批准前，v1.8 不实现 URL fetch、DOM scraping、internal API、登录模拟、cookies 读取或 polling。
+- MVP 改为：用户主动提供 URL → PALOS 严格校验、mask、hash → 用户在普通浏览器打开 → 用户手动粘贴可见文本 → PALOS 本地 parser/hash/message diff → preview → explicit confirm。
+
+### MVP update semantics
+
+- 相同 transcript hash：no change，零 canonical 写入。
+- 旧 Message 序列是新序列的精确前缀：safe append；只写新 Snapshot Source、新 Messages、新 Rounds，或保留 enrichment 地扩展最后 unanswered Round。
+- 中间编辑、缩短、重排、role change 或 parser ambiguity：conflict preview，现有 Conversation 零改动。
+- 这里的 incremental 是本地持久化增量；没有官方 delta API 时不承诺网络 delta。
+
+### Design artifact and next gate
+
+- 完整设计：[PALOS v1.8 ChatGPT Share Snapshot Design](./docs/design/PALOS-v1.8-ChatGPT-Share-Snapshot.md)
+- 实施前需产品负责人确认：接受 manual capture MVP、完整 URL 默认不保存、conflict 不覆盖、历史 Snapshot 保留，以及 URL fetch 作为独立 compliance gate。
+
+---
+
+# PALOS v1.7 — Personal AI Context Management Handoff
+
+## 2026-07-23 Final Release QA / Data Semantics Closure
+
+本轮从干净的 `release/v1.7` / `fb032b4 checkpoint: PALOS v1.7 round-first usability candidate` 开始。Phase 0 基线为 clean，lint/build、9 files / 204 tests、Playwright 2/2 全部通过。本轮只修复审计确认的 release blocker/明显回归；没有改 IndexedDB schema、storage architecture、Aggregate 或 AI/Provider 范围，没有清理用户数据、commit 或 push。
+
+### Semantic and reliability closure
+
+- `Round.summary` 继续保存“本轮结论”；`Round.note` 通过唯一 `round-record.ts` 保存“我的备注 / 下一步 / 目标 / 决定 / 遗留问题 / 旧自由文本”。Canonical string 增加内部版本标记和 header-line 转义；纯文本、旧分段、`【补充备注】`、重复兼容段与未知 header 可 parse → edit one field → serialize 而不静默丢失。
+- Search 为 Round record 输出独立 matched fields；Continue Topic 分别输出“我的备注 / 本轮结论 / 下一步”，不再展示无法区分语义的整段 raw note。
+- `DebouncedAutosave` 现在支持 async save、revision 与 in-flight 串行。每个 Round/Overview controller 独立；blur、折叠/切换和卸载 flush；dispose 后不更新 UI。IndexedDB optimistic cache update 后等待 tracked transaction 成功才显示 saved，失败保留最新 draft，retry 重写最新值。`beforeunload` 仍只有 best-effort，不作为唯一保障。
+- 动态投影显示“当前推荐参考：Round X”且不写数据；人工确认后显示“已固定参考：Round X”并读取 confirmed snapshot。来源 Round 后改不会覆盖固定 snapshot，也不会改当前 Round own record。
+- 手工 Knowledge 对“相同 source + 规范化 content”做最小幂等复用；不做语义级全局去重。autosave/inheritance 仍不创建 Proposal/Knowledge，人工 Applied Proposal provenance 与 Conversation delete 后 Knowledge 保留规则不变。
+- 真实 390px 截图发现展开 Navigator 虽无 overflow 但会挤压主内容；小屏改为 overlay，桌面 inline 行为不变。
+
+### Tests and browser QA
+
+- Vitest：9 files / 213 tests passed。新增覆盖 serializer 六字段/未知 legacy、单字段编辑保真、两 Round 隔离、async response ordering、blur/unmount、failure/retry latest、动态推荐变化/固定 snapshot、Knowledge 幂等、Search/Continue 语义。
+- Playwright：2/2 passed。v1.7 闭环创建 6 Messages / 3 Rounds，验证快速输入→立即切换→reload、一次 intentional IndexedDB failure→failed→retry、Overview autosave、Continue Topic、Knowledge 重复确认、Imported Round 无破坏入口、1280/390 无 overflow、Navigator 无跳动、Conversation delete 后 Dashboard/Search/Review 无残留、Knowledge 按既有规则保留。
+- QA artifacts：`test-results/v17-inline-autosave-inline-f0027-ssively-and-stay-responsive-desktop-chrome/` 下保存 1280px/390px 截图与不含正文的 `qa-manifest.json`。intentional failure 是唯一预期错误注入；恢复后 unexpected Console error = 0。
+- 应用内 Browser 使用独立空 profile 做只读可视复核；没有读取或清理用户浏览器数据。可视检查直接促成了小屏 Navigator overlay 修复。
+
+### Final status and limits
+
+Final gate：lint passed；build passed（19 routes）；Vitest 213/213；Playwright 2/2；`git diff --check` passed。PALOS v1.7 的 Round-first release semantics 已闭合，建议创建单一 v1.7 release commit，但本轮按要求不 commit、不 push。
+
+Remaining non-blockers：`beforeunload` 不能保证异步 IndexedDB 完成，因此可靠路径仍是 debounce + blur/unmount flush；Conversation Context 与 Version 仍是两个既有 store 的非跨-store transaction；restore durable journal、固定 Playwright Chromium、cloud/AI/RAG/Agent 均不属于 v1.7。
+
+### Main changed files
+
+- Core：`round-record.ts`、`debounced-autosave.ts`、`round-context-inheritance.ts`、`round-knowledge-service.ts`、`context-export-service.ts`、`search-index-service.ts`
+- Infrastructure/UI：`indexeddb/database.ts`、两个 autosave panel、`round-context-panel.tsx`、`round-navigator.tsx`、`search-experience.tsx`
+- Tests/docs：两个 v1.7 Vitest 文件、v1.7 E2E、README / PROJECT / ARCHITECTURE / ROADMAP / CHANGELOG / QA Checklist / HANDOFF
+
+---
+
+## 2026-07-22 Final Usability Correction closure
+
+本轮在既有 v1.7 dirty worktree 上原地收口，没有 reset / restore / stash / checkout，没有清浏览器数据、修改 IndexedDB schema、重写 Core Storage、接入新 Provider/RAG/Agent/Embedding，也没有创建 commit。版本仍为单一 **v1.7**。
+
+### Root cause and inline layout
+
+- 旧实现把 `RoundRecordPanel` 与 `RoundContextPanel` 挂在页面级固定 `320px` Inspector，Round 内容在另一个网格列。固定栏、嵌套控件最小宽度与选中态共享面板共同压缩正文，并让记录脱离来源 Round，形成横向滚动风险和大片空白。
+- 页面级 Inspector 与黄色“本轮记录”入口已移除。每个展开 Round 自己包含内容/记录双栏：1280px 实测正文 62.7%、记录 37.3%；390px 为上下排列。两种视口的 document overflow 均为 false。
+- 真实浏览器首次检查还发现 `detail-section` 自身已有“标题 + 内容”两列，而 Round 列表缺少内容 wrapper，导致卡片误入 224px 标题列、内层正文宽度为 0。已补 `round-workspace-content` 的 `min-width: 0` 容器，并完整复验。
+
+### Round Own Record and autosave
+
+- 默认直接显示三个字段：我的备注、本轮结论、下一步。分别复用 `Round.note` 的结构化备注段、`Round.summary`、`Round.note` 的下一步段。
+- “更多记录”才显示本轮目标、新增决定、遗留问题与旧自由 Round Note；旧 `【补充备注】` 和未分段 Note 均继续兼容读取，没有迁移或删除旧数据。
+- `DebouncedAutosave` 统一 750ms 防抖；输入变更只排队，停止后才持久化。blur、Round 折叠/搜索隐藏/模式切换导致的组件卸载，以及 `beforeunload` 会 flush pending value。
+- 状态覆盖未修改、等待保存、保存中、已保存、保存失败点击重试；默认不再显示“保存本轮记录”。
+
+### Passive inherited reference
+
+- 新增纯函数 `findMostRecentEffectiveRound`：只查当前 Round 前序兄弟，从近到远选择存在人工 Summary/Note 或 confirmed snapshot 的 Round，并跳过空 Round。
+- 默认引用只是只读投影，不写当前 Round context/snapshot，不复制到三个记录字段，不改来源 Round，也不改 Conversation Overview。无有效 Round 时回退 Overview；两者均空时显示“暂无历史参考”。
+- 普通态只显示“参考上下文：Round X 的结论与下一步”。用户展开“调整参考”后才可改选 Round、Overview、自动选择或本轮不参考；只有这些主动操作与高级 Override/Exclude 才写既有 inheritance 配置。
+- 旧 sourceRoundId、confirmed snapshot、excludedFields、overrides 继续读取；高级字段控制留在二级折叠区，不再作为逐轮必经步骤。
+
+### Conversation Overview and Knowledge boundary
+
+- Rounds 后保留独立 Conversation Overview，默认只显示总备注/当前背景、当前总论、后续方向，映射既有 `longTermBackground/currentState/nextActions`；旧 decisions/constraints 在“更多总览”中兼容。
+- Overview 使用同一 autosave/blur/unload 机制，不由 Round 自动覆盖。“继续这个主题”只读取人工 Overview、最近有效 Rounds、Pending Questions 与 Next Actions。
+- Round 结论与 Overview 各有“保存为 Knowledge”次级动作，均先展示确认预览，确认后才创建。autosave 和 passive reference 不调用 Proposal/Knowledge 路径。
+- 现有 `KnowledgeCard.proposalId` 仍为必填，因此人工创建继续生成一个 `Applied` manual provenance Proposal；本轮没有扩大数据模型或绕过来源关系。
+
+### Imported Round immutability
+
+- 当前没有可靠、无 schema 变更的 per-Round origin 判定，因此按保守规则隐藏所有单 Round 删除、合并、拆分、上下移动、Duplicate 与原始 Question/Answer/Message binding 编辑入口。
+- 用户仍可编辑人工 Round Record 与参考来源；整个 Conversation 的既有显式删除与 canonical cascade 保持不变。
+
+### Tests and real browser QA
+
+- 新增 `tests/v17-final-usability.test.ts` 9 项，覆盖三字段直显、Round 隔离、debounce、blur flush、reload、跳过空 Round、reference 不污染当前记录、主动关闭 reference、Overview autosave、Knowledge 显式确认边界、imported immutability 与 responsive source contract。
+- 新增 `tests/e2e/v17-inline-autosave.spec.ts`：真实创建 6 Messages / 3 Rounds，分别保存 Round 1/2、reload、Round 3 最近有效引用/自身空值、改选来源持久化、Overview autosave、desktop/narrow grid、无横向 overflow、Knowledge 数量不变和 Conversation 删除。
+- 测试机已有非本任务的 IPv6 `*:3000` 监听，导致 Playwright 自启动的 IPv4 `127.0.0.1:3000` 偶发路由冲突；`playwright.config.ts` 仅把测试 server/baseURL 隔离到 `127.0.0.1:3100`。标准 `npm run test:e2e` 随后稳定 2/2，不改变应用默认运行端口。
+- 应用内浏览器另建 `PALOS v1.7 Final Browser QA 2026-07-22`，完成相同三轮闭环。Round 3 在 Round 2 为空时引用 Round 1，Round 2 保存后自动改为引用 Round 2；改选 Round 1 后 reload 仍保持，Round 3 三个自有字段始终为空。
+- Overview reload 后三个字段准确；Knowledge 仍为 0；删除临时 Conversation 后 Dashboard 无标题、Search 为 no-results、Review 无标题，PALOS Console error = 0。临时 Conversation 已通过 UI 删除，没有清理其他浏览器数据。
+
+### Final verification and release recommendation
+
+```text
+npm run lint          passed
+npm run build         passed, 19 routes
+npm test -- --run     passed, 9 files / 204 tests
+npm run test:e2e      passed, 2/2
+git diff --check      passed
+```
+
+当前可以进入 **v1.7 release QA**。这只表示 Final Usability Correction 达到 release QA 输入标准，不代表已创建 release commit；本轮明确未 commit、未 push。
+
+### Main files
+
+- UI：`round-workspace.tsx`、`conversation-workspace-mode.tsx`、`round-record-panel.tsx`、`round-context-panel.tsx`、`conversation-context-panel.tsx`、`conversation-detail.tsx`
+- Core：`debounced-autosave.ts`、`round-record.ts`、`round-context-inheritance.ts`、`conversation-context-service.ts`、`context-export-service.ts`、`round-knowledge-service.ts`
+- Tests：`tests/v17-final-usability.test.ts`、`tests/v17-context-management.test.ts`、`tests/e2e/v17-inline-autosave.spec.ts`、`playwright.config.ts`
+- Docs：PROJECT、ARCHITECTURE、ROADMAP、CHANGELOG、QA Checklist、HANDOFF
+
+---
+
+## 2026-07-19 UX Refinement closure
+
+本轮只完成 v1.7 既有能力的 UX Refinement，没有新增领域、Entity、canonical store 或 IndexedDB schema，也没有接入 AI、RAG、Agent、Embedding、云 Provider 或 API Key。PALOS 继续定位为 **Personal AI Context Manager**；主流程调整为 AI 对话 / Import → Conversation → Round → 本轮记录 → Context → Decision / Task → 未来继续。
+
+### Conversation Dashboard and content guidance
+
+- Conversation 标题下方直接展示 Context Dashboard，首屏包含长期目标、当前状态、已确认决策、约束条件与下一步行动。
+- Dashboard 提供“编辑长期 Context”“继续这个主题”“History / Timeline”三个明确入口；Context 编辑默认只在空 Context 时展开。
+- “不同内容写在哪里”明确说明：Conversation Note 是普通备注，Summary 是对话摘要，Conclusion 是当前结论，Pending Questions 是未解决问题，Context 是长期维护状态。
+- 原 Note / Summary / Conclusion / Pending Questions 与 `Conversation.context` 数据职责保持不变。
+
+### Round record and inheritance UX
+
+- 每个 Round 卡片增加“本轮记录”入口；五项字段为本轮目标、本轮结论、新增决定、遗留问题、下一步行动。
+- 本轮结论继续写入 `Round.summary`；其余四项以人类可读分段写入 `Round.note`。旧自由 Round Note 作为“补充备注”兼容保留，没有新增字段或 Entity。
+- Round 标题并入既有 Edit 表单，替代不稳定的 prompt-only 重命名路径；Question、Answer、Note 与 Message binding 仍使用同一个保存动作。
+- inheritance 明确显示“Round 之间不是自动 AI 记忆”、来源 Round X，以及当前状态、决策、约束三个核心继承字段。
+- “保留 / 删除 / 修改”继续分别映射 retained inherited value、`excludedFields` 与 `overrides`；确认前只预览，点击确认后才保存既有 Context Snapshot。
+
+### Continue Context and Timeline
+
+- “继续这个主题”基于现有 Context Export DTO 生成可编辑、可复制的纯文本，包含 Conversation Context、最近 3 个 Rounds、Pending Questions 与 Next Actions。
+- 文本明确标记为人工维护数据，不包含 AI 推断；不写 Storage、不调用 Analyzer / Provider。
+- Context Dashboard 的 History / Timeline 展示修改时间及字段 previous/next，继续复用 `ConversationVersion[kind=context]`。
+
+### Real-use Demo and browser QA
+
+- 通过真实 Import 创建并保留 `PALOS开发迭代记录`：6 Messages / 3 Rounds / 1 Source，而不是空 Conversation。
+- Conversation Context：长期目标 `开发个人AI上下文管理工具`；当前状态 `v1.7 UX优化`；决策 `暂缓RAG和Agent`；下一步 `完成Release QA`；另记录本轮 scope 约束与一个关联 Task。
+- Round 依次命名为 `重新定义PALOS路线`、`实现Context`、`优化UI`，三轮都填写五项本轮记录并在 reload 后保持。
+- Round 1 从 Conversation Context 确认 Snapshot；Round 2 以 Round 1 为来源，真实执行当前状态=修改、决策=保留、约束=删除；Round 3 正确推荐 Round 2。
+- 浏览器验证继续文本包含 Context、三个 Rounds、Pending Questions、Context Next Action 与关联 Task，复制成功；Timeline 展示五项 Context 变化。
+- 真实视觉检查发现 320px Inspector 中继承摘要被三列布局挤压，已改为纵向堆叠；首次 prompt rename 检查暴露浏览器不支持 prompt，已由 Edit 内联标题字段修复。
+
+### Verification and release recommendation
+
+```text
+npm run lint          passed
+npm run build         passed, 19 routes
+npm test -- --run     passed, 8 files / 195 tests
+git diff --check      passed
+```
+
+新增回归覆盖真实 PALOS 三轮 Continue Context 文本与五项 Round 记录在既有 Summary / Note 中的序列化兼容。应用内浏览器在修复前记录到一条 `prompt() is not supported`，因此把 Round 标题改进既有 Edit 表单；修复后 reload、三轮编辑、inheritance、继续文本、Timeline 与视觉复查期间，检查点没有新增 PALOS Console error。最后一次额外新 tab 重开被浏览器表面策略拒绝，未绕过；既有 tab 已多次 reload 验证持久化。Demo 数据保留供 release QA 继续检查。
+
+当前可以进入 **v1.7 release QA**。这表示 implementation 与 UX refinement 已达到 release QA 输入标准，不代表已经完成最终 release review 或创建 release commit。本轮按要求不 commit、不 push。
+
+### Main UX refinement files
+
+- Conversation：`src/app/conversation/[id]/conversation-detail.tsx`、`conversation-context-panel.tsx`
+- Round：`round-workspace.tsx`、`conversation-workspace-mode.tsx`、`round-record-panel.tsx`、`round-context-panel.tsx`
+- Pure formatting：`src/core/services/context-export-service.ts`、`round-record.ts`
+- Tests / docs：`tests/v17-context-management.test.ts`、`src/app/help/page.tsx`、README / PROJECT / ARCHITECTURE / ROADMAP / CHANGELOG / QA Checklist / HANDOFF
+
+---
+
+## 2026-07-19 implementation candidate
+
+本轮从干净的 `release/v1.6.5` 基线开始。Phase 0 的 lint、187 项测试与 build 全部通过；`v1.6.5` 标签指向稳定发布提交，当前 HEAD 另含 release baseline 文档。v1.7 没有创建 commit、没有修改 IndexedDB schema、没有新增 canonical store 或大型 Aggregate，也没有扩展 Provider、Agent、RAG、Embedding、MCP、Cloud Sync、Mobile 或多人协作。
+
+### Product position
+
+PALOS v1.7 的定位是 **Personal AI Context Manager**：Conversation 保存人与 AI 的原始协作过程，Context 表达当前仍然有效的背景/状态/决策/约束，Knowledge 只保存人工确认且适合长期复用的信息。Analyzer / Provider 关闭时，Import、Context、Decision、Task、Search 与 Export 仍然可用。
+
+### Context model and reused fields
+
+- 保留 `Conversation.note`：自由、长期项目备注，不与结构化 Context 合并。
+- 保留 `summary`：Conversation 的压缩概览。
+- 保留 `conclusion`：当前最终结论。
+- 保留 `pendingQuestions`：仍未解决的问题。
+- 新增 optional embedded `Conversation.context`：`longTermBackground`、`currentState`、`decisions`、`constraints`、`nextActions`。
+- `Round.note` 继续表示本轮新增的人工备注；`Round.summary` 继续表示本轮客观摘要。
+- 新增 optional embedded `Round.context`，保存 inheritance mode、sourceRoundId、excluded fields、overrides、confirmed snapshot 与 confirmedAt。Round 仍不是 Aggregate Root。
+
+### Round Context inheritance
+
+- 默认只推荐同一 Conversation 内最近、早于当前 Round、且有有效 Context Snapshot 的 Round；没有候选时使用 Conversation Context。
+- 用户可选择来源 Round、逐字段 Override、逐字段 Exclude，或取消整轮继承。
+- Preview 不写 Storage；只有点击“确认本轮 Context Snapshot”才保存。
+- 取消继承后只保留用户本轮 Override，不自动删除 Round Note。
+- Conversation 复制会重映射 Round Context 的 `sourceRoundId`；Split 出来的新 Round 不自动复制已确认 Context。
+
+### Context Timeline
+
+- 复用现有 ConversationVersion/Snapshot；没有创建 Event 系统。
+- `ConversationVersion` 增加 optional `kind` 与 `contextChanges`。每次有效 Context CRUD 追加 `kind=context` 的不可覆盖记录，包含 previous/next value。
+- 手动与自动恢复点现在可选标记 `manual` / `automatic`，旧 Version 缺失 kind 时继续按原逻辑读取。
+- Timeline 在 Conversation Context 区域展示“什么时候改变了什么”；清空当前 Context 也保留历史。
+
+### Task, Search, and Export
+
+- Conversation 内 Next Actions 复用现有 Task + Conversation SourceRef；用户可创建、完成、重开。AI 不会自动创建 Task。
+- Search 仍是运行时关键词 + subsequence fuzzy；匹配优先级为 Context → Summary → Conclusion → Knowledge → Round Note → Message。Raw Message 仍只在高级模式出现。
+- `ContextExportService` 输出稳定 `palos-context-export` v1.0 JSON：Conversation、Context、Decision current/history、关联 Task、Round summary/note/context snapshot。导出不调用模型。
+
+### Compatibility and storage
+
+- canonical IndexedDB stores 仍为 7 个：`conversations`、`messages`、`rounds`、`sources`、`proposals`、`knowledge-cards`、`conversation-versions`。
+- Browser/IndexedDB Conversation 与 Round adapter 对新增 optional context 字段集中归一化；v1.6.5 记录缺失字段时返回空 Context，不回写、不清空旧数据。
+- App Data Export/Restore 的 JSON 记录结构继续兼容；没有 storage rewrite 或 schema migration。
+
+### Main files
+
+- Entity：`src/core/entities/conversation.ts`、`round.ts`、`conversation-version.ts`
+- Service：`conversation-context-service.ts`、`round-context-inheritance.ts`、`context-export-service.ts`、Search/Task/Version/Workspace 相关最小扩展
+- Infrastructure：`context-normalization.ts` 与四个 Conversation/Round Browser/IndexedDB adapters
+- UI：`conversation-context-panel.tsx`、`round-context-panel.tsx`，以及 Conversation Detail / Classic / Workspace Mode 集成
+- Tests：`tests/v17-context-management.test.ts`
+- Docs：README、PROJECT、ARCHITECTURE、ROADMAP、CHANGELOG、QA Checklist、Help、HANDOFF
+
+### Automated tests
+
+- 新增 6 项：Context CRUD + Timeline、v1.6.5 export compatibility、Round inheritance、Override/Exclude、inheritance cancel、Context Export、Search priority（部分行为在同一用例组合验证）。
+- 当前全量结果：8 files / 193 tests passed。
+- 最终 `npm run lint` passed；`npm run build` passed（19 routes）；`npm test -- --run` passed（8 files / 193 tests）；`git diff --check` passed。
+- `npm run test:e2e` 首次在沙箱内因 `listen EPERM 127.0.0.1:3000` 无法启动；获准在本地测试环境重跑后发现 Search placeholder 稳定 selector 回归。恢复原 placeholder 合约后再次重跑，Playwright 1/1 passed（create → TXT import → reload → search → export → delete/reload → restore → search）。
+
+### Manual QA and remaining limits
+
+- `docs/QA_CHECKLIST.md` 新增 V17-01–V17-10；本轮尚未执行浏览器人工 QA，因此当前是 implementation candidate，不标记正式 release-ready。
+- Context Timeline 与 Context 当前态跨 Conversation/Version 两个现有 store 写入，沿用当前非跨 store 事务边界。
+- Context field 是人工维护的文本，不是自动 Memory、知识图谱或语义状态机。
+- Context Export v1.0 是未来 LLM/Agent/RAG 的输入准备，本轮没有调用或启用这些能力。
+
+### Next recommendation
+
+先执行 V17-01–V17-10 浏览器 QA，重点验证旧 v1.6.5 数据、Round 推荐/取消继承、Timeline history、Task linkage、Search order、Context JSON 与 App Data restore。自动与人工门禁通过后可进入单一 v1.7 release review；不拆 v1.7.1/v1.7.2。本轮按要求不创建 commit。
+
+---
+
+# PALOS v1.6.5 — Stable Candidate Handoff
+
+## 2026-07-19 candidate closure
+
+本轮先把完整 v1.6.4 dirty worktree 固化为 `9ed8feb checkpoint: v1.6.4 known issues closure`，随后只完成用户批准的 Stable 收口。没有 push，没有创建最终 release commit，没有修改 IndexedDB schema，也没有迁移 Task、Workspace、Asset、AnalyzerRun、Tag 或其它 sidecar。
+
+### Storage Factory closure
+
+- `analysis-result`、`round-workspace`、`conversation-workspace-mode`、`workspace-manager`、`tag-manager`、Tasks 与 Today 中涉及七类 canonical entity 的读取/写入统一走 `storage-factory`。
+- 七类 canonical entity 仍为 Conversation、Message、Round、Source、Proposal、KnowledgeCard、ConversationVersion。
+- 新增 source-contract 回归，防止指定业务页面重新直接依赖 canonical `Browser*Storage` implementation。
+
+### App Data restore closure
+
+```text
+preview / import
+  → validate envelope, store keys, record IDs, duplicates and references
+  → drain pending IndexedDB writes
+  → backup selected LocalStorage keys + affected IndexedDB stores
+  → apply restore
+  → clear caches + preload
+  → verify LocalStorage content + IndexedDB ID sets
+  → success
+
+failure
+  → restore backup
+  → verify backup
+  → report verified rollback OR explicitly report unconfirmed data state
+```
+
+- Restore 不再仅凭 `replaceStores()` resolve 就报告成功。
+- UI success 文案包含实际验证数量与 pre-restore backup 数量。
+- Generic failure 不再宣称“原数据已回滚”；只有 `AppDataRestoreError.rollbackSucceeded=true` 的路径才携带 verified rollback 结论。
+- Backup 是本次操作内的内存快照；journal recovery 明确未实现。
+
+### Minimal Playwright E2E
+
+- 新增 `@playwright/test`、`playwright.config.ts` 与单条 desktop Chrome 串行测试。
+- 闭环：create Conversation → Existing TXT import → detail reload → Search → App Data export → delete → reload durability → App Data restore → Search。
+- E2E 首次执行发现 URL 直接进入 `inputMode=txt` 时 parser state 仍初始化为 ChatGPT；已最小修复为初始 mode 与 parser 一致。
+- 删除后 ConversationList 会立即更新，但同页 Conversation Explorer 的独立 React snapshot 要到 reload 才同步；E2E 以 delete → reload 验证 canonical durability，本轮未扩展到跨组件状态重构。
+
+### Verification
+
+```text
+npm run lint          passed
+npm run build         passed, 19 routes
+npm test -- --run     passed, 7 files / 187 tests
+npm run test:e2e      passed, 1 test
+git diff --check      passed
+```
+
+### Remaining risks
+
+- Restore 没有 durable journal；浏览器在 replace 与 verification 之间异常退出时不能自动恢复。
+- Playwright 当前使用系统 Chrome channel；没有安装仓库固定版本的 Chromium binary。
+- Conversation Explorer 删除后同页 snapshot 可能短暂陈旧，reload 后 canonical 状态正确。
+- ChatGPT import transaction fan-out 与 advanced cross-source semantic dedup 仍是 backlog。
+- 当前 v1.6.5 candidate 改动仍在工作区；最终 release commit 尚未创建。
+
+### Release recommendation
+
+自动门禁与完整 E2E 均通过后，建议进入一次人工 release review；若接受上述剩余风险，可创建独立 v1.6.5 release commit。按本轮要求不创建该 commit。
+
+---
+
+# PALOS v1.6.4 — Known Issues Closure / Existing TXT / Import Diagnostics
+
+## 2026-07-16 work-in-progress checkpoint
+
+本轮在 `fix/v1.6.4-known-issues-closure`、基线 `9d8a83c` / `v1.6.3-integrity-ui-closure` 上完成实现；没有修改 IndexedDB schema，没有重写 v1.6.1 canonical atomic delete、v1.6.2 structured ChatGPT import 或 v1.6.3 referential integrity，没有清理用户浏览器数据，也没有创建 commit。
+
+Canonical IndexedDB stores 仍固定为 7 个：`conversations`、`messages`、`rounds`、`sources`、`proposals`、`knowledge-cards`、`conversation-versions`。LocalStorage 继续承载 `current-source` / `current-proposal` 选择指针、轻量配置、UI preference、storage metadata、legacy migration 数据与其它非 canonical sidecars。
+
+### Complete Known Issues Matrix
+
+| ID | 来源 | 审计状态 | 级别 | 本轮结果 | 验收证据 |
+| --- | --- | --- | --- | --- | --- |
+| KI-01 Existing + TXT | 用户反馈 / code audit | partially fixed | P1 | fixed | Existing 可直接选 TXT；`ImportService.appendToConversation` 追加 Source/Message/Round；reload durability test |
+| KI-02 Import progress | 用户反馈 / code audit | confirmed open | P1 | fixed | 明确 10 phases；批量每 10 Conversations 更新；显示 Message/Round/skipped counters |
+| KI-03 quota warning / confirm | 用户反馈 / code audit | confirmed open | P1 | fixed | 超阈值按钮不再 disabled；warning 后进入 explicit confirm；quota stop 有 processed/unprocessed |
+| KI-04 Copy Diagnostics 普通用户可见 | 用户反馈 / code audit | confirmed open | P1 | fixed | `NEXT_PUBLIC_PALOS_DIAGNOSTICS=1` gate；默认 component 返回 null |
+| KI-05 production debug/console | TODO / code audit | confirmed open | P1 | fixed | console 只在 bulk flag 输出；移除 R1.3 logs 与旧 console fallback 文案 |
+| KI-06 AppEventLog 循环实例化 | code audit | confirmed open | P2 | fixed | ChatGPT batch 每个 component 复用一个 `BrowserAppEventLogStorage` |
+| KI-07 Quick filter tests | code audit | confirmed open | P2 | fixed | pure quick-filter helper + all/empty/imported/failed/workspace tests |
+| KI-08 deriveRoundDrafts edges | code audit | partially fixed | P2 | fixed | empty/system/orphan/unknown/consecutive assistant tests；既有 parsing 不变 |
+| KI-09 cross-source duplicate | 用户反馈 / code audit | confirmed open | P1 | fixed | same identity skip；same source later update append；different source same content preserved |
+| KI-10 docs stale | README/ARCHITECTURE/ROADMAP/CHANGELOG/HANDOFF | confirmed open | P1 | fixed | 五份文档统一 v1.6.4 WIP、7 stores、sidecars、matrix 与 backlog |
+| KI-11 mode stale state / URL | 用户反馈 / code audit | confirmed open | P1 | fixed | target/input switch 清无效 state；New URL 不保留 target；legacy target param 移除 |
+| KI-12 invalid TXT | 用户反馈 / code audit | partially fixed | P1 | fixed | empty/whitespace/no labels/invalid UTF-8 全部 failed，不可 confirm |
+| KI-13 Existing append report count | 用户反馈 / code audit | partially fixed | P1 | fixed | report 来自实际新增 ID/count；success 前 reload 后核对 delta 与引用 |
+| KI-14 error + stale success | 用户反馈 / code audit | confirmed open | P1 | fixed | 新操作清旧 report/error；失败清 report；success 只在 verifying 后设置 |
+| KI-15 delete/Clear 后立即 import | v1.6.1 regression | already fixed | P1 | preserved | 既有 Clear / single delete / batch delete 后 import tests 继续通过 |
+| KI-16 Proposal/Note/Navigator | v1.6.3 HANDOFF | already fixed | P0/P1 | preserved | orphan cleanup、Review not-found、single Note editor、contained Navigator、Analyzer gate tests 继续通过 |
+| KI-17 import transaction fan-out | code comment / HANDOFF | feature backlog | feature | not implemented | 记录为 future performance debt；本轮不改 canonical storage contracts |
+| KI-18 share link / mobile / cloud / AI | product non-goals | feature backlog | feature | not implemented | 五份文档明确未支持，不冒充 current capability |
+
+### Existing + TXT final execution chain
+
+```text
+Existing target selector
+  → TXT File input
+  → fatal UTF-8 decode
+  → ImportParserPipeline.preview(parserId = txt)
+  → reject empty / whitespace / no speaker labels / no Messages
+  → ImportService.appendToConversation(targetId)
+  → save Source(filename + raw content)
+  → save Messages(target conversationId + actual IDs)
+  → save Rounds(target conversationId + actual Message IDs)
+  → update target Conversation.updatedAt
+  → flushCachesToIndexedDB
+  → clearCaches
+  → preloadAll
+  → verify Conversation count unchanged, Source metadata, exact Message/Round delta,
+     ownership, returned IDs, and every Round.messageIds reference
+  → success report
+```
+
+失败会清除旧 success report 并显示明确 error；不会创建额外 Conversation。Existing TXT 不调用 ChatGPT structured parser。
+
+### Final Import mode matrix
+
+| Target | Input | Status | Write semantics |
+| --- | --- | --- | --- |
+| New | ChatGPT Export | supported | structured linearizer → one canonical Conversation per selected source；external conversation duplicate skip |
+| New | Paste Text | supported | labeled-text Preview → new Source/Messages/Rounds |
+| New | TXT File | supported | UTF-8 TXT Preview → new Source/Messages/Rounds |
+| Existing | ChatGPT Export | supported | append new external message identities；old content untouched |
+| Existing | Paste Text | supported | append one Source segment + parsed Messages/Rounds |
+| Existing | TXT File | supported | same text/TXT pipeline；preserve filename；durable reload verification |
+
+### Duplicate semantics boundary
+
+- Same ChatGPT Export imported in New mode：existing `externalConversationId` means no duplicate Conversation copy.
+- Same ChatGPT Conversation later update：Existing append skips existing `externalMessageId` values and appends new identities; no longer skips the whole source after the first intersection.
+- Same TXT file appended again：there is no reliable cross-file identity, so PALOS does not pretend to provide semantic file dedup.
+- Repeated content inside one TXT append：each parser result is written exactly once; identical legitimate utterances are preserved with distinct canonical IDs.
+- Different source, same content：not globally deduplicated by pure content hash.
+- `skipped` for ChatGPT means messages skipped by known external identity; `skipped` for Paste/TXT is currently `0`.
+
+### Progress / error / quota state machine
+
+`idle → parsing → preview-ready → confirming → importing → flushing → verifying → success`
+
+Terminal alternatives are `failed` and `quota-stopped`. Batch progress reports processed/selected Conversations, imported Messages, imported Rounds and skipped Messages; React state updates every 10 Conversations or at final item, not per Message. New operations clear old error/success. Storage success is impossible before flush and reload verification. Quota warning does not disable the action; user may cancel at confirmation. `quota-stopped` only counts items still readable after persistence verification and reports unprocessed Conversations.
+
+### Production diagnostics
+
+- Bounded in-memory buffer remains available to code and tests without affecting correctness.
+- `BulkDiagnosticsCopyButton` and `[PALOS BULK DIAG]` console output require `NEXT_PUBLIC_PALOS_DIAGNOSTICS=1`.
+- Analyzer failure injection remains independent behind `NEXT_PUBLIC_PALOS_ANALYZER_DIAGNOSTICS=1`.
+- ID arrays are normalized to count + at most 10 sample IDs; batch-delete residual console output is also sampled.
+- Diagnostics did not add any drain、flush、clearCaches or preload call and is not a success dependency.
+
+### Small performance / quality changes
+
+- `BrowserAppEventLogStorage` moved out of both ChatGPT batch loops and is reused.
+- Import progress is throttled per 10 Conversations.
+- Import preview remains memoized only on artifact/parser inputs; unrelated progress/report state does not trigger full parse.
+- Conversation quick filters and Import URL/phase state are reusable pure helpers.
+- ChatGPT per-Conversation pending-write fan-out was not refactored and remains documented performance debt.
+
+### Tests
+
+- 原 159 tests 全部保留。
+- 新增 25 tests；当前总数为 6 files / 184 tests。
+- 新增覆盖：六种 Import 组合、Existing TXT count/ownership/reference/source metadata、flush→clear→preload durability、invalid TXT、mode/URL、same-source update、cross-source same content、TXT repeats、progress/failure/quota、diagnostic flags/sampling、quick filters、deriveRoundDrafts edges。
+- 既有 atomic batch delete、Clear write barrier、Proposal integrity、Review not-found、Note editor、Navigator contained scroll、ChatGPT count parity 与 Manual text parsing 回归继续通过。
+
+### Files
+
+- Import UI：`src/app/import/import-workbench.tsx`、`src/app/import/chatgpt-export-import.tsx`
+- Import services/state：`src/core/services/import-service.ts`、`chatgpt-export-import.ts`、`import-parser-pipeline.ts`、`import-page-state.ts`、`import-operation-state.ts`
+- Diagnostics/quality：`src/infrastructure/diagnostics/bulk-data-diagnostics.ts`、`src/app/bulk-diagnostics-copy-button.tsx`、`src/core/services/conversation-quick-filters.ts`、`src/app/conversation/conversation-list.tsx`
+- Tests：`tests/v164-known-issues.test.ts`、`chatgpt-export-import.test.ts`、`indexeddb-reliability.test.ts`、`bulk-data-diagnostics.test.ts`
+- Docs：`README.md`、`ARCHITECTURE.md`、`ROADMAP.md`、`CHANGELOG.md`、`HANDOFF.md`
+
+### Explicit backlog
+
+- ChatGPT share-link import；update an existing Conversation from share link。
+- mobile / PWA；cloud / multi-device sync；multi-user / family sharing。
+- attachment / voice / canvas / tool nodes。
+- import transaction fan-out optimization。
+- advanced cross-source semantic dedup。
+- AI / RAG / Embedding。
+
+### Verification / browser QA / commit
+
+最终 gate：`npm run lint` passed；`npm run build` passed（19 routes）；`npm test -- --run` passed（6 files / 184 tests）；`git diff --check` passed。
+
+2026-07-19 已完成真实、可回收的应用内浏览器闭环，没有清空整个浏览器数据：
+
+1. 通过 New + Paste 创建临时 Conversation，初始统计为 2 Messages / 1 Round / 1 Source。
+2. 从详情页真实点击进入 Import，选择 Existing + TXT；页面只显示 1 个 target selector 与 1 个 file input。
+3. 真实上传 UTF-8 TXT；preview 与 success report 均为新增 4 Messages / 2 Rounds / 0 skipped。
+4. 首轮发现详情页显示 6 Messages / 3 Rounds / **1 Source**。底层 Source 记录实际均已保存，问题是详情页把 singular latest Source 错当作总数。先保存截图与 Console 证据，再让 `conversation-detail.tsx` 按 `conversationId` 统计全部 Source；回归测试增加已有 Source 后 append 应保留 2 条的断言。
+5. 修复后从创建临时 Conversation 开始完整复跑：追加后为 6 Messages / 3 Rounds / 2 Sources；整页刷新后仍为 6 / 3 / 2。
+6. 删除临时 Conversation 后，Dashboard 无标题残留；Search 使用完整临时标题查询返回 no-results；Review 显示 canonical missing/deleted state，没有旧实体内容。
+7. 每个截图检查点的 PALOS tab Console error 均为 0。文件选择期间 Codex Browser client 的 Statsig 遥测请求发生超时，但不在 PALOS 页面 Console 中，也未影响解析、flush、verify 或删除。
+
+截图与逐步 Console 记录位于 workspace 外的 Codex visualization artifact：`palos-v164-browser-qa-2026-07-19/`。两个临时 Conversation 均已通过现有 UI 删除，没有清理或重置其他浏览器数据。
+
+本轮不创建 commit。真实浏览器 QA 与最终自动门禁均通过后，可以建议用户创建聚焦的 v1.6.4 commit。
+
+---
+
+# PALOS v1.6.3.1 — Current Referential Integrity and UI Regression Closure
+
+## 2026-07-16 checkpoint
+
+本轮继续使用 `fix/v1.6.3-referential-integrity` 与现有 dirty worktree；没有切分支、reset/restore、清理浏览器数据或创建 commit。改动只覆盖现存 orphan Proposal、Conversation Note 语义、Round Navigator 真实布局和 Analyze 手工失败注入入口。
+
+后续验收更新：用户已于 2026-07-16 确认 Safari manual QA 通过；此前仅剩的 Safari sticky / active-number / document-scroll smoke blocker 已关闭。
+
+### 真实 orphan Proposal 的物理来源
+
+在修改前，通过当前 `http://localhost:3000` 浏览器状态导出并核对，残留 Proposal 为：
+
+- ID：`demo-proposal-f962faf8-2086-463d-97f8-73279ff5da8e`
+- 短标题：`关于「Sprint2 验收对话-Claude」的内容提炼`
+- active storage mode：IndexedDB
+- canonical IndexedDB：Conversation / Message / Round / Source / Proposal / KnowledgeCard 均为 `0`；canonical `proposals` store **不包含**该 ID。
+- `ai-learning-os.proposals`：包含 2 条 legacy accepted Proposal，其中包含该 ID。
+- `ai-learning-os.current-proposal`：包含该 ID 的**完整 Proposal 对象**，不是仅有 ID 的选择指针。
+- 其他持久 Search index：不存在；Search 在运行时重建文档。
+
+修改前各读取路径的实际语义：
+
+- `BrowserProposalStorage.getAll()` 会返回 legacy `ai-learning-os.proposals`，因此能返回该 ID。
+- `IndexedDBProposalStorage.getAll()` 会把 `current-proposal` 完整对象合并到空 canonical cache，因而返回 1 条该 ID。
+- `createProposalStorage().getAll()` 在 IndexedDB mode 下走上述 IndexedDB adapter，同样返回 1 条该 ID。
+- Dashboard 与 Search 因 active adapter 把 stale pointer 当成实体而显示 Proposal `1`；Review 当时仍直接读 Browser storage，并可从 legacy Proposal / current selection 打开同一个 ID。
+- 因此这不是 canonical IndexedDB 中的 orphan，而是 **legacy Proposal 副本 + full-object current pointer 两个 LocalStorage 来源同时存在**，再由 adapter 合并/回退语义复活。Dashboard 的 Conversation 为 0、Proposal 为 1，根因正是 `current-proposal` 被当成 canonical entity，而不是独立 Search cache。
+
+仅记录了 ID、count、linkage 与短标题；没有输出完整 Conversation 内容。
+
+### Proposal cleanup 与一致性修复
+
+- `current-proposal` 现在只写 `{ id }`；仍可读取旧 full-object 格式以完成兼容清理，但对象内容永远不再作为 Proposal 实体或 `getAll()` 数据源。
+- Browser / IndexedDB adapter 的 `getCurrent()` 都先用 pointer ID 回查当前 active canonical collection；ID 不存在时清除 pointer 并返回 `null`。
+- IndexedDB preload 增加一次 bounded integrity cleanup：只检查 canonical Proposal drafts，通过 `conversationId`、`sourceId`、`sourceRoundId`、`sourceMessageIds` 核对 Conversation / Source / Round / Message；删除 linkage 已失效的 Proposal ID，并清理 stale current pointer。
+- preload cleanup 不扫描/重写其他业务 store，不删除 accepted formal KnowledgeCard，也不删除 IndexedDB mode 下的 legacy `ai-learning-os.proposals`。legacy 数据仍可供 LocalStorage mode 使用，但不会合并进 IndexedDB canonical 结果。
+- 单删和原子批删继续通过同一 dependency collector 处理全部四类 Proposal linkage；只通过 deleted Round 或 deleted Message 关联的 Proposal 也会删除。
+- Dashboard、Search、Review 均使用 active storage factory；Review 按 URL ID 回查 canonical storage，既不回退到 pointer full object，也不保留旧 component state。
+- 删除后的 direct URL 显示 `Proposal 不存在或已删除`，且不渲染旧 title、summary、evidence 或 action。
+
+### Conversation Summary / Conversation Note
+
+修改前真实页面左侧是 `Conversation Summary / 对话总结`，右侧却只有泛化的 `备注 / Note`，两者都呈现为可修改内容，容易被理解为重复编辑器；此前处理的是 Round Note，未解决这个 Conversation-level 语义问题。
+
+最终交互：
+
+- 左侧保持 `Conversation Summary / 对话总结`：说明为“结构化记录从 Conversation 生成或整理出的结论”，保留结构化字段与现有确认保存机制。
+- 右侧改为 `Conversation Note / 对话备注`：说明为“手动记录附属于此 Conversation 的私有上下文”。
+- 默认只读预览与 `编辑对话备注`；进入编辑态后只出现一个 textarea、`保存`、`取消`；preview/editor 互斥。
+- 继续使用现有 `Conversation.note` 字段与可靠 save 路径，没有 schema 变更、富文本、第二个 Inspector editor 或 Summary/Note 字段合并。
+
+### Round Navigator 的真实布局修复
+
+上一版把 `sticky top-4 self-start` 放在 Navigator 组件自身，仍处于页面 flex 子项语境，并与全局 sticky header 的高度冲突；Safari 实页没有形成稳定、清晰的 page-level sticky rail。sticky 的所有权与完整详情页边界没有被布局结构显式保证，这是“CSS 类存在但真实页面仍随正文移动”的原因。
+
+新布局：
+
+- Conversation Detail 使用 page-level 两列 grid；左侧是显式 `<aside class="sticky top-20 self-start">`，右侧包含 Raw Timeline、Context、Summary/Note、Assets、History、Source、Rounds、Proposal、Knowledge 的完整详情内容。
+- sticky parent 因此跨越整页详情，而不是在某个短 section 结束；`top-20` 避开全局 header。
+- 实测 ancestor chain 从 `aside` 到 `html` 均无 trapping `overflow`、`transform`、`filter` 或 `contain`；Navigator 自身有显式 max-height 与 internal `overflow-y-auto`。
+- collapsed 实测在 `scrollY=3691.5` 与 `4827.5` 时 rail top 均为 `80px`；expanded 在 `scrollY=4633.5` 与 `4895.5` 时 rail top 也均为 `80px`。
+- IntersectionObserver 只更新 active round ID；后续 effect 只调用 Navigator internal container 的 `scrollTo()`。Observer 路径不存在 `window.scrollTo()`、`element.scrollIntoView()` 或其他 document scroll。
+- 只有用户点击编号时才使用显式 element top + `88px` header offset 滚动正文；不再使用 `block: "center"`。
+
+### “模拟失败”
+
+该按钮是 Demo Analyzer 的手工 failure injection，用于测试真实 error banner、Retry、provider switch 与 timeout UI，不是正常业务入口。底层失败路径保留，但按钮默认隐藏；仅当显式设置 `NEXT_PUBLIC_PALOS_ANALYZER_DIAGNOSTICS=1` 时显示。普通本地开发与 production 均不会默认出现，真实 analyzer error handling 未删除。
+
+### Tests
+
+新增/更新回归覆盖：
+
+- IndexedDB canonical orphan（包括仅 `sourceRoundId` / `sourceMessageIds` linkage）清理。
+- stale legacy Proposal 不进入 IndexedDB mode，full-object pointer 不能复活 entity，pointer 被清除。
+- `createProposalStorage()` / Dashboard-equivalent count / Search docs / Review lookup 全部为 0。
+- valid Proposal 在删除 owner 前保留；删除 owner 后仅删除关联 Proposal，unrelated Proposal 保持。
+- valid/deleted direct Review URL 与 stale pointer fallback。
+- Conversation Note preview/edit 互斥、cancel restore、save persist、唯一 textarea，以及 Summary/Note label 区分。
+- Navigator observer/internal scroll 与 user/document scroll 合约、visible/above/below contained scroll、page-level layout source contract。
+- failure injection 默认隐藏、显式 diagnostics flag 可见、真实 Retry/provider/timeout error UI 仍存在。
+
+当前完整测试数为 5 files / 159 tests。
+
+### 真实浏览器 QA
+
+Codex in-app browser 在同一 `localhost:3000` origin 上实际访问了 IndexedDB，并跨 reload 与 production server restart 保持数据；没有清浏览器数据。
+
+1. 初始 orphan cleanup 后：Dashboard `Conversation 0 / Messages 0 / Knowledge 0 / Proposal 0`；Search 无旧 Proposal；旧 URL `/review?proposal=demo-proposal-f962faf8-2086-463d-97f8-73279ff5da8e` 显示 `Proposal 不存在或已删除`。
+2. 通过 UI 创建 `v1.6.3.1 QA Conversation`（2 Messages / 1 Round），生成 Proposal `source-proposal-eed7b3b4-0eb7-42fb-b93b-7e8b5a80c881`；Dashboard Proposal 1、Search 1、Review direct URL 可打开同一 Proposal。
+3. Note UI 显示最终两组 label；取消不会保留草稿，保存 `v1.6.3.1 QA private context` 后 reload 仍存在，任一时刻只有一个 Note textarea。
+4. Navigator collapsed / expanded 均保持 `80px` rail top；滚动 settle 后 `scrollY` 不反向变化；普通 UI 未出现“模拟失败”。
+5. 通过 UI 删除 QA Conversation 并 reload：Conversation list 0；Dashboard `Conversation 0 / Messages 0 / Proposal 0`；Search 无 Proposal；刚生成的 direct URL 显示 `Proposal 不存在或已删除`。
+
+Codex 工具执行上述同源浏览器 QA 时，无法在不读取用户其他 Safari tab URL 的情况下定位 authoritative localhost tab；该读取被隐私保护拒绝。因此上述记录只代表真实浏览器 IndexedDB QA，不把工具结果冒充 Safari app QA。随后用户已完成 Safari 专项手工验收并确认通过，collapsed / expanded rail、active number、document scroll、Dashboard/Search/Review 以及 Note / failure-injection 文案的最终 blocker 已关闭。
+
+### 关键文件
+
+- Proposal integrity / pointer：`src/core/services/conversation-referential-integrity.ts`、`src/infrastructure/storage/flow-pointers.ts`、`src/infrastructure/storage/indexeddb/preload.ts`、Browser/IndexedDB Proposal adapters、`canonical-operations.ts`
+- Dashboard/Search/Review：`src/core/services/global-search.ts`、`search-index-service.ts`、`proposal-review-lookup.ts`、`src/app/review/review-proposal.tsx`
+- Note / Navigator / diagnostics：`src/app/conversation/[id]/conversation-detail.tsx`、`round-navigator.tsx`、`conversation-workspace-mode.tsx`、`round-workspace.tsx`、`note-editing.ts`、`round-navigation.ts`、`analyzer-diagnostics.ts`
+- Existing delete/provenance support：Conversation list/workspace service、AnalyzerRun storage、Knowledge list/detail、Source adapters
+- Tests：`tests/indexeddb-reliability.test.ts`、`tests/v163-ui-regressions.test.ts`
+
+### Verification 与 commit 建议
+
+最终 gate：`npm run lint` passed；`npm run build` passed（19 routes）；`npm test -- --run` passed（5 files / 159 tests）；`git diff --check` passed。Safari manual QA 已由用户确认通过，提交阻塞项已关闭；本工作树适合整理为单独的 integrity / UI closure commit。
+
+---
+
+# PALOS v1.6.3 — Referential Integrity, Note UX, and Round Navigation Handoff
+
+## 2026-07-14 checkpoint
+
+本轮在 `fix/v1.6.3-referential-integrity`（基于 `v1.6.2-import-count-parity`）完成最小范围实现；未修改 IndexedDB schema、canonical store 集合、ChatGPT parser 或 v1.6.1 的单次 `replaceStores` 原子事务模型，未创建 commit。
+
+### Confirmed root cause
+
+- Conversation 删除只按 `proposal.conversationId` / `proposal.sourceId` 过滤，遗漏只通过 `sourceRoundId` 或 `sourceMessageIds` 关联的 Proposal。
+- `current-proposal` 是 LocalStorage 中的完整 Proposal 对象；Browser / IndexedDB Proposal adapter 的 `getAll()` 会把该指针重新合并进集合。canonical Proposal 已删除后，旧指针因此会被 Review 读取，并重新进入运行时 Search 文档。
+- Review 页面此前直接实例化 Browser storage，绕过 IndexedDB 默认 storage factory。
+- Search 没有持久化索引；幽灵结果的根因是残留 Proposal / 指针被 storage adapter 重新暴露，不是独立 Search 数据库。
+
+Proposal 的真实关联字段为：`conversationId?`、`sourceId?`、`sourceRoundId?`、`sourceMessageIds?`；`targetKnowledgeId?` 是更新目标，不是来源引用。不存在 `sourceRef` 或 `targetEntityId`。
+
+### 删除语义
+
+- 单删与批删统一：Conversation、Message、Round、Source、Proposal、ConversationVersion 删除；AnalyzerRun 按 Conversation / Source / Round / Message 引用清理；Conversation/Round Asset metadata 清理。
+- `current-source`、`current-proposal` 在 canonical commit 后按本次 dependency IDs 清理。
+- Task 延续既定语义，保留来源快照；不擅自删除。
+- 正式 KnowledgeCard 是独立 aggregate，单删和批删均保留。其历史 provenance ID 仍可留作快照，但 Search、Knowledge 列表和 Detail 只有在 Conversation/Round 仍存在时才生成实时跳转；否则明确显示来源已删除。
+- Proposal / 未确认草稿随 Conversation 删除，不与正式 KnowledgeCard 混同。
+- post-delete verification 现在核对请求 ID、每类 dependent ID、全局 orphan 数、cache/IndexedDB count、Search 重建、Review lookup、current pointers 与 pending write count。
+
+### Note UX
+
+- 根因：Workspace 模式对同一个 `Round.note` 同时展示正文只读预览和右侧 Inspector 无标签编辑器。
+- 新交互：正文位置默认只读 `Round Note`；点击“编辑备注”后原位置显示 textarea、保存、取消；预览与编辑器互斥；右侧重复入口移除；继续使用现有 `Round.note` 字段和手动保存。
+
+### Round Navigator
+
+- 根因：Navigator 项点击使用 `scrollIntoView({ block: "center" })`，且 sticky 放在内部子节点，导航内部没有独立 active-item 滚动策略；一旦自动 active 更新接入同一路径，会形成 document scroll → active update → document scroll 的反馈环。
+- Navigator 外层现在直接 `sticky top-4 self-start`；IntersectionObserver 只更新 active ID。
+- active item 可见性通过 `calculateContainedScrollTop()` 计算，并只调用 Navigator overflow container 的 `scrollTo()`；Observer 路径从不滚动 document。
+- 只有用户点击 Round 才调用 `window.scrollTo()` 定位正文，并使用固定 88px header offset。collapsed / expanded 共用同一内部滚动规则；空 Round 文案不变。
+
+### 关键文件
+
+- Referential integrity：`src/core/services/conversation-referential-integrity.ts`、`src/core/services/conversation-workspace.ts`、`src/infrastructure/storage/indexeddb/canonical-operations.ts`
+- Pointer / adapter：`src/infrastructure/storage/flow-pointers.ts`、Browser/IndexedDB Proposal 与 Source adapters
+- Review / Search / Knowledge：`src/app/review/review-proposal.tsx`、`src/core/services/proposal-review-lookup.ts`、`src/core/services/search-index-service.ts`、Knowledge list/detail
+- Note：`src/core/services/note-editing.ts`、`src/app/conversation/[id]/conversation-workspace-mode.tsx`
+- Navigator：`src/core/services/round-navigation.ts`、`src/app/conversation/[id]/round-navigator.tsx`、`round-workspace.tsx`
+- Tests：`tests/indexeddb-reliability.test.ts`、`tests/v163-ui-regressions.test.ts`
+
+### 自动化验证
+
+截至本 checkpoint：
+
+```text
+npm run lint       passed
+npm run build      passed, 19 routes
+npm test -- --run  passed, 5 files / 151 tests
+git diff --check   passed
+```
+
+新增回归覆盖 Proposal 指针复活、round/message-only Proposal、Review not-found、Search 重建、Knowledge 保留、100 Conversation 原子批量删除与 reload、pendingWriteCount、AnalyzerRun/Asset sidecar、Task 保留、Note 状态，以及 Navigator contained-scroll 纯函数。
+
+### 限制与下一步
+
+- 当前 Codex 内置浏览器执行环境报告 `indexedDB` 不可用，因此无法在本轮环境中完成用户要求的“真实浏览器 IndexedDB”自动复现；Vitest 覆盖的是完整 IDB transaction/cache harness，不能冒充真实浏览器验证。
+- commit 前必须在支持 IndexedDB 的桌面浏览器完成下方 smoke test；在该项完成前不建议 commit。
+- 未创建 commit。
+
+### Minimal manual QA
+
+1. IndexedDB 模式创建 Conversation + Message/Round/Source/Proposal；确认 Review 与 Search 可见。
+2. 分别单删与 100 条批删，刷新后确认 Proposal、Review URL、Search、current pointers 不恢复，正式 Knowledge 仍可打开且无失效来源跳转。
+3. 模拟 AnalyzerRun / Conversation 与 Round Asset metadata，确认删除后 metadata 清理而真实文件不受影响；Task 保留来源快照。
+4. Workspace 模式验证 Round Note 默认预览、编辑/取消/保存互斥，右侧无第二编辑器，刷新后内容保持。
+5. 长 Conversation 中持续滚动正文，确认 collapsed / expanded Navigator 均固定、只在内部滚动；点击 Round 使用稳定 header offset，无页面向上跳或抖动。
+
+---
+
+# PALOS v1.4 Finalization — IndexedDB Default Storage + Unified Import UX Handoff
+
+## 2026-07-08 checkpoint
+
+本轮完成 PALOS 业务存储默认收敛到 IndexedDB，并统一 Import / App Data / destructive persistence 的关键路径。未创建 commit，未删除现有测试，未回退 Storage Reliability Fix。
+
+### 完成内容
+
+- IndexedDB 成为业务数据默认存储；无 storage mode key 的新用户会直接使用 IndexedDB。
+- LocalStorage 保留为轻量配置、UI preference、current pointer、legacy migration source 和 debug/rollback 工具。
+- Import 页面一级路径统一为「新建 Conversation」与「追加到已有 Conversation」，两条路径均支持 ChatGPT Export 与手动文本。
+- Existing + Text 复用 `ImportParserPipeline` / `ImportService`，追加 Source、Messages、Rounds，并更新 Conversation `updatedAt`，不覆盖旧内容。
+- ChatGPT Export 接受 `conversations.json` / `conversations-*.json`，不限制 Conversation 数量；超过 30000 Messages 或 2000 万字符只做二次确认，不硬阻断。
+- 批量 ChatGPT Import / Append 继续在 IndexedDB flush transaction complete 后才显示 success；失败时重新 preload cache，不展示成功。
+- App Data Export 现在包含 IndexedDB 业务 stores；Import App Data 可 restore IndexedDB stores 并 reload 后保持。
+- Settings 的 Storage Engine Migration 改为 Legacy Data Migration；无旧 LocalStorage 数据时显示无需迁移；切回 LocalStorage 移入 Advanced / Debug。
+- Conversation 创建、列表读取、删除、批量删除和复制改走 storage factory；IndexedDB 模式下等待 flush 后刷新 UI。
+- Clear App Data 新增 IndexedDB business data clear path，不静默删除 legacy LocalStorage。
+
+### 修改文件
+
+- `src/infrastructure/storage/storage-factory.ts`
+- `src/infrastructure/storage/app-data-storage.ts`
+- `src/core/services/import-service.ts`
+- `src/app/import/import-workbench.tsx`
+- `src/app/import/chatgpt-export-import.tsx`
+- `src/app/settings/data-management.tsx`
+- `src/app/conversation/conversation-list.tsx`
+- `src/app/conversation/create-conversation-dialog.tsx`
+- `tests/indexeddb-reliability.test.ts`
+- `tests/chatgpt-export-import.test.ts`
+- `PROJECT.md`
+- `ARCHITECTURE.md`
+- `HANDOFF.md`
+
+### 验证
+
+```
+npm run lint ✅
+npm run build ✅
+npm test -- --run ✅
+git diff --check ✅
+```
+
+### 已知限制与人工 QA
+
+- 全仓仍有部分历史页面直接实例化 `Browser*Storage`，本轮修复了默认存储、Import、App Data、Conversation list/create/delete 等关键路径；Knowledge/Search/Conversation detail 等旧页面后续应按页面逐步迁到 factory，避免大规模重构。
+- App Data Import 会 restore bundle 中的 IndexedDB 业务 stores；LocalStorage legacy data 不会被自动清理，避免破坏迁移来源。
+- 需要浏览器手动 QA：首次打开 IndexedDB preload、Import 100+ Conversations、Existing + Text 追加、Export → Clear → Import → Reload、Conversation delete → Reload。
+
+### 是否建议 commit
+
+建议 commit，但本轮按要求未创建 commit。
+
+---
+
 # v1.1 Alpha — Long Conversation UX & Import Stabilization Handoff
 
 ## 2026-07-06 Epic C-J checkpoint (FINAL)
@@ -348,7 +1690,9 @@ None。所有新 provenance 字段为 optional；旧 Message、Q&A Pair、Propos
 4. 覆盖全部 Round 操作、Round Analyze → Review → Knowledge、Search 深链与 History restore。
 5. 回归 v0.9 Search/Asset、旧 Q&A Pair、Proposal Evidence、Knowledge Source、Task SourceRef 与 Conversation copy/delete。
 
-## Remaining TODO
+## Historical Phase1 follow-up list（superseded; not current TODO）
+
+以下是旧 Phase1 checkpoint 的历史记录；其中已完成项以本文件顶部 v1.6.4 matrix 和当前 ROADMAP 为准，不应作为当前待办继续执行。
 
 - 执行并记录 Phase1 人工 QA；在通过前保持 alpha draft。
 - 完成 recovery export/staging/checksum/commit marker/rollback 后，才能讨论任何破坏性 schema migration。

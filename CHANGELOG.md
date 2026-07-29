@@ -2,7 +2,52 @@
 
 本文件记录当前仓库已经完成的 Sprint 与关键提交。日期使用仓库 commit date。
 
-当前口径：Runtime Version 为 v1.1 alpha draft；Epic C–J 已实现并通过自动门禁；人工 QA 待执行。
+当前口径：Runtime Version 为 v1.7 release candidate；Final Release QA 已通过，release commit 尚未创建。
+
+## 2026-07-19 — v1.7 Personal AI Context Management
+
+- **Product position**：PALOS 从 AI 对话归档收敛为 Personal AI Context Manager；关闭 Analyzer 后仍可 Import、整理 Context/Decision、维护 Task、Search 与 Export。
+- **Conversation Context**：在现有 Conversation 上增加长期背景、当前状态、决策记录、约束条件与下一步行动；保留 Note/Summary/Conclusion/Pending Questions 原语义。
+- **Final Usability Correction**：移除页面级 Round Inspector；每个展开 Round 自带响应式内容/记录双栏，窄屏改为上下排列，默认直接显示三个主要字段。
+- **Round record / serializer**：我的备注、本轮结论、下一步复用现有 Round Note/Summary；唯一 serializer/parser 增加版本标记与 header-line 转义，目标/决定/遗留问题及纯文本、旧分段、`【补充备注】`、未知 legacy text 可逆保留。
+- **Autosave correctness**：750ms per-controller debounce 增加 revision/in-flight 串行；blur/切换/卸载 flush，IndexedDB transaction 完成后才显示 saved，失败显示 error，retry 使用最新 draft；`beforeunload` 仅 best-effort。
+- **Passive reference**：自动跳过空 Round 并显示“当前推荐参考”；默认不写 Snapshot。人工确认后显示“已固定参考”并读取固定 snapshot，不用 live source 覆盖历史。
+- **Conversation Overview**：Rounds 后独立显示总备注/当前背景、当前总论、后续方向并 autosave；旧 decisions/constraints 在折叠区保留。
+- **Knowledge boundary**：Round 结论与 Overview 都必须先预览确认；同一来源与规范化内容重复确认复用既有 Knowledge；autosave/reference 不创建 Proposal 或 Knowledge。
+- **Continue Context / Search semantics**：“继续这个主题”和 Search 复用 Round parser，分别标识我的备注、下一步及其它字段，不把整个 `Round.note` 混为一种语义。
+- **Context Timeline**：复用 ConversationVersion 追加 `kind=context` 与字段变化；顶部提供明显的 History / Timeline 入口，历史值不覆盖。
+- **Task integration**：Conversation Context 内可人工创建、完成或重开关联 Task；没有自动创建、Calendar、Reminder 或 Habit。
+- **Search**：保持关键词 + fuzzy，相关度优先 Context、Summary、Conclusion、Knowledge、Round Note、Message。
+- **Context Export**：新增 `palos-context-export` v1.0 JSON，输出 Conversation、Context、Decision history、关联 Task 与 Round summary/context snapshot。
+- **Compatibility**：只增加 optional embedded fields；IndexedDB schema 与 7 个 canonical stores 不变；v1.6.5 数据继续可读。
+- **Responsive closure**：1280px 保持内联双栏；390px 为上下布局，Navigator 小屏展开改为覆盖层，不挤压主内容，document 无横向 overflow。
+- **Tests**：v1.7 当前 9 files / 213 tests；Playwright release gate 2/2、lint/build/diff-check 全部通过；三轮 QA 覆盖保存失败/retry、快速切换/reload、动态/固定参考、Knowledge 幂等、完整删除与 1280/390px 截图，unexpected Console error 为 0。
+- **Non-goals**：未实现 Agent、MCP、RAG、Embedding、Vector Database、云 Provider、Cloud Sync、Mobile、多用户或自动执行。
+
+## 2026-07-19 — v1.6.5 Stable Candidate
+
+- **Checkpoint**：将完整 v1.6.4 Known Issues Closure 固化为 `9ed8feb checkpoint: v1.6.4 known issues closure`；未 push。
+- **Storage Factory**：指定业务页面的七类 canonical entity 不再直接实例化 `Browser*Storage`；Task、Workspace、Asset、AnalyzerRun、Tag 与其它 sidecar 不迁移。
+- **Restore pre-validation**：App Data 在写入前校验 schema envelope、IndexedDB key、record ID、duplicate ID 与 canonical references。
+- **Backup / verification**：restore 在 pending-write barrier 后创建操作内备份；写入后验证 LocalStorage 内容及 IndexedDB ID 集；失败时恢复并验证备份，无法验证时不声称成功或已回滚。
+- **E2E**：新增最小 Playwright 测试，覆盖 create、TXT import、reload、search、export、delete/reload、restore、search。
+- **TXT URL state**：修复 URL 直达 `inputMode=txt` 时 parser 初始值仍为 ChatGPT 的问题。
+- **Tests**：Vitest 7 files / 187 tests；Playwright 1/1；lint/build/diff-check passed。
+- **Non-goals**：未改 IndexedDB schema，未实现 journal recovery、云同步、跨来源语义去重或 import transaction fan-out 优化。
+
+## 2026-07-16 — v1.6.4 WIP: Known Issues Closure / Existing TXT / Import Diagnostics
+
+- **Import matrix**：统一 New / Existing target 与 ChatGPT Export / Paste Text / TXT File input source，支持全部六种组合；Existing 只有一个 target selector。
+- **Existing + TXT**：复用 TXT/parser pipeline，追加 Source、Messages、Rounds，保留文件名；Message/Round ownership 与 `messageIds` 在 flush → clear caches → preload 后验证，失败不显示 success。
+- **TXT errors**：拒绝 empty、whitespace-only、无可解析角色标签与 invalid UTF-8；不创建额外 Empty Conversation。
+- **Mode state**：切换 target/input 时清理不适用的 target、file/text、report/error；URL 只保留当前有效参数。
+- **Progress / quota**：新增 idle → parsing → preview-ready → confirming → importing → flushing → verifying → success/failed/quota-stopped；批量每 10 个 Conversation 更新，quota warning 可进入显式确认，停止后报告 durable success 与未处理数。
+- **Duplicate semantics**：ChatGPT Existing append 按 message identity 去重并允许同 source 后续更新；不同 source 的相同 content 不再被纯 content hash 全局跳过。Advanced semantic dedup 仍未实现。
+- **Diagnostics**：Copy Diagnostics 与 `[PALOS BULK DIAG]` console 由 `NEXT_PUBLIC_PALOS_DIAGNOSTICS=1` gate；Analyzer 使用独立 flag；ID arrays 限制为 count + sample；移除 R1.3 DEBUG logs。
+- **Small quality fixes**：batch import 复用单个 `BrowserAppEventLogStorage`；quick-filter 与 Import page state 抽取为可测 pure helper；未改 import transaction fan-out。
+- **Real browser closure**：在 Codex 应用内浏览器创建临时 Conversation，真实上传 UTF-8 TXT，核对追加前后与整页刷新后的 Message/Round/Source 统计，并删除临时数据；修复详情页把多个已保存 Source 错误显示为 `1` 的计数问题。Dashboard、精确标题 Search 与 Review 均无删除残留，PALOS 页面 Console error 为 0。
+- **Tests**：保留原 159 tests，新增 25 tests；当前 6 files / 184 tests。
+- **Non-goals**：未改 IndexedDB schema、canonical atomic delete、structured ChatGPT parser 或 v1.6.3 integrity；未实现 share link、PWA/mobile、cloud/multi-user、attachment nodes 或 AI/RAG/Embedding。
 
 ## 2026-07-06 — v1.1 Alpha: Long Conversation UX & Import Stabilization
 
@@ -14,8 +59,6 @@
 - **Search UX**：Round 搜索结果可跳转到对应 Round；Conversation/Knowledge/Round/Proposal 默认优先；Raw Message 仍在高级模式。
 - **Error / Feedback**：Feedback 增加 page 字段，支持从 Conversation 页面一键跳转并自动捕获路径；Data Health 增加 duplicate import risk 与 orphan round 检查。
 - **Docs & Help**：Help 增加 v1.1 新功能说明与全部新增概念；CHANGELOG/HANDOFF/QA_CHECKLIST 同步。
-
-## 2026-07-06 — v1.0 Phase2 Alpha: Second Brain Workspace
 
 ## 2026-07-06 — v1.0 Phase2 Alpha: Second Brain Workspace
 

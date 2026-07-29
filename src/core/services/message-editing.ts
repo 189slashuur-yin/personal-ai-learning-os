@@ -1,11 +1,14 @@
 import type { ConversationStorage } from "@/core/contracts/conversation-storage";
 import type { MessageStorage } from "@/core/contracts/message-storage";
+import type { SourceStorage } from "@/core/contracts/source-storage";
 import type { Conversation } from "@/core/entities/conversation";
 import type { Message } from "@/core/entities/message";
+import { assertShareSnapshotTranscriptMutable } from "@/core/services/share-snapshot-mutation-guard";
 
 export type MessageEditingStorages = {
   conversations: ConversationStorage;
   messages: MessageStorage;
+  sources: SourceStorage;
 };
 
 export type MessageEditingResult = {
@@ -37,6 +40,12 @@ export function editMessage(
   if (!conversation) {
     return null;
   }
+
+  assertShareSnapshotTranscriptMutable(
+    storages.sources,
+    conversation.id,
+    "edit Message",
+  );
 
   const timestamp = new Date().toISOString();
   const nextMessage: Message = {

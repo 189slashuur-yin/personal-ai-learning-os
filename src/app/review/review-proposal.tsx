@@ -14,12 +14,14 @@ import {
   applyProposal,
   rejectProposal,
 } from "@/core/services/proposal-review";
-import { BrowserKnowledgeCardStorage } from "@/infrastructure/storage/browser-knowledge-card-storage";
-import { BrowserConversationStorage } from "@/infrastructure/storage/browser-conversation-storage";
-import { BrowserMessageStorage } from "@/infrastructure/storage/browser-message-storage";
-import { BrowserProposalStorage } from "@/infrastructure/storage/browser-proposal-storage";
-import { BrowserRoundStorage } from "@/infrastructure/storage/browser-round-storage";
+import { resolveProposalReviewLookup } from "@/core/services/proposal-review-lookup";
 import { BrowserAppEventLogStorage } from "@/infrastructure/storage/browser-feedback-storage";
+import {
+  createStorageInstances,
+  ensureIndexedDBLoaded,
+  getStorageMode,
+} from "@/infrastructure/storage/storage-factory";
+import { flushCachesToIndexedDB } from "@/infrastructure/storage/indexeddb/preload";
 import { CapabilityBadges } from "@/app/capability-badges";
 
 type ReviewState =
@@ -46,29 +48,41 @@ export function ReviewProposal({ proposalId }: { proposalId?: string }) {
 
   useEffect(() => {
     const loadTimer = window.setTimeout(() => {
-      const storage = new BrowserProposalStorage();
-      const proposal = proposalId
-        ? storage.getById(proposalId)
-        : storage.getCurrent();
+      async function load() {
+        if (getStorageMode() === "indexedDB") {
+          await ensureIndexedDBLoaded();
+        }
+        const storages = createStorageInstances();
+        const proposal = proposalId
+          ? storages.proposals.getById(proposalId)
+          : storages.proposals.getCurrent();
+        const conversation = proposal?.conversationId
+          ? storages.conversations.getById(proposal.conversationId)
+          : null;
+        const sourceMessageIdSet = new Set(proposal?.sourceMessageIds ?? []);
+        const round = proposal?.sourceRoundId
+          ? storages.rounds.getById(proposal.sourceRoundId)
+          : null;
+        const sourceMessages = proposal?.conversationId
+          ? storages.messages
+              .getByConversationId(proposal.conversationId)
+              .filter((message) => sourceMessageIdSet.has(message.id))
+          : [];
 
-      const conversation = proposal?.conversationId
-        ? new BrowserConversationStorage().getById(proposal.conversationId)
-        : null;
-      const sourceMessageIdSet = new Set(proposal?.sourceMessageIds ?? []);
-      const round = proposal?.sourceRoundId
-        ? new BrowserRoundStorage().getById(proposal.sourceRoundId)
-        : null;
-      const sourceMessages = proposal?.conversationId
-        ? new BrowserMessageStorage()
-            .getByConversationId(proposal.conversationId)
-            .filter((message) => sourceMessageIdSet.has(message.id))
-        : [];
-
-      setState(
-        proposal
-          ? { status: "ready", proposal, conversation, round, sourceMessages }
-          : { status: "missing-proposal" },
-      );
+        const reviewLookup = resolveProposalReviewLookup(proposal);
+        setState(
+          reviewLookup.status === "ready"
+            ? {
+                status: "ready",
+                proposal: reviewLookup.proposal,
+                conversation,
+                round,
+                sourceMessages,
+              }
+            : reviewLookup,
+        );
+      }
+      void load().catch(() => setState({ status: "missing-proposal" }));
     }, 0);
 
     return () => window.clearTimeout(loadTimer);
@@ -85,31 +99,39 @@ export function ReviewProposal({ proposalId }: { proposalId?: string }) {
   if (state.status === "missing-proposal") {
     return (
       <section className="mt-8 max-w-2xl rounded-xl border border-amber-200 bg-amber-50 p-6">
-        <p className="font-medium text-amber-950">尚未找到 AI 整理建议</p>
+        <p className="font-medium text-amber-950">Proposal 不存在或已删除</p>
         <p className="mt-2 text-sm leading-6 text-amber-800">
-          请先完成 TXT 导入和 Demo Analyzer 分析，再回来审核。
+          该链接不会回退到缓存或旧指针。你可以返回 Search 或重新生成整理建议。
         </p>
         <Link
           className="mt-5 inline-block rounded-lg bg-zinc-950 px-5 py-3 text-sm font-medium text-white"
-          href="/analysis"
+          href="/search?type=proposal"
         >
-          返回 Analysis 页面
+          返回 Proposal Search
         </Link>
       </section>
     );
   }
 
-  function handleAccept() {
+  async function persistCanonicalReviewState() {
+    if (getStorageMode() === "indexedDB") {
+      await flushCachesToIndexedDB();
+    }
+  }
+
+  async function handleAccept() {
     if (state.status !== "ready" || state.proposal.status !== "Pending") {
       return;
     }
 
-    const proposalStorage = new BrowserProposalStorage();
-    const knowledgeStorage = new BrowserKnowledgeCardStorage();
+    const storages = createStorageInstances();
+    const proposalStorage = storages.proposals;
+    const knowledgeStorage = storages.knowledgeCards;
     if (state.proposal.purpose === "knowledge-update" && state.proposal.targetKnowledgeId) {
       const updated = new RoundKnowledgeService(knowledgeStorage, proposalStorage).applyUpdate(state.proposal);
       if (updated) {
         proposalStorage.saveCurrent(applyProposal(acceptProposal(state.proposal)));
+        await persistCanonicalReviewState();
         router.push(`/knowledge/${updated.id}`);
         return;
       }
@@ -120,6 +142,7 @@ export function ReviewProposal({ proposalId }: { proposalId?: string }) {
       const appliedProposal = applyProposal(state.proposal);
       proposalStorage.saveCurrent(appliedProposal);
       setState({ ...state, proposal: appliedProposal });
+      await persistCanonicalReviewState();
       router.push(`/knowledge/${existingCard.id}`);
       return;
     }
@@ -132,6 +155,7 @@ export function ReviewProposal({ proposalId }: { proposalId?: string }) {
       knowledgeStorage.save(knowledgeCard);
       new BrowserAppEventLogStorage().record("knowledge created", knowledgeCard.id);
       proposalStorage.saveCurrent(applyProposal(acceptedProposal));
+      await persistCanonicalReviewState();
       router.push(`/knowledge/${knowledgeCard.id}`);
       return;
     }
@@ -139,13 +163,14 @@ export function ReviewProposal({ proposalId }: { proposalId?: string }) {
     router.push("/knowledge");
   }
 
-  function handleReject() {
+  async function handleReject() {
     if (state.status !== "ready" || state.proposal.status !== "Pending") {
       return;
     }
 
     const rejectedProposal = rejectProposal(state.proposal);
-    new BrowserProposalStorage().saveCurrent(rejectedProposal);
+    createStorageInstances().proposals.saveCurrent(rejectedProposal);
+    await persistCanonicalReviewState();
     setState({ ...state, proposal: rejectedProposal });
   }
 

@@ -65,7 +65,7 @@ function suggestedTitle(artifact: ImportArtifact, messages: ParsedMessageDraft[]
   return fromName || firstUserMessage?.content.split("\n")[0].slice(0, 80) || "Imported Conversation";
 }
 
-function deriveRoundDrafts(messages: ParsedMessageDraft[]): ParsedRoundDraft[] {
+export function deriveRoundDrafts(messages: ParsedMessageDraft[]): ParsedRoundDraft[] {
   const groups: number[][] = [];
   let current: number[] = [];
   let currentKind: "dialogue" | "orphan" | "context" | null = null;
@@ -139,7 +139,13 @@ class TextConversationParser implements ConversationParser {
 
     if (!artifact.content.trim()) errors.push("Import content is empty.");
     if (messages.length > 0 && unknownCount === messages.length) {
-      warnings.push("No supported speaker labels were found; content is preserved as unknown.");
+      if (this.id === "txt") {
+        errors.push(
+          "TXT does not contain parseable speaker labels. Use User/Assistant, 用户/AI, 我/GPT, or 问/答.",
+        );
+      } else {
+        warnings.push("No supported speaker labels were found; content is preserved as unknown.");
+      }
     }
 
     return {

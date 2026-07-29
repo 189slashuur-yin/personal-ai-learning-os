@@ -6,12 +6,12 @@ export default function Home() {
   return (
     <main className="workspace-shell pb-24">
       <div className="rounded-2xl border border-zinc-200 bg-white px-6 py-8 shadow-sm sm:px-8">
-        <p className="eyebrow">Dashboard</p>
+        <p className="eyebrow">Personal AI Context Manager</p>
         <h1 className="mt-3 text-3xl font-semibold tracking-tight text-zinc-950 sm:text-4xl">
-          你的学习工作区
+          你的长期 AI 协作上下文
         </h1>
         <p className="mt-3 max-w-2xl text-base leading-7 text-zinc-600">
-          从原始 Conversation 出发，整理 Proposal，并沉淀为可持续使用的 Knowledge。
+          保留原始 Conversation，人工维护当前 Context、Decision 与 Next Action，并把稳定信息沉淀为 Knowledge。Analyzer 可选。
         </p>
         <DashboardSearch />
       </div>

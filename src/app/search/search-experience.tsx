@@ -9,16 +9,20 @@ import type {
 import type { Workspace } from "@/core/entities/workspace";
 import { SearchIndexService } from "@/core/services/search-index-service";
 import { WorkspaceService } from "@/core/services/workspace-service";
-import { BrowserConversationStorage } from "@/infrastructure/storage/browser-conversation-storage";
-import { BrowserKnowledgeCardStorage } from "@/infrastructure/storage/browser-knowledge-card-storage";
-import { BrowserMessageStorage } from "@/infrastructure/storage/browser-message-storage";
-import { BrowserProposalStorage } from "@/infrastructure/storage/browser-proposal-storage";
-import { BrowserSourceStorage } from "@/infrastructure/storage/browser-source-storage";
 import { BrowserTagStorage } from "@/infrastructure/storage/browser-tag-storage";
 import { BrowserTaskStorage } from "@/infrastructure/storage/browser-task-storage";
 import { BrowserWorkspaceStorage } from "@/infrastructure/storage/browser-workspace-storage";
-import { BrowserRoundStorage } from "@/infrastructure/storage/browser-round-storage";
 import { BrowserAssetStorage } from "@/infrastructure/storage/browser-asset-storage";
+import {
+  createConversationStorage,
+  createMessageStorage,
+  createRoundStorage,
+  createProposalStorage,
+  createKnowledgeCardStorage,
+  createSourceStorage,
+  ensureIndexedDBLoaded,
+  getStorageMode,
+} from "@/infrastructure/storage/storage-factory";
 
 type SearchCatalog = {
   service: SearchIndexService;
@@ -60,8 +64,17 @@ const resultTypeLabels: Record<SearchDocumentEntityType, string> = {
   tag: "Tag",
 };
 
-function loadSearchCatalog(): SearchCatalog {
-  const conversationStorage = new BrowserConversationStorage();
+async function loadSearchCatalog(): Promise<SearchCatalog> {
+  // Preload IndexedDB data into memory for IndexedDB mode;
+  // localStorage mode reads directly from localStorage.
+  if (getStorageMode() === "indexedDB") {
+    await ensureIndexedDBLoaded();
+  }
+
+  // Use canonical storage via factory helpers — respects storage mode.
+  // Tasks, tags, assets, and workspaces remain on Browser*Storage
+  // until IndexedDB versions exist for them.
+  const conversationStorage = createConversationStorage();
   const workspaces = new WorkspaceService(
     new BrowserWorkspaceStorage(),
     conversationStorage,
@@ -69,11 +82,11 @@ function loadSearchCatalog(): SearchCatalog {
   const service = new SearchIndexService({
     workspaces,
     conversations: conversationStorage.getAll(),
-    sources: new BrowserSourceStorage().getAll(),
-    messages: new BrowserMessageStorage().getAll(),
-    rounds: new BrowserRoundStorage().getAll(),
-    proposals: new BrowserProposalStorage().getAll(),
-    knowledgeCards: new BrowserKnowledgeCardStorage().getAll(),
+    sources: createSourceStorage().getAll(),
+    messages: createMessageStorage().getAll(),
+    rounds: createRoundStorage().getAll(),
+    proposals: createProposalStorage().getAll(),
+    knowledgeCards: createKnowledgeCardStorage().getAll(),
     tasks: new BrowserTaskStorage().getAll(),
     tags: new BrowserTagStorage().getAll(),
     assets: new BrowserAssetStorage().getAll(),
@@ -118,6 +131,15 @@ function formatDate(timestamp: string) {
   }).format(date);
 }
 
+const matchedFieldLabels: Record<string, string> = {
+  "record.notes": "我的备注",
+  "record.nextActions": "下一步",
+  "record.goal": "本轮目标",
+  "record.decisions": "新增决定",
+  "record.pendingQuestions": "遗留问题",
+  "record.legacyNote": "旧自由 Round Note",
+};
+
 function ResultCard({ result, query }: { result: SearchDocumentMatch; query: string }) {
   return (
     <article
@@ -155,7 +177,11 @@ function ResultCard({ result, query }: { result: SearchDocumentMatch; query: str
             {result.tags?.map((tag) => <span key={tag}>#{tag}</span>)}
             {result.updatedAt ? <span>更新 · {formatDate(result.updatedAt)}</span> : null}
             {result.matchedFields.length ? (
-              <span>匹配字段 · {result.matchedFields.join("、")}</span>
+              <span>
+                匹配字段 · {result.matchedFields
+                  .map((field) => matchedFieldLabels[field] ?? field)
+                  .join("、")}
+              </span>
             ) : null}
           </div>
           {result.entityType === "round" && typeof result.metadata?.conversationId === "string" ? <Link className="mt-3 inline-block text-xs font-semibold text-sky-700" href={`/conversation/${result.metadata.conversationId}?mode=workspace&round=${encodeURIComponent(result.entityId)}#round-${result.entityId}`}>跳转到对应 Round →</Link> : null}
@@ -185,7 +211,9 @@ export function SearchExperience({
   const [advancedMode, setAdvancedMode] = useState(initialType === "message");
 
   useEffect(() => {
-    const timer = window.setTimeout(() => setCatalog(loadSearchCatalog()), 0);
+    const timer = window.setTimeout(async () => {
+      setCatalog(await loadSearchCatalog());
+    }, 0);
     return () => window.clearTimeout(timer);
   }, []);
 
@@ -282,7 +310,7 @@ export function SearchExperience({
           <input checked={advancedMode} onChange={(event) => { setAdvancedMode(event.target.checked); if (!event.target.checked && typeFilter === "message") setTypeFilter("all"); }} type="checkbox" />
           高级模式：包含 Raw Message
         </label>
-        <p className="mt-2 text-xs text-zinc-500">Fuzzy 是字符子序列匹配，不是语义搜索、Embedding 或 RAG。</p>
+        <p className="mt-2 text-xs text-zinc-500">排序优先 Context → Summary → Conclusion → Knowledge → Round Note → Message。Fuzzy 是字符子序列匹配，不是语义搜索、Embedding 或 RAG。</p>
         {query || hasFilters ? (
           <button
             className="mt-4 rounded-lg px-3 py-2 text-sm font-medium text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900"

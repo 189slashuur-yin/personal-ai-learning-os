@@ -19,8 +19,8 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
   return (
     <main className="workspace-shell pb-24">
       <p className="eyebrow">Global search</p>
-      <h1 className="workspace-title">搜索 Learning OS</h1>
-      <p className="workspace-description">搜索当前浏览器中的全部文字，并定位到具体来源片段。索引仅在运行时构建。</p>
+      <h1 className="workspace-title">搜索 PALOS Context</h1>
+      <p className="workspace-description">优先检索当前 Context、Summary、Conclusion 与 Knowledge，再定位 Round Note 和原始 Message。索引仅在运行时构建。</p>
       <SearchExperience
         initialQuery={q}
         initialType={initialType}

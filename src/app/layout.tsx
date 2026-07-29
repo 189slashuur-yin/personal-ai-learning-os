@@ -4,8 +4,8 @@ import { FeedbackButton } from "./feedback/feedback-button";
 import { AppNavigation } from "./app-navigation";
 
 export const metadata: Metadata = {
-  title: "Personal AI Learning OS",
-  description: "把对话提炼成持续演化的个人知识。",
+  title: "PALOS · Personal AI Context Manager",
+  description: "管理长期人机协作产生的对话、上下文、决策、行动与知识。",
 };
 
 export default function RootLayout({

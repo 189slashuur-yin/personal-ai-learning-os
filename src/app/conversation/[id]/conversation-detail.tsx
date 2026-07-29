@@ -20,35 +20,51 @@ import type { Round } from "@/core/entities/round";
 import type { ProviderCapability } from "@/core/entities/provider-capability";
 import { DEFAULT_WORKSPACE_ID, type Workspace } from "@/core/entities/workspace";
 import { AnalyzerExecutionService } from "@/core/services/analyzer-execution";
+import { shouldShowAnalyzerFailureInjection } from "@/core/services/analyzer-diagnostics";
 import { ImportProfileService } from "@/core/services/import-profile-service";
 import { ConversationVersionService } from "@/core/services/conversation-version-service";
+import { ContextExportService } from "@/core/services/context-export-service";
 import { editMessage } from "@/core/services/message-editing";
 import { parseMessagesFromRawText } from "@/core/services/message-parser";
 import { PromptTemplateService } from "@/core/services/prompt-template-service";
 import { ProviderConfigurationService } from "@/core/services/provider-configuration-service";
 import { ProviderService } from "@/core/services/provider-service";
 import { deriveQAPairs } from "@/core/services/qa-pair-service";
+import { isShareSnapshotOwnedConversation } from "@/core/services/share-snapshot-mutation-guard";
 import { countWords } from "@/core/services/text-statistics";
 import { TaskService } from "@/core/services/task-service";
 import { WorkspaceService } from "@/core/services/workspace-service";
-import { BrowserConversationStorage } from "@/infrastructure/storage/browser-conversation-storage";
-import { BrowserConversationVersionStorage } from "@/infrastructure/storage/browser-conversation-version-storage";
+import {
+  beginNoteEditing,
+  cancelNoteEditing as cancelNoteEditor,
+  createNoteEditorState,
+  getNoteEditorVisibility,
+  saveNoteEditing,
+  updateNoteDraft,
+} from "@/core/services/note-editing";
 import { BrowserAIProviderStorage } from "@/infrastructure/storage/browser-ai-provider-storage";
 import { BrowserAnalyzerRunStorage } from "@/infrastructure/storage/browser-analyzer-run-storage";
-import { BrowserKnowledgeCardStorage } from "@/infrastructure/storage/browser-knowledge-card-storage";
-import { BrowserMessageStorage } from "@/infrastructure/storage/browser-message-storage";
-import { BrowserProposalStorage } from "@/infrastructure/storage/browser-proposal-storage";
 import { BrowserPromptTemplateStorage } from "@/infrastructure/storage/browser-prompt-template-storage";
 import { BrowserProviderConfigurationStorage } from "@/infrastructure/storage/browser-provider-configuration-storage";
-import { BrowserRoundStorage } from "@/infrastructure/storage/browser-round-storage";
-import { BrowserSourceStorage } from "@/infrastructure/storage/browser-source-storage";
 import { BrowserTaskStorage } from "@/infrastructure/storage/browser-task-storage";
 import { BrowserWorkspaceStorage } from "@/infrastructure/storage/browser-workspace-storage";
 import { BrowserAppEventLogStorage } from "@/infrastructure/storage/browser-feedback-storage";
+import {
+  createConversationStorage,
+  createConversationVersionStorage,
+  createKnowledgeCardStorage,
+  createMessageStorage,
+  createProposalStorage,
+  createRoundStorage,
+  createSourceStorage,
+  ensureIndexedDBLoaded,
+  getStorageMode,
+} from "@/infrastructure/storage/storage-factory";
 import { ProposalWorkspace } from "./proposal-workspace";
 import { ConversationAssets } from "./conversation-assets";
 import { RoundWorkspace } from "./round-workspace";
 import { ConversationWorkspaceMode } from "./conversation-workspace-mode";
+import { ConversationContextPanel } from "./conversation-context-panel";
 import { RoundNavigator } from "./round-navigator";
 import { CapabilityBadges } from "@/app/capability-badges";
 
@@ -59,15 +75,19 @@ type ConversationDetailProps = {
 
 type DetailState =
   | { status: "loading" }
+  | { status: "error"; message: string }
   | { status: "missing" }
   | {
       status: "ready";
       conversation: Conversation;
       source: ImportedSource | null;
+      sourceCount: number;
+      shareSnapshotOwned: boolean;
       messages: Message[];
       proposals: Proposal[];
       knowledgeCard: KnowledgeCard | null;
       knowledgeCount: number;
+      roundCount: number;
       versions: ConversationVersion[];
     };
 
@@ -155,11 +175,9 @@ export function ConversationDetail({
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
   const [isRenaming, setIsRenaming] = useState(false);
   const [titleDraft, setTitleDraft] = useState("");
-  const [isEditingNote, setIsEditingNote] = useState(false);
-  const [noteDraft, setNoteDraft] = useState("");
-  const [summaryDraft, setSummaryDraft] = useState("");
-  const [conclusionDraft, setConclusionDraft] = useState("");
-  const [pendingQuestionsDraft, setPendingQuestionsDraft] = useState("");
+  const [conversationNoteEditor, setConversationNoteEditor] = useState(
+    createNoteEditorState(),
+  );
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [selectedMessageIds, setSelectedMessageIds] = useState<Set<string>>(
     new Set(),
@@ -170,6 +188,7 @@ export function ConversationDetail({
   const [snapshotName, setSnapshotName] = useState("");
   const [snapshotDescription, setSnapshotDescription] = useState("");
   const [restoreStatus, setRestoreStatus] = useState<string | null>(null);
+  const [roundWorkspaceRevision, setRoundWorkspaceRevision] = useState(0);
   const [collapsedMessageIds, setCollapsedMessageIds] = useState<Set<string>>(
     new Set(),
   );
@@ -200,11 +219,9 @@ export function ConversationDetail({
   const moreMenuRef = useRef<HTMLDivElement>(null);
   const moreMenuButtonRef = useRef<HTMLButtonElement>(null);
 
-  // K3: Summary undo/redo
-  const [summaryUndoStack, setSummaryUndoStack] = useState<string[]>([]);
-  const [summaryRedoStack, setSummaryRedoStack] = useState<string[]>([]);
-  const [summaryModified, setSummaryModified] = useState(false);
-  const [summaryLastSaved, setSummaryLastSaved] = useState<string | null>(null);
+  // P0-5: Raw Timeline toggle
+  const [rawTimelineOpen, setRawTimelineOpen] = useState(false);
+
   const [providerDetails] = useState<{
     id: string;
     name: string;
@@ -294,9 +311,22 @@ export function ConversationDetail({
 
   useEffect(() => {
     const loadTimer = window.setTimeout(() => {
-      const conversation = new BrowserConversationStorage().getById(
-        conversationId,
-      );
+      async function load() {
+        try {
+          if (getStorageMode() === "indexedDB") {
+            await ensureIndexedDBLoaded();
+          }
+        } catch {
+          setState({
+            status: "error",
+            message: "IndexedDB 数据加载失败。请刷新页面重试，或前往 Settings 切换回 LocalStorage 模式。",
+          });
+          return;
+        }
+
+        const conversation = createConversationStorage().getById(
+          conversationId,
+        );
       if (new URLSearchParams(window.location.search).get("mode") === "workspace") {
         setDetailMode("workspace");
       }
@@ -310,16 +340,21 @@ export function ConversationDetail({
         ...conversation,
         lastOpenedAt: new Date().toISOString(),
       };
-      new BrowserConversationStorage().save(openedConversation);
+      createConversationStorage().save(openedConversation);
       setWorkspaces(
         new WorkspaceService(
           new BrowserWorkspaceStorage(),
-          new BrowserConversationStorage(),
+          createConversationStorage(),
         ).listWorkspaces(),
       );
 
-      const source = new BrowserSourceStorage().getByConversationId(conversationId);
-      const proposalStorage = new BrowserProposalStorage();
+      const sourceStorage = createSourceStorage();
+      const source = sourceStorage.getByConversationId(conversationId);
+      const conversationSources = sourceStorage
+        .getAll()
+        .filter((candidate) => candidate.conversationId === conversationId);
+      const sourceCount = conversationSources.length;
+      const proposalStorage = createProposalStorage();
       const conversationProposals = proposalStorage.getByConversationId(
         conversationId,
       );
@@ -334,7 +369,7 @@ export function ConversationDetail({
           ? [sourceProposal, ...conversationProposals]
           : conversationProposals
       ).sort((left, right) => right.createdAt.localeCompare(left.createdAt));
-      const knowledgeCardStorage = new BrowserKnowledgeCardStorage();
+      const knowledgeCardStorage = createKnowledgeCardStorage();
       const knowledgeCard = proposals
         .map((proposal) => knowledgeCardStorage.getByProposalId(proposal.id))
         .find((card) => card !== null) ?? null;
@@ -342,11 +377,12 @@ export function ConversationDetail({
       const knowledgeCount = knowledgeCardStorage
         .getAll()
         .filter((card) => proposalIds.has(card.proposalId)).length;
-      const messages = new BrowserMessageStorage().getByConversationId(
+      const messages = createMessageStorage().getByConversationId(
         conversationId,
       );
+      const rounds = createRoundStorage().getByConversationId(conversationId);
       const versions =
-        new BrowserConversationVersionStorage().getByConversationId(
+        createConversationVersionStorage().getByConversationId(
           conversationId,
         );
       setLatestAnalyzerRun(
@@ -360,27 +396,34 @@ export function ConversationDetail({
       lastSavedContent.current = sourceContent;
       setDraft(sourceContent);
       setTitleDraft(openedConversation.title);
-      setNoteDraft(openedConversation.note ?? "");
-      setSummaryDraft(openedConversation.summary ?? "");
-      setConclusionDraft(openedConversation.conclusion ?? "");
-      setPendingQuestionsDraft(openedConversation.pendingQuestions ?? "");
+      setConversationNoteEditor(
+        createNoteEditorState(openedConversation.note ?? ""),
+      );
       setLastSavedAt(source?.updatedAt ?? null);
       setState({
         status: "ready",
         conversation: openedConversation,
         source,
+        sourceCount,
+        shareSnapshotOwned: isShareSnapshotOwnedConversation(
+          sourceStorage,
+          conversationId,
+        ),
         messages,
         proposals,
         knowledgeCard,
         knowledgeCount,
+        roundCount: rounds.length,
         versions,
       });
+      }
+      void load();
     }, 0);
 
     return () => window.clearTimeout(loadTimer);
   }, [conversationId, providerDetails.id]);
 
-  // R9: Close More Menu on outside click
+  // R9: Close More Menu on outside click and Esc
   useEffect(() => {
     if (!moreMenuOpen) return;
     function handleClick(event: MouseEvent) {
@@ -393,13 +436,21 @@ export function ConversationDetail({
         setMoreMenuOpen(false);
       }
     }
+    function handleKey(event: globalThis.KeyboardEvent) {
+      if (event.key === "Escape") setMoreMenuOpen(false);
+    }
     document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
+    document.addEventListener("keydown", handleKey);
+    return () => {
+      document.removeEventListener("mousedown", handleClick);
+      document.removeEventListener("keydown", handleKey);
+    };
   }, [moreMenuOpen]);
 
   useEffect(() => {
     if (
       state.status !== "ready" ||
+      state.shareSnapshotOwned ||
       draft === lastSavedContent.current ||
       (!state.source && draft.length === 0)
     ) {
@@ -407,6 +458,16 @@ export function ConversationDetail({
     }
 
     const autosaveTimer = window.setTimeout(() => {
+      const sourceStorage = createSourceStorage();
+      if (
+        isShareSnapshotOwnedConversation(
+          sourceStorage,
+          state.conversation.id,
+        )
+      ) {
+        return;
+      }
+
       const timestamp = new Date().toISOString();
       const nextSource: ImportedSource = {
         id: state.source?.id ?? crypto.randomUUID(),
@@ -424,8 +485,8 @@ export function ConversationDetail({
         updatedAt: timestamp,
       };
 
-      new BrowserSourceStorage().save(nextSource);
-      new BrowserConversationStorage().save(nextConversation);
+      sourceStorage.save(nextSource);
+      createConversationStorage().save(nextConversation);
       lastSavedContent.current = draft;
       setLastSavedAt(timestamp);
       setSaveStatus("saved");
@@ -435,6 +496,9 @@ export function ConversationDetail({
               ...currentState,
               conversation: nextConversation,
               source: nextSource,
+              sourceCount: currentState.source
+                ? currentState.sourceCount
+                : currentState.sourceCount + 1,
             }
           : currentState,
       );
@@ -448,6 +512,24 @@ export function ConversationDetail({
       <p className="workspace-shell text-sm text-zinc-500" role="status">
         正在打开 Conversation…
       </p>
+    );
+  }
+
+  if (state.status === "error") {
+    return (
+      <main className="workspace-shell">
+        <p className="eyebrow text-red-700">加载错误</p>
+        <h1 className="workspace-title">数据加载失败</h1>
+        <p className="mt-4 text-sm leading-6 text-red-600" role="alert">
+          {state.message}
+        </p>
+        <Link
+          className="mt-6 inline-block rounded-lg bg-zinc-950 px-4 py-2.5 text-sm font-medium text-white"
+          href="/conversation"
+        >
+          返回 Conversation
+        </Link>
+      </main>
     );
   }
 
@@ -466,7 +548,7 @@ export function ConversationDetail({
     );
   }
 
-  const { conversation, source, proposals, knowledgeCard, knowledgeCount } = state;
+  const { conversation, source, proposals, knowledgeCard, roundCount } = state;
   const importProfileService = new ImportProfileService();
   const importProfile = conversation.importProfileId
     ? importProfileService.getById(conversation.importProfileId)
@@ -475,63 +557,18 @@ export function ConversationDetail({
     dateStyle: "medium",
     timeStyle: "short",
   }).format(new Date(conversation.updatedAt));
-  const hasOriginalContent = draft.trim().length > 0;
-  const activeFlowStep = !hasOriginalContent
-    ? 1
-    : knowledgeCount > 0
-      ? 7
-      : proposals.length > 0
-        ? 5
-        : selectedMessageIds.size > 0
-          ? 4
-          : 2;
-  const flowSteps = [
-    { label: "导入", href: "/import" },
-    { label: "浏览 Rounds", anchor: "section-rounds" },
-    { label: "写 Summary/Note", anchor: "section-info" },
-    { label: "可选 Analyze", anchor: "section-proposal" },
-    { label: "可选 Review", href: "/review" },
-    { label: "Knowledge", anchor: "section-knowledge" },
-    { label: "Search", href: "/search" },
-  ];
+  const conversationNoteVisibility = getNoteEditorVisibility(
+    conversationNoteEditor.mode,
+  );
+  const showAnalyzerFailureInjection = shouldShowAnalyzerFailureInjection(
+    process.env.NEXT_PUBLIC_PALOS_ANALYZER_DIAGNOSTICS,
+  );
 
   function scrollToAnchor(anchorId: string) {
     const element = document.getElementById(anchorId);
     if (element) {
       element.scrollIntoView({ behavior: "smooth", block: "start" });
     }
-  }
-
-  // K3: Summary undo/redo
-  function pushSummaryUndo(value: string) {
-    setSummaryUndoStack((prev) => [...prev.slice(-19), value]);
-    setSummaryRedoStack([]);
-  }
-
-  function undoSummary() {
-    if (summaryUndoStack.length === 0) return;
-    const previous = summaryUndoStack[summaryUndoStack.length - 1];
-    setSummaryRedoStack((prev) => [...prev, summaryDraft]);
-    setSummaryUndoStack((prev) => prev.slice(0, -1));
-    setSummaryDraft(previous);
-    setSummaryModified(true);
-  }
-
-  function redoSummary() {
-    if (summaryRedoStack.length === 0) return;
-    const next = summaryRedoStack[summaryRedoStack.length - 1];
-    setSummaryUndoStack((prev) => [...prev, summaryDraft]);
-    setSummaryRedoStack((prev) => prev.slice(0, -1));
-    setSummaryDraft(next);
-    setSummaryModified(true);
-  }
-
-  function resetSummary() {
-    if (state.status !== "ready") return;
-    const original = state.conversation.summary ?? "";
-    pushSummaryUndo(original);
-    setSummaryDraft(original);
-    setSummaryModified(false);
   }
 
   async function runSourceAnalyzer(simulateFailure = false) {
@@ -561,7 +598,7 @@ export function ConversationDetail({
       ...result.proposal,
       sourceType: "conversation",
     };
-    new BrowserProposalStorage().saveCurrent(conversationProposal);
+    createProposalStorage().saveCurrent(conversationProposal);
     setAnalyzerError(null);
     setAnalyzerSuccess(`已从 Source 生成整理建议「${conversationProposal.title}」。请在 Review 页面审核后确认加入 Knowledge。`);
     setState({
@@ -582,37 +619,12 @@ export function ConversationDetail({
       setAnalyzerError(result.run.error?.message ?? "Round Analyzer 运行失败。");
       return;
     }
-    const proposalStorage = new BrowserProposalStorage();
+    const proposalStorage = createProposalStorage();
     proposalStorage.save(result.proposal);
     proposalStorage.saveCurrent(result.proposal);
     setAnalyzerError(null);
     setAnalyzerSuccess(`已从 Round「${round.title}」生成整理建议。请在 Review 页面审核后确认加入 Knowledge。`);
     setState({ ...state, proposals: [result.proposal, ...state.proposals] });
-  }
-
-  async function runConversationSummaryAnalyzer() {
-    if (state.status !== "ready") return;
-    setAnalyzerSuccess(null);
-    setLatestAnalyzerRun({ id: "pending", conversationId: state.conversation.id, providerId: providerDetails.id, providerName: providerDetails.name, status: "running", startedAt: new Date().toISOString() });
-    const rounds = new BrowserRoundStorage().getByConversationId(state.conversation.id);
-    const timestamp = new Date().toISOString();
-    const summaryMessages: Message[] = rounds.flatMap((round, index) => [
-      ...(round.question ? [{ id: `summary-q-${round.id}`, conversationId: state.conversation.id, role: "user" as const, content: round.question, order: index * 2 + 1, createdAt: timestamp, updatedAt: timestamp }] : []),
-      ...(round.answer ? [{ id: `summary-a-${round.id}`, conversationId: state.conversation.id, role: "assistant" as const, content: round.answer, order: index * 2 + 2, createdAt: timestamp, updatedAt: timestamp }] : []),
-    ]);
-    const result = await createAnalyzerExecutionService(analyzeProviderId).runMessages(state.conversation.id, summaryMessages);
-    setLatestAnalyzerRun(result.run);
-    if (!result.proposal) {
-      setAnalyzerError(result.run.error?.message ?? "Conversation Summary Analyzer 运行失败。");
-      return;
-    }
-    const proposal: Proposal = { ...result.proposal, sourceType: "conversation", sourceMessageIds: rounds.flatMap((round) => round.messageIds), title: `Conversation Summary Draft · ${state.conversation.title}` };
-    const storage = new BrowserProposalStorage();
-    storage.save(proposal);
-    storage.saveCurrent(proposal);
-    setAnalyzerError(null);
-    setAnalyzerSuccess("已生成 Conversation Summary 整理建议。请在 Review 页面审核后确认加入 Knowledge。");
-    setState({ ...state, proposals: [proposal, ...state.proposals] });
   }
 
   function createTaskFromConversation() {
@@ -712,7 +724,7 @@ export function ConversationDetail({
       return;
     }
 
-    const proposalStorage = new BrowserProposalStorage();
+    const proposalStorage = createProposalStorage();
     proposalStorage.saveFromMessages(result.proposal);
     proposalStorage.saveCurrent(result.proposal);
     setAnalyzerError(null);
@@ -733,7 +745,7 @@ export function ConversationDetail({
     }
 
     if (latestAnalyzerRun.sourceId) {
-      const retrySource = new BrowserSourceStorage()
+      const retrySource = createSourceStorage()
         .getAll()
         .find((item) => item.id === latestAnalyzerRun.sourceId);
 
@@ -750,7 +762,7 @@ export function ConversationDetail({
         return;
       }
 
-      new BrowserProposalStorage().saveCurrent(result.proposal);
+      createProposalStorage().saveCurrent(result.proposal);
       setAnalyzerError(null);
       setState({
         ...state,
@@ -781,7 +793,7 @@ export function ConversationDetail({
       return;
     }
 
-    const proposalStorage = new BrowserProposalStorage();
+    const proposalStorage = createProposalStorage();
     proposalStorage.saveFromMessages(result.proposal);
     proposalStorage.saveCurrent(result.proposal);
     setAnalyzerError(null);
@@ -813,7 +825,7 @@ export function ConversationDetail({
       return;
     }
 
-    new BrowserProposalStorage().remove(proposal.id);
+    createProposalStorage().remove(proposal.id);
     setState({
       ...state,
       proposals: state.proposals.filter((item) => item.id !== proposal.id),
@@ -825,7 +837,20 @@ export function ConversationDetail({
   }
 
   function generateMessages() {
-    if (state.status !== "ready" || !draft.trim()) {
+    if (
+      state.status !== "ready" ||
+      state.shareSnapshotOwned ||
+      !draft.trim()
+    ) {
+      return;
+    }
+
+    if (
+      isShareSnapshotOwnedConversation(
+        createSourceStorage(),
+        state.conversation.id,
+      )
+    ) {
       return;
     }
 
@@ -844,7 +869,7 @@ export function ConversationDetail({
     const messages = profile
       ? importProfileService.parse(draft, state.conversation.id, profile)
       : parseMessagesFromRawText(draft, state.conversation.id);
-    new BrowserMessageStorage().replaceByConversationId(
+    createMessageStorage().replaceByConversationId(
       state.conversation.id,
       messages,
     );
@@ -945,6 +970,10 @@ export function ConversationDetail({
   }
 
   function startEditingMessage(message: Message) {
+    if (state.status !== "ready" || state.shareSnapshotOwned) {
+      return;
+    }
+
     setEditingMessageId(message.id);
     setMessageDraft(message.content);
     setSavedMessageId(null);
@@ -956,13 +985,14 @@ export function ConversationDetail({
   }
 
   function saveMessageEditing(messageId: string) {
-    if (state.status !== "ready") {
+    if (state.status !== "ready" || state.shareSnapshotOwned) {
       return;
     }
 
     const result = editMessage(messageId, messageDraft, {
-      conversations: new BrowserConversationStorage(),
-      messages: new BrowserMessageStorage(),
+      conversations: createConversationStorage(),
+      messages: createMessageStorage(),
+      sources: createSourceStorage(),
     });
 
     if (!result) {
@@ -986,15 +1016,16 @@ export function ConversationDetail({
       return;
     }
 
-    const versionStorage = new BrowserConversationVersionStorage();
+    const versionStorage = createConversationVersionStorage();
     const version = new ConversationVersionService({
-      conversations: new BrowserConversationStorage(),
-      messages: new BrowserMessageStorage(),
+      conversations: createConversationStorage(),
+      messages: createMessageStorage(),
       versions: versionStorage,
     }).createSnapshot(
       state.conversation.id,
       snapshotName,
       snapshotDescription,
+      { kind: "manual" },
     );
 
     if (!version) {
@@ -1010,7 +1041,7 @@ export function ConversationDetail({
   }
 
   function restoreSnapshot(version: ConversationVersion) {
-    if (state.status !== "ready") {
+    if (state.status !== "ready" || state.shareSnapshotOwned) {
       return;
     }
 
@@ -1023,10 +1054,17 @@ export function ConversationDetail({
     }
 
     const result = new ConversationVersionService({
-      conversations: new BrowserConversationStorage(),
-      messages: new BrowserMessageStorage(),
-      versions: new BrowserConversationVersionStorage(),
-    }).restoreSnapshot(state.conversation.id, version.id);
+      conversations: createConversationStorage(),
+      messages: createMessageStorage(),
+      versions: createConversationVersionStorage(),
+    }).restoreSnapshot(
+      state.conversation.id,
+      version.id,
+      {
+        sources: createSourceStorage(),
+        rounds: createRoundStorage(),
+      },
+    );
 
     if (!result) {
       return;
@@ -1046,6 +1084,7 @@ export function ConversationDetail({
     setMessageSearchQuery("");
     setActiveSearchIndex(0);
     setMessageTimelineMode("collapsed");
+    setRoundWorkspaceRevision((current) => current + 1);
     setRestoreStatus("Restored successfully");
   }
 
@@ -1072,7 +1111,7 @@ export function ConversationDetail({
       title: nextTitle,
       updatedAt: new Date().toISOString(),
     };
-    new BrowserConversationStorage().save(nextConversation);
+    createConversationStorage().save(nextConversation);
     setState({ ...state, conversation: nextConversation });
     setIsRenaming(false);
   }
@@ -1088,7 +1127,7 @@ export function ConversationDetail({
       workspaceId,
       updatedAt: timestamp,
     };
-    new BrowserConversationStorage().save(nextConversation);
+    createConversationStorage().save(nextConversation);
     setState({ ...state, conversation: nextConversation });
   }
 
@@ -1097,12 +1136,12 @@ export function ConversationDetail({
       return;
     }
 
-    const normalizedNote = noteDraft.trim();
+    const nextEditor = saveNoteEditing(conversationNoteEditor);
+    const normalizedNote = nextEditor.savedValue.trim();
     const currentNote = state.conversation.note ?? "";
 
     if (normalizedNote === currentNote) {
-      setNoteDraft(currentNote);
-      setIsEditingNote(false);
+      setConversationNoteEditor(createNoteEditorState(currentNote));
       return;
     }
 
@@ -1111,10 +1150,11 @@ export function ConversationDetail({
       note: normalizedNote || undefined,
       updatedAt: new Date().toISOString(),
     };
-    new BrowserConversationStorage().save(nextConversation);
+    createConversationStorage().save(nextConversation);
     setState({ ...state, conversation: nextConversation });
-    setNoteDraft(nextConversation.note ?? "");
-    setIsEditingNote(false);
+    setConversationNoteEditor(
+      createNoteEditorState(nextConversation.note ?? ""),
+    );
   }
 
   function cancelNoteEditing() {
@@ -1122,29 +1162,27 @@ export function ConversationDetail({
       return;
     }
 
-    setNoteDraft(state.conversation.note ?? "");
-    setIsEditingNote(false);
+    setConversationNoteEditor(cancelNoteEditor(conversationNoteEditor));
   }
 
-  function saveConversationSummary() {
+  function exportConversation(format: "json" | "markdown" | "context") {
     if (state.status !== "ready") return;
-    const nextConversation: Conversation = {
-      ...state.conversation,
-      summary: summaryDraft.trim() || undefined,
-      conclusion: conclusionDraft.trim() || undefined,
-      pendingQuestions: pendingQuestionsDraft.trim() || undefined,
-      updatedAt: new Date().toISOString(),
-    };
-    new BrowserConversationStorage().save(nextConversation);
-    setState({ ...state, conversation: nextConversation });
-  }
-
-  function exportConversation(format: "json" | "markdown") {
-    if (state.status !== "ready") return;
-    const rounds = new BrowserRoundStorage().getByConversationId(state.conversation.id);
-    const content = format === "json" ? JSON.stringify({ conversation: state.conversation, rounds, messages: state.messages }, null, 2) : `# ${state.conversation.title}\n\n${rounds.map((round) => `## Round ${round.order}: ${round.title}\n\n**Q:** ${round.question}\n\n**A:** ${round.answer}\n\n${round.summary ? `Summary: ${round.summary}\n` : ""}`).join("\n")}`;
-    const blob = new Blob([content], { type: format === "json" ? "application/json" : "text/markdown" });
-    const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = `${state.conversation.title}.${format === "json" ? "json" : "md"}`; link.click(); URL.revokeObjectURL(link.href);
+    const rounds = createRoundStorage().getByConversationId(state.conversation.id);
+    const contextExport = format === "context"
+      ? new ContextExportService({
+          conversations: createConversationStorage(),
+          rounds: createRoundStorage(),
+          tasks: new BrowserTaskStorage(),
+          versions: createConversationVersionStorage(),
+        }).exportConversation(state.conversation.id)
+      : null;
+    const content = format === "context"
+      ? JSON.stringify(contextExport, null, 2)
+      : format === "json"
+        ? JSON.stringify({ conversation: state.conversation, rounds, messages: state.messages }, null, 2)
+        : `# ${state.conversation.title}\n\n${rounds.map((round) => `## Round ${round.order}: ${round.title}\n\n**Q:** ${round.question}\n\n**A:** ${round.answer}\n\n${round.summary ? `Summary: ${round.summary}\n` : ""}`).join("\n")}`;
+    const blob = new Blob([content], { type: format === "markdown" ? "text/markdown" : "application/json" });
+    const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = `${state.conversation.title}${format === "context" ? ".context.json" : format === "json" ? ".json" : ".md"}`; link.click(); URL.revokeObjectURL(link.href);
   }
 
   function handleTitleKeyDown(event: KeyboardEvent<HTMLInputElement>) {
@@ -1169,23 +1207,11 @@ export function ConversationDetail({
         </Link>
         <button
           className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs font-semibold text-zinc-600 hover:border-zinc-300 hover:text-zinc-950"
-          onClick={() => scrollToAnchor("section-rounds")}
-          type="button"
-        >
-          ↓ 当前 Rounds
-        </button>
-        <button
-          className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800 hover:border-amber-300 hover:bg-amber-100"
           onClick={() => scrollToAnchor("section-history")}
           type="button"
         >
-          🔄 History / 版本历史
+          History / 版本历史
         </button>
-      </div>
-
-      <div className="mt-6 rounded-xl border border-zinc-200 bg-white p-5 text-sm leading-7 text-zinc-700">
-        <p className="font-semibold text-zinc-900">📋 对话记录 · 版本管理</p>
-        <p className="mt-1">本页用于管理一个完整对话：导入原始记录 → 自动切成 Round → 手动写摘要/备注 → 必要时生成 AI 建议 → 可用版本恢复撤回整理操作。</p>
       </div>
 
       <header className="mt-8 border-b border-zinc-200 pb-8">
@@ -1254,6 +1280,7 @@ export function ConversationDetail({
                     <div className="flex flex-col gap-1">
                       <button className="rounded-lg px-3 py-2 text-left text-xs font-semibold text-zinc-700 hover:bg-zinc-50" onClick={() => { exportConversation("markdown"); setMoreMenuOpen(false); }} type="button">Export Markdown</button>
                       <button className="rounded-lg px-3 py-2 text-left text-xs font-semibold text-zinc-700 hover:bg-zinc-50" onClick={() => { exportConversation("json"); setMoreMenuOpen(false); }} type="button">Export JSON</button>
+                      <button className="rounded-lg px-3 py-2 text-left text-xs font-semibold text-zinc-700 hover:bg-zinc-50" onClick={() => { exportConversation("context"); setMoreMenuOpen(false); }} type="button">Export Context JSON</button>
                       <button className="rounded-lg px-3 py-2 text-left text-xs font-semibold text-zinc-700 hover:bg-zinc-50" onClick={() => { createTaskFromConversation(); setMoreMenuOpen(false); }} type="button">Create Task</button>
                       <Link className="rounded-lg px-3 py-2 text-left text-xs font-semibold text-zinc-700 hover:bg-zinc-50" href={`/search?q=${encodeURIComponent(conversation.title)}&workspaceId=${encodeURIComponent(conversation.workspaceId ?? DEFAULT_WORKSPACE_ID)}&type=conversation`} onClick={() => setMoreMenuOpen(false)}>搜索此 Conversation</Link>
                       <Link className="rounded-lg px-3 py-2 text-left text-xs font-semibold text-zinc-700 hover:bg-zinc-50" href={`/feedback?page=${encodeURIComponent(`/conversation/${conversation.id}`)}`} onClick={() => setMoreMenuOpen(false)}>记录反馈</Link>
@@ -1264,10 +1291,59 @@ export function ConversationDetail({
               : null}
           </div>
         </div>
+
+        {/* v1.5.1: Lightweight header stats */}
+        <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-1 text-xs text-zinc-500">
+          <span>
+            Messages:{" "}
+            <strong className="text-zinc-700">{state.messages.length}</strong>
+          </span>
+          <span>
+            Rounds:{" "}
+            <strong className="text-zinc-700">{roundCount}</strong>
+          </span>
+          <span>
+            Sources:{" "}
+            <strong className="text-zinc-700">{state.sourceCount}</strong>
+          </span>
+          <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 font-semibold text-zinc-600">
+            {conversation.sourceType}
+          </span>
+          {source?.importedAt ? (
+            <span>
+              Imported:{" "}
+              {new Intl.DateTimeFormat("zh-CN", {
+                dateStyle: "medium",
+                timeStyle: "short",
+              }).format(new Date(source.importedAt))}
+            </span>
+          ) : null}
+        </div>
       </header>
 
-      <div className="flex gap-6">
-        <RoundNavigator conversationId={conversation.id} />
+      {/* v1.5.1: Warning when Messages exist but Rounds are missing */}
+      {state.messages.length > 0 && roundCount === 0 ? (
+        <div
+          className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800"
+          role="alert"
+        >
+          <span className="font-semibold">
+            ⚠️ Messages 已存在，但 Rounds 为空。
+          </span>{" "}
+          可查看 Raw Timeline 或重新导入/后续再生成。
+        </div>
+      ) : null}
+
+      <div
+        className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-6"
+        data-testid="conversation-detail-navigator-layout"
+      >
+        <aside
+          className="sticky top-20 z-20 self-start"
+          data-testid="conversation-detail-navigator-rail"
+        >
+          <RoundNavigator conversationId={conversation.id} />
+        </aside>
         <div className="min-w-0 flex-1">
 
       {taskNotice ? (
@@ -1292,78 +1368,108 @@ export function ConversationDetail({
         </p>
       ) : null}
 
-      <nav aria-label="Conversation 整理流程" className="mt-8 rounded-xl border border-sky-200 bg-sky-50 p-5">
-        <div className="flex flex-wrap items-center justify-between gap-3">
+      {/* Rounds — main content area */}
+      {state.messages.length > 0 && roundCount === 0 && detailMode === "classic" ? (
+        <div
+          className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-xs text-amber-800"
+          role="alert"
+        >
+          <span className="font-semibold">⚠️ Messages 已存在，但 Rounds 为空。</span>{" "}
+          可查看下方 Raw Timeline，或重新导入/后续再生成。
+        </div>
+      ) : null}
+
+      <div id="section-rounds">
+        {detailMode === "workspace" ? (
+          <ConversationWorkspaceMode
+            conversationId={conversationId}
+            key={`round-workspace-${roundWorkspaceRevision}`}
+            onAnalyzeRound={runRoundAnalyzer}
+          />
+        ) : (
+          <RoundWorkspace
+            conversationId={conversationId}
+            key={`round-workspace-${roundWorkspaceRevision}`}
+            onAnalyzeRound={runRoundAnalyzer}
+          />
+        )}
+      </div>
+
+      <ConversationContextPanel
+        conversation={conversation}
+        key={conversation.id}
+        onSaved={(nextConversation, versions) =>
+          setState({
+            ...state,
+            conversation: nextConversation,
+            versions,
+          })
+        }
+        versions={state.versions}
+      />
+
+      {/* P0-5: Raw Timeline / 原始对话 — prominent entry point */}
+      <section className="mt-6 rounded-xl border border-zinc-200 bg-white">
+        <button
+          className="flex w-full items-center justify-between p-5 text-left"
+          onClick={() => setRawTimelineOpen((prev) => !prev)}
+          type="button"
+        >
           <div>
-            <p className="text-sm font-semibold text-sky-950">推荐整理流程</p>
-            <p className="mt-1 text-xs text-sky-800">导入 → 浏览 Rounds → 写 Summary/Note → 可选 Analyze → 可选 Review → Knowledge → Search</p>
+            <h2 className="text-lg font-semibold text-zinc-900">原始对话 / Raw Timeline</h2>
+            <p className="mt-1 text-sm text-zinc-500">
+              {state.messages.length > 0
+                ? `${state.messages.length} 条 Message — 点击展开查看完整原始对话记录`
+                : "暂无原始 Messages"}
+            </p>
           </div>
-          <Link className="text-xs font-semibold text-sky-900 underline" href="/help">查看操作手册</Link>
-        </div>
-        <ol className="mt-4 grid gap-2 sm:grid-cols-4 lg:grid-cols-7">
-          {flowSteps.map((step, index) => {
-            const stepNum = index + 1;
-            const active = stepNum === activeFlowStep;
-            const completed = stepNum < activeFlowStep;
-            const isLink = "href" in step;
-            const isAnchor = "anchor" in step;
-            const className = `rounded-lg border px-3 py-3 text-xs font-semibold cursor-pointer transition-colors ${active ? "border-sky-600 bg-white text-sky-950 shadow-sm ring-2 ring-sky-200" : completed ? "border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100" : "border-sky-100 bg-sky-100/60 text-sky-700 hover:bg-sky-200/60"}`;
-
-            if (isLink && step.href) {
-              return (
-                <li key={step.label}>
-                  <Link className={className} href={step.href}>
-                    <span className="block text-[10px] uppercase tracking-wider">Step {stepNum}</span>
-                    <span className="mt-1 block">{step.label} →</span>
-                  </Link>
-                </li>
-              );
-            }
-
-            if (isAnchor && step.anchor) {
-              return (
-                <li key={step.label}>
-                  <button
-                    className={className}
-                    onClick={() => scrollToAnchor(step.anchor!)}
-                    type="button"
+          <span className="text-zinc-400 text-xl">{rawTimelineOpen ? "▾" : "▸"}</span>
+        </button>
+        {rawTimelineOpen ? (
+          <div className="border-t border-zinc-100 px-5 pb-5">
+            {state.messages.length > 0 ? (
+              <ol className="mt-4 max-h-[32rem] space-y-3 overflow-auto">
+                {state.messages.map((message) => (
+                  <li
+                    key={message.id}
+                    className={`flex max-w-[90%] gap-3 rounded-xl border p-4 sm:max-w-[82%] ${
+                      message.role === "user"
+                        ? "ml-auto border-sky-200 bg-sky-50"
+                        : message.role === "assistant"
+                          ? "mr-auto border-violet-200 bg-violet-50"
+                          : "mx-auto border-zinc-200 bg-zinc-50"
+                    }`}
                   >
-                    <span className="block text-[10px] uppercase tracking-wider">Step {stepNum}</span>
-                    <span className="mt-1 block">{step.label} ↓</span>
-                  </button>
-                </li>
-              );
-            }
-
-            return (
-              <li className={className} key={step.label}>
-                <span className="block text-[10px] uppercase tracking-wider">Step {stepNum}</span>
-                <span className="mt-1 block">{step.label}</span>
-              </li>
-            );
-          })}
-        </ol>
-        <div className="mt-4 text-sm leading-6 text-sky-950">
-          {!hasOriginalContent ? (
-            <p>还没有原始内容。请先前往 <Link className="font-semibold underline" href="/import">Import</Link> 导入材料。</p>
-          ) : knowledgeCount > 0 ? (
-            <p>已有 Knowledge。你仍可继续从 Rounds 选择其他内容整理，或前往 <Link className="font-semibold underline" href="/search">Search</Link> 检索。</p>
-          ) : proposals.length > 0 ? (
-            <p>Proposal（AI 整理建议）已经生成。请前往 <Link className="font-semibold underline" href="/review">Review</Link> 人工审核。也可以跳过 Analyze，直接手动创建 Knowledge。</p>
-          ) : selectedMessageIds.size > 0 ? (
-            <p>已选择 {selectedMessageIds.size} 条 Messages。下一步点击「Analyze / 生成整理建议」（可选），或直接在 Round 中写 Summary/Note。</p>
-          ) : (
-            <p>浏览下方 Rounds，为每个 Round 写 Summary/Note。需要 AI 辅助时再点击 Analyze（可选）；没有 Proposal 也可以直接手动创建 Knowledge。</p>
-          )}
-        </div>
-      </nav>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-x-3 text-xs">
+                        <span className="font-semibold uppercase tracking-[0.12em] text-zinc-600">
+                          {messageRoleLabels[message.role]}
+                        </span>
+                        <span className="text-zinc-400">#{message.order + 1}</span>
+                      </div>
+                      <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-zinc-800">
+                        {message.content}
+                      </p>
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            ) : (
+              <p className="mt-4 rounded-lg bg-zinc-50 px-4 py-6 text-center text-sm text-zinc-500">
+                暂无原始 Messages，可能是失败导入或空 Conversation。
+              </p>
+            )}
+          </div>
+        ) : null}
+      </section>
 
       <section className="detail-section" id="section-info">
         <div className="detail-section-heading">
-          <p className="detail-kicker">01 · Context</p>
-          <h2 className="detail-title">Conversation 信息</h2>
+          <p className="detail-kicker">Conversation Info</p>
+          <h2 className="detail-title">基本信息</h2>
         </div>
-        <dl className="grid gap-4 rounded-xl border border-zinc-200 bg-white p-5 text-sm sm:grid-cols-3 lg:grid-cols-9">
+        <div>
+        <dl className="mt-4 grid gap-4 rounded-xl border border-zinc-200 bg-white p-5 text-sm sm:grid-cols-3 lg:grid-cols-9">
           <div>
             <dt className="text-zinc-500">Workspace</dt>
             <dd className="mt-1">
@@ -1422,6 +1528,12 @@ export function ConversationDetail({
             </dd>
           </div>
           <div>
+            <dt className="text-zinc-500">Rounds</dt>
+            <dd className="mt-1 font-medium text-zinc-900">
+              {roundCount} 条
+            </dd>
+          </div>
+          <div>
             <dt className="text-zinc-500">Proposals</dt>
             <dd className="mt-1 font-medium text-zinc-900">
               {proposals.length} 条
@@ -1440,64 +1552,44 @@ export function ConversationDetail({
             </dd>
           </div>
         </dl>
-
-        {/* Conversation Summary — part of Conversation Information */}
-        <div className="mt-4 rounded-xl border border-zinc-200 bg-white p-5">
-          <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
-            <div>
-              <h3 className="text-sm font-semibold text-zinc-900">Conversation Summary / 对话总结</h3>
-              <p className="mt-1 text-xs text-zinc-500">整本书摘要，由你确认后保存；Analyzer 只生成 Proposal 草稿。</p>
-            </div>
-            <div className="flex flex-wrap items-center gap-2 text-xs">
-              {summaryModified ? <span className="rounded-full bg-amber-100 px-2.5 py-1 font-semibold text-amber-800">● Modified</span> : summaryLastSaved ? <span className="rounded-full bg-emerald-100 px-2.5 py-1 font-semibold text-emerald-800">● Saved {summaryLastSaved}</span> : null}
-              {proposals.length > 0 ? <span className="rounded-full bg-sky-100 px-2.5 py-1 font-semibold text-sky-800">Proposal Available</span> : null}
-              {!summaryDraft.trim() && !conclusionDraft.trim() && !pendingQuestionsDraft.trim() ? <span className="rounded-full bg-zinc-100 px-2.5 py-1 font-semibold text-zinc-600">Draft</span> : null}
-            </div>
-          </div>
-          <div className="mb-3 flex flex-wrap items-center gap-2">
-            <button className="rounded-md border border-zinc-200 bg-white px-2.5 py-1.5 text-xs font-medium text-zinc-600 hover:bg-zinc-50 disabled:opacity-30" disabled={summaryUndoStack.length === 0} onClick={undoSummary} type="button" title="撤销">↩ Undo</button>
-            <button className="rounded-md border border-zinc-200 bg-white px-2.5 py-1.5 text-xs font-medium text-zinc-600 hover:bg-zinc-50 disabled:opacity-30" disabled={summaryRedoStack.length === 0} onClick={redoSummary} type="button" title="重做">↪ Redo</button>
-            <button className="rounded-md border border-zinc-200 bg-white px-2.5 py-1.5 text-xs font-medium text-zinc-600 hover:bg-zinc-50" onClick={resetSummary} type="button" title="重置为已保存版本">⟳ Reset</button>
-            <span className="text-xs text-zinc-400">| Auto-save on</span>
-          </div>
-          <div className="grid gap-4 lg:grid-cols-3">
-            <label className="text-sm font-semibold">总结<textarea className="mt-2 min-h-28 w-full rounded-lg border border-zinc-200 p-3 font-normal" onChange={(event) => { pushSummaryUndo(event.target.value); setSummaryDraft(event.target.value); setSummaryModified(true); }} value={summaryDraft} /></label>
-            <label className="text-sm font-semibold">最终结论<textarea className="mt-2 min-h-28 w-full rounded-lg border border-zinc-200 p-3 font-normal" onChange={(event) => setConclusionDraft(event.target.value)} value={conclusionDraft} /></label>
-            <label className="text-sm font-semibold">待确认点<textarea className="mt-2 min-h-28 w-full rounded-lg border border-zinc-200 p-3 font-normal" onChange={(event) => setPendingQuestionsDraft(event.target.value)} value={pendingQuestionsDraft} /></label>
-          </div>
-          <div className="mt-4 flex flex-wrap gap-3">
-            <button className="rounded-lg bg-zinc-950 px-4 py-2.5 text-sm font-semibold text-white" onClick={() => { saveConversationSummary(); setSummaryModified(false); setSummaryLastSaved(new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })); }} type="button">确认保存</button>
-            <button className="rounded-lg border border-zinc-200 px-4 py-2.5 text-sm font-semibold" onClick={runConversationSummaryAnalyzer} type="button">可选：从所有 Rounds 生成 AI 整理建议</button>
-          </div>
-        </div>
-
         <div className="mt-4 rounded-xl border border-zinc-200 bg-white p-5">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <h3 className="text-sm font-semibold text-zinc-900">备注 / Note</h3>
+              <h3 className="text-sm font-semibold text-zinc-900">Conversation Note / 对话备注</h3>
               <p className="mt-1 text-xs text-zinc-500">
-                仅记录 Conversation 级上下文，不会写入 Tags、Proposal 或 Knowledge。
+                普通自由备注：记录临时想法、补充说明或私人备注；不作为长期 Context。
               </p>
             </div>
-            {!isEditingNote ? (
+            {conversationNoteVisibility.showPreview ? (
               <button
                 className="rounded-lg border border-zinc-200 px-3 py-2 text-xs font-semibold text-zinc-700 hover:border-zinc-300 hover:text-zinc-950"
-                onClick={() => setIsEditingNote(true)}
+                onClick={() =>
+                  setConversationNoteEditor(
+                    beginNoteEditing(conversationNoteEditor),
+                  )
+                }
                 type="button"
               >
-                编辑备注
+                编辑对话备注
               </button>
             ) : null}
           </div>
-          {isEditingNote ? (
+          {conversationNoteVisibility.showEditor ? (
             <div className="mt-4">
               <textarea
-                aria-label="Conversation 备注"
+                aria-label="Conversation Note / 对话备注"
                 autoFocus
                 className="min-h-28 w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm leading-6 text-zinc-900 outline-none focus:border-zinc-400"
-                onChange={(event) => setNoteDraft(event.target.value)}
-                placeholder="记录背景、后续整理方向或其它私有备注…"
-                value={noteDraft}
+                onChange={(event) =>
+                  setConversationNoteEditor(
+                    updateNoteDraft(
+                      conversationNoteEditor,
+                      event.target.value,
+                    ),
+                  )
+                }
+                placeholder="记录临时想法、补充说明或其它普通备注…"
+                value={conversationNoteEditor.draftValue}
               />
               <div className="mt-3 flex gap-2">
                 <button
@@ -1505,7 +1597,7 @@ export function ConversationDetail({
                   onClick={saveNote}
                   type="button"
                 >
-                  保存备注
+                  保存
                 </button>
                 <button
                   className="rounded-lg border border-zinc-200 px-3 py-2 text-xs font-semibold text-zinc-600 hover:border-zinc-300"
@@ -1518,9 +1610,10 @@ export function ConversationDetail({
             </div>
           ) : (
             <p className="mt-4 whitespace-pre-wrap text-sm leading-6 text-zinc-700">
-              {conversation.note || "暂无备注。"}
+              {conversationNoteEditor.savedValue || "暂无对话备注。"}
             </p>
           )}
+        </div>
         </div>
       </section>
 
@@ -1576,7 +1669,10 @@ export function ConversationDetail({
           {state.versions.length > 0 ? (
             <ol className="mt-4 space-y-3">
               {[...state.versions].reverse().map((version) => {
-                const isAuto = version.name.startsWith("自动恢复点");
+                const isContext = version.kind === "context";
+                const isAuto =
+                  version.kind === "automatic" ||
+                  version.name.startsWith("自动恢复点");
                 return (
                 <li
                   className="rounded-xl border border-zinc-200 bg-white p-4"
@@ -1588,8 +1684,8 @@ export function ConversationDetail({
                         <h3 className="font-semibold text-zinc-950">
                           {version.name}
                         </h3>
-                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${isAuto ? "bg-sky-100 text-sky-700" : "bg-amber-100 text-amber-700"}`}>
-                          {isAuto ? "Auto" : "Manual"}
+                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${isContext ? "bg-violet-100 text-violet-700" : isAuto ? "bg-sky-100 text-sky-700" : "bg-amber-100 text-amber-700"}`}>
+                          {isContext ? "Context" : isAuto ? "Auto" : "Manual"}
                         </span>
                       </div>
                       <p className="mt-1 text-xs text-zinc-500">
@@ -1604,7 +1700,8 @@ export function ConversationDetail({
                         {version.messageCount} Messages
                       </span>
                       <button
-                        className="rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-50"
+                        className="rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-40"
+                        disabled={state.shareSnapshotOwned}
                         onClick={() => restoreSnapshot(version)}
                         type="button"
                       >
@@ -1636,6 +1733,15 @@ export function ConversationDetail({
           </p>
         </div>
         <div className="rounded-xl border border-zinc-200 bg-white p-5">
+          {state.shareSnapshotOwned ? (
+            <p
+              className="mb-4 rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-800"
+              role="status"
+            >
+              此 Conversation 由 immutable share Snapshot 管理。Source 与
+              Messages 只能通过 Conversation Snapshot import 更新。
+            </p>
+          ) : null}
           <textarea
             className="min-h-64 w-full resize-y rounded-lg border border-zinc-200 bg-zinc-50 p-4 font-mono text-sm leading-7 text-zinc-800 outline-none focus:border-zinc-400 focus:bg-white focus:ring-2 focus:ring-zinc-100"
             onChange={(event) => {
@@ -1643,6 +1749,7 @@ export function ConversationDetail({
               setSaveStatus("editing");
             }}
             placeholder="在这里粘贴 ChatGPT、Claude、DeepSeek、Markdown 或其他原始文本…"
+            readOnly={state.shareSnapshotOwned}
             value={draft}
           />
           <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-xs text-zinc-500">
@@ -1673,16 +1780,8 @@ export function ConversationDetail({
       </section>
 
 
-      <div id="section-rounds">
-        {detailMode === "workspace" ? <ConversationWorkspaceMode conversationId={conversationId} onAnalyzeRound={runRoundAnalyzer} /> : <RoundWorkspace conversationId={conversationId} onAnalyzeRound={runRoundAnalyzer} />}
-      </div>
-
       <section className="detail-section">
         <div className="detail-section-heading">
-          <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-            <p className="font-semibold">⚠️ 高级功能区域 — 日常整理不需要进入此区域</p>
-            <p className="mt-1 text-xs">这是底层原始数据。日常阅读、整理、编辑请使用上方的 Rounds。仅在需要核对原始内容或修复数据时使用。</p>
-          </div>
           <p className="detail-kicker">06 · 高级 / 原始数据</p>
           <h2 className="detail-title">Message Timeline / Raw Data</h2>
           <p className="detail-description">
@@ -1742,7 +1841,7 @@ export function ConversationDetail({
             ) : null}
             <button
               className="rounded-lg bg-zinc-950 px-4 py-2.5 text-sm font-medium text-white hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-300"
-              disabled={!draft.trim()}
+              disabled={!draft.trim() || state.shareSnapshotOwned}
               onClick={generateMessages}
               type="button"
             >
@@ -1956,7 +2055,10 @@ export function ConversationDetail({
                               </button>
                               <button
                                 className="rounded-md bg-zinc-950 px-3 py-1.5 text-xs font-medium text-white hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-300"
-                                disabled={!messageDraft.trim()}
+                                disabled={
+                                  !messageDraft.trim() ||
+                                  state.shareSnapshotOwned
+                                }
                                 onClick={() => saveMessageEditing(message.id)}
                                 type="button"
                               >
@@ -1981,7 +2083,10 @@ export function ConversationDetail({
                             </span>
                             <button
                               className="rounded-md border border-zinc-200 bg-white px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-40"
-                              disabled={editingMessageId !== null}
+                              disabled={
+                                editingMessageId !== null ||
+                                state.shareSnapshotOwned
+                              }
                               onClick={() => startEditingMessage(message)}
                               type="button"
                             >
@@ -2182,7 +2287,7 @@ export function ConversationDetail({
               可选：生成 AI 整理建议
             </button>
             <p className="mt-1 text-xs text-zinc-400">不影响原文、Round、Summary；失败也不会丢数据。</p>
-            {providerDetails.id === "demo" ? (
+            {providerDetails.id === "demo" && showAnalyzerFailureInjection ? (
             <button
               className="ml-2 rounded-lg border border-zinc-200 bg-white px-4 py-2.5 text-sm font-medium text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-40"
               disabled={!source || saveStatus === "editing"}

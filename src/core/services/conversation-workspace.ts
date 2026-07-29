@@ -9,6 +9,11 @@ import type { SourceStorage } from "@/core/contracts/source-storage";
 import type { RoundStorage } from "@/core/contracts/round-storage";
 import type { Conversation } from "@/core/entities/conversation";
 import { AssetService } from "@/core/services/asset-service";
+import {
+  collectConversationDependencyIds,
+  type ConversationDependencyIds,
+} from "@/core/services/conversation-referential-integrity";
+import { assertShareSnapshotTranscriptMutable } from "@/core/services/share-snapshot-mutation-guard";
 
 export type ConversationWorkspaceStorages = {
   conversations: ConversationStorage;
@@ -22,20 +27,6 @@ export type ConversationWorkspaceStorages = {
   rounds?: RoundStorage;
 };
 
-function runAssetLifecycle(
-  storage: AssetStorage | undefined,
-  operation: (service: AssetService) => void,
-): void {
-  if (!storage) return;
-
-  try {
-    operation(new AssetService(storage));
-  } catch {
-    // Asset metadata is best-effort for legacy/corrupt optional storage and
-    // must not prevent the canonical Conversation operation from completing.
-  }
-}
-
 export type BatchDeleteResult = {
   deletedConversations: number;
   deletedMessages: number;
@@ -45,40 +36,70 @@ export type BatchDeleteResult = {
   orphanedKnowledgeCount: number;
   /** Knowledge cards that were linked to deleted proposals */
   orphanedKnowledgeIds: string[];
+  sidecarCleanupFailures: string[];
 };
+
+export function deleteConversationSidecarMetadata(
+  dependencyIds: Pick<
+    ConversationDependencyIds,
+    "conversationIds" | "messageIds" | "roundIds" | "sourceIds"
+  >,
+  storages: Pick<ConversationWorkspaceStorages, "analyzerRuns" | "assets">,
+): string[] {
+  const failures: string[] = [];
+  try {
+    storages.analyzerRuns?.removeByDependencies(dependencyIds);
+  } catch (error) {
+    failures.push(
+      `AnalyzerRun cleanup failed: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+
+  if (storages.assets) {
+    const service = new AssetService(storages.assets);
+    for (const conversationId of dependencyIds.conversationIds) {
+      try {
+        service.removeForEntity("conversation", conversationId);
+      } catch (error) {
+        failures.push(
+          `Conversation Asset cleanup failed for ${conversationId}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+    }
+    for (const roundId of dependencyIds.roundIds) {
+      try {
+        service.removeForEntity("round", roundId);
+      } catch (error) {
+        failures.push(
+          `Round Asset cleanup failed for ${roundId}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+    }
+  }
+  return failures;
+}
 
 export function batchDeleteConversationWorkspace(
   conversationIds: string[],
   storages: ConversationWorkspaceStorages,
 ): BatchDeleteResult {
-  const idSet = new Set(conversationIds);
-  let deletedMessages = 0;
-  let deletedRounds = 0;
-  let deletedSources = 0;
-  let deletedProposals = 0;
-
-  // Collect all source IDs for these conversations
-  const allSources = storages.sources.getAll();
-  const sourceIds: string[] = [];
-  for (const source of allSources) {
-    if (source.conversationId && idSet.has(source.conversationId)) {
-      sourceIds.push(source.id);
-    }
-  }
-  const sourceIdSet = new Set(sourceIds);
-
-  // Collect proposal IDs (by conversationId or sourceId)
-  const allProposals = storages.proposals.getAll();
-  const proposalIds: string[] = [];
-  for (const proposal of allProposals) {
-    if (
-      (proposal.conversationId && idSet.has(proposal.conversationId)) ||
-      (proposal.sourceId && sourceIdSet.has(proposal.sourceId))
-    ) {
-      proposalIds.push(proposal.id);
-    }
-  }
-  const proposalIdSet = new Set(proposalIds);
+  const dependencyIds = collectConversationDependencyIds(conversationIds, {
+    conversations: storages.conversations.getAll(),
+    messages: storages.messages.getAll(),
+    rounds: storages.rounds?.getAll() ?? [],
+    sources: storages.sources.getAll(),
+    proposals: storages.proposals.getAll(),
+    conversationVersions: storages.versions?.getAll() ?? [],
+  });
+  const idSet = new Set(dependencyIds.conversationIds);
+  const proposalIdSet = new Set(dependencyIds.proposalIds);
+  const beforeConversationCount = dependencyIds.conversationIds.length;
 
   // Count knowledge cards that will become orphaned — DO NOT delete them
   let orphanedKnowledgeCount = 0;
@@ -90,53 +111,44 @@ export function batchDeleteConversationWorkspace(
     }
   }
 
-  // Count before deletion
-  for (const conversationId of conversationIds) {
-    deletedMessages += storages.messages.getByConversationId(conversationId).length;
-    deletedRounds += storages.rounds?.getByConversationId(conversationId).length ?? 0;
-  }
-  deletedSources = sourceIds.length;
-  deletedProposals = proposalIds.length;
-
-  // Delete proposals (linked by sourceIds and by conversationId)
-  storages.proposals.removeBySourceIds(sourceIds);
-  for (const conversationId of conversationIds) {
-    storages.proposals.removeByConversationId(conversationId);
+  for (const proposalId of dependencyIds.proposalIds) {
+    storages.proposals.remove(proposalId);
   }
 
-  // Delete sources
-  for (const conversationId of conversationIds) {
+  for (const conversationId of dependencyIds.conversationIds) {
     storages.sources.removeByConversationId(conversationId);
-  }
-
-  // Delete messages and rounds
-  for (const conversationId of conversationIds) {
     storages.messages.removeByConversationId(conversationId);
     storages.rounds?.removeByConversationId(conversationId);
-  }
-
-  // Delete analyzer runs, versions, assets
-  for (const conversationId of conversationIds) {
-    storages.analyzerRuns?.removeByConversationId(conversationId);
     storages.versions?.removeByConversationId(conversationId);
-    runAssetLifecycle(storages.assets, (service) => {
-      service.removeForEntity("conversation", conversationId);
-    });
   }
+  const sidecarCleanupFailures = deleteConversationSidecarMetadata(
+    dependencyIds,
+    storages,
+  );
 
-  // Delete conversations
-  for (const conversationId of conversationIds) {
-    storages.conversations.remove(conversationId);
+  storages.conversations.removeMany(dependencyIds.conversationIds);
+
+  // Verify deletion: count conversations that still exist AFTER deletion
+  const afterConversationCount = storages.conversations
+    .getAll()
+    .filter((conversation) => idSet.has(conversation.id)).length;
+
+  // Log mismatch if any conversations were not removed from cache
+  if (afterConversationCount > 0) {
+    console.error(
+      `[batchDeleteConversationWorkspace] ${afterConversationCount} conversation(s) still in cache after removeMany — IDs may not have been found.`,
+    );
   }
 
   return {
-    deletedConversations: conversationIds.length,
-    deletedMessages,
-    deletedRounds,
-    deletedSources,
-    deletedProposals,
+    deletedConversations: beforeConversationCount - afterConversationCount,
+    deletedMessages: dependencyIds.messageIds.length,
+    deletedRounds: dependencyIds.roundIds.length,
+    deletedSources: dependencyIds.sourceIds.length,
+    deletedProposals: dependencyIds.proposalIds.length,
     orphanedKnowledgeCount,
     orphanedKnowledgeIds,
+    sidecarCleanupFailures,
   };
 }
 
@@ -144,31 +156,7 @@ export function deleteConversationWorkspace(
   conversationId: string,
   storages: ConversationWorkspaceStorages,
 ) {
-  const sourceIds = storages.sources
-    .getAll()
-    .filter((source) => source.conversationId === conversationId)
-    .map((source) => source.id);
-  const proposalIds = storages.proposals
-    .getAll()
-    .filter(
-      (proposal) =>
-        proposal.conversationId === conversationId ||
-        (proposal.sourceId ? sourceIds.includes(proposal.sourceId) : false),
-    )
-    .map((proposal) => proposal.id);
-
-  storages.knowledgeCards.removeByProposalIds(proposalIds);
-  storages.proposals.removeBySourceIds(sourceIds);
-  storages.proposals.removeByConversationId(conversationId);
-  storages.sources.removeByConversationId(conversationId);
-  storages.messages.removeByConversationId(conversationId);
-  storages.rounds?.removeByConversationId(conversationId);
-  storages.analyzerRuns?.removeByConversationId(conversationId);
-  storages.versions?.removeByConversationId(conversationId);
-  runAssetLifecycle(storages.assets, (service) => {
-    service.removeForEntity("conversation", conversationId);
-  });
-  storages.conversations.remove(conversationId);
+  return batchDeleteConversationWorkspace([conversationId], storages);
 }
 
 export function duplicateConversationWorkspace(
@@ -181,11 +169,20 @@ export function duplicateConversationWorkspace(
     return null;
   }
 
+  assertShareSnapshotTranscriptMutable(
+    storages.sources,
+    conversationId,
+    "duplicate Conversation transcript",
+  );
+
   const timestamp = new Date().toISOString();
   const duplicatedConversation: Conversation = {
     ...originalConversation,
     id: crypto.randomUUID(),
     title: `${originalConversation.title} Copy`,
+    context: originalConversation.context
+      ? { ...originalConversation.context }
+      : undefined,
     createdAt: timestamp,
     updatedAt: timestamp,
     lastOpenedAt: timestamp,
@@ -211,11 +208,12 @@ export function duplicateConversationWorkspace(
   storages.messages.saveMany(duplicatedMessages);
 
   const roundIdMap = new Map<string, string>();
-  const duplicatedRounds = storages.rounds
-    ?.getByConversationId(conversationId)
-    .map((round) => {
-      const duplicatedRoundId = crypto.randomUUID();
-      roundIdMap.set(round.id, duplicatedRoundId);
+  const originalRounds = storages.rounds?.getByConversationId(conversationId);
+  originalRounds?.forEach((round) => {
+    roundIdMap.set(round.id, crypto.randomUUID());
+  });
+  const duplicatedRounds = originalRounds?.map((round) => {
+      const duplicatedRoundId = roundIdMap.get(round.id) as string;
       return {
         ...round,
         id: duplicatedRoundId,
@@ -224,6 +222,23 @@ export function duplicateConversationWorkspace(
           const duplicatedMessageId = messageIdMap.get(messageId);
           return duplicatedMessageId ? [duplicatedMessageId] : [];
         }),
+        context: round.context
+          ? {
+              ...round.context,
+              sourceRoundId: round.context.sourceRoundId
+                ? roundIdMap.get(round.context.sourceRoundId)
+                : undefined,
+              excludedFields: round.context.excludedFields
+                ? [...round.context.excludedFields]
+                : undefined,
+              overrides: round.context.overrides
+                ? { ...round.context.overrides }
+                : undefined,
+              snapshot: round.context.snapshot
+                ? { ...round.context.snapshot }
+                : undefined,
+            }
+          : undefined,
         createdAt: timestamp,
         updatedAt: timestamp,
       };
@@ -300,13 +315,17 @@ export function duplicateConversationWorkspace(
     });
   });
 
-  runAssetLifecycle(storages.assets, (service) => {
-    service.duplicateForEntity(
-      "conversation",
-      conversationId,
-      duplicatedConversation.id,
-    );
-  });
+  if (storages.assets) {
+    try {
+      new AssetService(storages.assets).duplicateForEntity(
+        "conversation",
+        conversationId,
+        duplicatedConversation.id,
+      );
+    } catch {
+      // Optional legacy metadata must not block canonical duplication.
+    }
+  }
 
   return duplicatedConversation;
 }
