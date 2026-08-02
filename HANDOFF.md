@@ -1,5 +1,46 @@
 # PALOS v1.8 — ChatGPT Conversation Snapshot Handoff
 
+## 2026-08-03 v1.8.1 post-release P2-1 authoritative mutation guard
+
+本轮只关闭 Snapshot-owned Conversation 非 canonical mutation 的跨 tab cached ownership TOCTOU。没有修改 Snapshot metadata/schema、IndexedDB schema/version/store、canonical Snapshot writer、App Restore、legacy migration 或 UI；没有新增产品功能，也没有 commit。
+
+### Audit result
+
+- Source autosave 使用 Detail state + 当前 Source cache；Message regenerate 使用 Detail state + cache；二者此前没有 transaction 内 authoritative check。
+- Message edit、普通 Import append、ChatGPT Export existing/target append、Merge、Duplicate 与 Version Restore 都调用现有 Core mutation guard，但 guard 只读取当前 JS context/cache。
+- Version Restore 的 v1.8.1 transaction 只覆盖 Conversation/Message/Round；其余路径使用多个 background write/最终 cache flush。列出的所有非 canonical transcript mutation 都可在 Tab A cache stale、Tab B 建立 Snapshot ownership 后绕过 pre-write cache check。
+
+### Transaction boundary
+
+- 新增 Core transcript mutation command contract 与默认 IndexedDB writer。writer 先 drain 当前 tab tracked writes，再开启包含 `sources` 与所有 touched canonical stores 的唯一 readwrite transaction。
+- transaction 内先读取 authoritative Sources；Source autosave、Message edit/regenerate、普通 import/export append、Merge 与 Duplicate 只有在全部 guarded Conversation mutable 时才排队写入。Merge 的自动 Version 与 transcript mutation 同 transaction；Duplicate 的 canonical copy records 同 transaction。
+- Conversation Version Restore 保留既有 writer/API，但 transaction 扩展为 `conversations + sources + messages + rounds`；authoritative ownership check、restore baseline validation 与写入位于同一 transaction。
+- 现有 `isShareSnapshotOwnedConversation()` / `assertShareSnapshotTranscriptMutable()` API 保留，继续提供即时 guard；IndexedDB transaction 内的 authoritative guard 是最终 fail-closed 边界。
+- commit 后 reload canonical caches；reload failure 不做补偿性 rollback。canonical Snapshot writer 及 restore/migration authority 不通过此 non-canonical writer，行为保持。
+
+### Regression coverage
+
+- Tab A preload/cache 看到 ordinary mutable Conversation 后，测试直接向 durable IndexedDB 写入 Tab B Snapshot owner；Tab A Message edit 在 `conversations + sources + messages` transaction 内 blocked，Message durable state 与 competing owner 保留。
+- 同一 stale-cache 场景下，Conversation Version Restore 在四-store transaction 内 blocked，Conversation/Message/Round durable state 全部保持。
+- 既有 cache guard、ordinary mutation、append durability、Merge/Duplicate compile path、atomic Restore abort/reload 与 canonical Snapshot persistence 回归继续通过。
+
+### Validation
+
+- 定向：`npm test -- --run tests/share-snapshot-mutation-guard.test.ts tests/share-snapshot-persistence.test.ts` passed（2 files / 74 tests）
+- Full Vitest：`npm test -- --run` passed（20 files / 376 tests）
+- `npm run lint`：passed
+- `npm run build`：passed（19 routes）
+- `git diff --check`：passed
+
+### Remaining risk
+
+- LocalStorage legacy/debug mode 没有 IndexedDB transaction 能力，继续依赖同步 cache guard 与顺序写；默认 IndexedDB 产品路径已关闭本轮 TOCTOU。
+- authoritative writer 当前读取整个 Sources store；replace path 还读取目标 Message/Round store。数据规模显著增长时会延长写锁时间；本轮按限制未新增 index/store。
+- transaction commit 后的 cache reload 可能观察到其它 tab 的更晚提交；reload failure 作为 committed-but-unverified error 返回且不回滚，调用方需 reload/review。
+- 当前 working tree 未 commit；Playwright 未在本轮重跑，v1.8.1 release baseline 为 3/3。
+
+---
+
 ## 2026-08-03 v1.8.1 final release blocker hardening
 
 本轮只关闭 release audit 剩余的两个 blocker：App Data Restore writer failure 后旧 backup 覆盖并发数据，以及 legacy migration timestamp validation 弱于 Restore。没有修改 Snapshot metadata/schema、IndexedDB schema/store、Import/UI、migration 输出设计或 restore transaction primitive；没有新增 lock、journal、功能或 commit。

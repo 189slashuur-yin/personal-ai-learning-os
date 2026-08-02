@@ -607,7 +607,7 @@ describe("IndexedDB storage reliability", () => {
       isLarge: false,
     };
 
-    const result = service.appendToConversation(preview, "target");
+    const result = await service.appendToConversation(preview, "target");
     await flushCachesToIndexedDB();
     clearCaches();
     await preloadAll();
@@ -1387,7 +1387,7 @@ describe("PALOS v1.4.5 — Entity Integrity", () => {
       isLarge: false,
     };
 
-    const result = service.appendToConversation(preview, "target-append");
+    const result = await service.appendToConversation(preview, "target-append");
     expect(result.appendedMessages).toBeGreaterThan(0);
 
     // Messages must have increased
@@ -1437,7 +1437,7 @@ describe("PALOS v1.4.5 — Entity Integrity", () => {
       isLarge: false,
     };
 
-    const result = service.appendToConversation(preview, "target-rounds");
+    const result = await service.appendToConversation(preview, "target-rounds");
     expect(result.appendedRounds).toBeGreaterThanOrEqual(0);
 
     // Rounds must have increased (or stayed same if no rounds generated, which is valid)
@@ -1489,7 +1489,7 @@ describe("PALOS v1.4.5 — Entity Integrity", () => {
       isLarge: false,
     };
 
-    service.appendToConversation(preview, targetId);
+    await service.appendToConversation(preview, targetId);
 
     // Flush and reload to simulate page navigation
     await flushCachesToIndexedDB();
@@ -1694,7 +1694,7 @@ describe("PALOS v1.4.6 — Diagnostic assertions", () => {
       isLarge: false,
     };
 
-    service.appendToConversation(preview, "target-F");
+    await service.appendToConversation(preview, "target-F");
     await settle();
 
     const allMessages = messages.getByConversationId("target-F");
@@ -1726,7 +1726,7 @@ describe("PALOS v1.4.6 — Diagnostic assertions", () => {
       isLarge: false,
     };
 
-    const result = service.appendToConversation(preview, "target-G");
+    const result = await service.appendToConversation(preview, "target-G");
     await settle();
 
     // All rounds for target must have correct conversationId
@@ -1764,7 +1764,7 @@ describe("PALOS v1.4.6 — Diagnostic assertions", () => {
       isLarge: false,
     };
 
-    const appendResult = service.appendToConversation(preview, targetId);
+    const appendResult = await service.appendToConversation(preview, targetId);
     await flushCachesToIndexedDB();
     clearCaches();
     await preloadAll();
@@ -1886,7 +1886,7 @@ describe("PALOS v1.4.6 — Regression tests", () => {
       isLarge: false,
     };
 
-    const result = service.appendToConversation(preview, targetId);
+    const result = await service.appendToConversation(preview, targetId);
     expect(result.appendedMessages).toBeGreaterThan(0);
 
     await flushCachesToIndexedDB();
@@ -1924,7 +1924,7 @@ describe("PALOS v1.4.6 — Regression tests", () => {
       isLarge: false,
     };
 
-    const result = service.appendToConversation(preview, targetId);
+    const result = await service.appendToConversation(preview, targetId);
     // appendedRounds may be 0 if parser didn't produce rounds, but messages should be appended
     expect(result.appendedMessages).toBeGreaterThan(0);
 
@@ -1964,7 +1964,7 @@ describe("PALOS v1.4.6 — Regression tests", () => {
       isLarge: false,
     };
 
-    const appendResult = service.appendToConversation(preview, targetId);
+    const appendResult = await service.appendToConversation(preview, targetId);
     expect(appendResult.appendedMessages).toBeGreaterThan(0);
 
     await flushCachesToIndexedDB();
@@ -2784,7 +2784,7 @@ describe("PALOS v1.4.8 — Canonical Storage Unification", () => {
       isLarge: false,
     };
 
-    const result = service.appendToConversation(preview, targetId);
+    const result = await service.appendToConversation(preview, targetId);
     expect(result.appendedMessages).toBeGreaterThan(0);
 
     await flushCachesToIndexedDB();
@@ -2960,7 +2960,7 @@ describe("PALOS v1.4.9 — Round persistence across flush/clear/reload", () => {
       rounds,
     );
     const previews = service.parseExport(CHATGPT_FIXTURE);
-    const result = service.appendToConversation(previews[0], targetId);
+    const result = await service.appendToConversation(previews[0], targetId);
 
     expect(result.appendedMessages).toBeGreaterThan(0);
     expect(result.appendedRounds).toBeGreaterThan(0);
@@ -4012,7 +4012,7 @@ describe("PALOS v1.6.4 — Existing TXT append durability", () => {
       },
       "txt",
     );
-    const result = new ImportService(
+    const result = await new ImportService(
       conversations,
       sources,
       messages,

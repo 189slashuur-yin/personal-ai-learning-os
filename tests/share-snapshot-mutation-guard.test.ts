@@ -177,7 +177,7 @@ describe("v1.8 immutable share Snapshot mutation guard", () => {
     },
   );
 
-  it("blocks Message editing before any write and preserves ordinary editing", () => {
+  it("blocks Message editing before any write and preserves ordinary editing", async () => {
     const conversations = new InMemoryConversationStorage();
     const sources = new InMemorySourceStorage();
     const messages = new InMemoryMessageStorage();
@@ -185,13 +185,13 @@ describe("v1.8 immutable share Snapshot mutation guard", () => {
     seedMessage(messages);
     sources.save(snapshotSource());
 
-    expect(() =>
+    await expect(
       editMessage("message-original", "Mutated", {
         conversations,
         sources,
         messages,
       }),
-    ).toThrow(ShareSnapshotMutationBlockedError);
+    ).rejects.toThrow(ShareSnapshotMutationBlockedError);
     expect(messages.getByConversationId(conversationId)[0]).toMatchObject({
       id: "message-original",
       content: "Original",
@@ -212,15 +212,15 @@ describe("v1.8 immutable share Snapshot mutation guard", () => {
     });
 
     expect(
-      editMessage("ordinary-message", "Edited normally", {
+      (await editMessage("ordinary-message", "Edited normally", {
         conversations,
         sources,
         messages,
-      })?.message.content,
+      }))?.message.content,
     ).toBe("Edited normally");
   });
 
-  it("blocks generic import and ChatGPT export append paths with zero writes", () => {
+  it("blocks generic import and ChatGPT export append paths with zero writes", async () => {
     const conversations = new InMemoryConversationStorage();
     const sources = new InMemorySourceStorage();
     const messages = new InMemoryMessageStorage();
@@ -322,7 +322,7 @@ describe("v1.8 immutable share Snapshot mutation guard", () => {
         }),
       }),
     ).rejects.toThrow(ShareSnapshotMutationBlockedError);
-    expect(() =>
+    await expect(
       duplicateConversationWorkspace(conversationId, {
         conversations,
         sources,
@@ -330,7 +330,7 @@ describe("v1.8 immutable share Snapshot mutation guard", () => {
         proposals: {} as ProposalStorage,
         knowledgeCards: {} as KnowledgeCardStorage,
       }),
-    ).toThrow(ShareSnapshotMutationBlockedError);
+    ).rejects.toThrow(ShareSnapshotMutationBlockedError);
 
     expect(conversations.getAll()).toHaveLength(1);
     expect(messages.getByConversationId(conversationId)).toEqual([

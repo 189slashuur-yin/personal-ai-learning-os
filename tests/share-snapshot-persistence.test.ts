@@ -13,6 +13,7 @@ import { ConversationVersionService } from "@/core/services/conversation-version
 import { hashChatGPTShareSnapshot } from "@/core/services/chatgpt-share-snapshot-comparator";
 import { prepareChatGPTShareSnapshot } from "@/core/services/chatgpt-share-snapshot-service";
 import { identifyChatGPTShareUrl } from "@/core/services/chatgpt-share-snapshot-url";
+import { editMessage } from "@/core/services/message-editing";
 import { ShareSnapshotMutationBlockedError } from "@/core/services/share-snapshot-mutation-guard";
 import {
   ChatGPTShareSnapshotWorkflow,
@@ -965,7 +966,7 @@ describe("Conversation Version Restore IndexedDB atomicity", () => {
       fakeIndexedDB.transactions.filter(({ mode }) => mode === "readwrite"),
     ).toEqual([
       {
-        storeNames: ["conversations", "messages", "rounds"],
+        storeNames: ["conversations", "sources", "messages", "rounds"],
         mode: "readwrite",
       },
     ]);
@@ -1042,7 +1043,7 @@ describe("Conversation Version Restore IndexedDB atomicity", () => {
       fakeIndexedDB.transactions.filter(({ mode }) => mode === "readwrite"),
     ).toEqual([
       {
-        storeNames: ["conversations", "messages", "rounds"],
+        storeNames: ["conversations", "sources", "messages", "rounds"],
         mode: "readwrite",
       },
     ]);
@@ -1094,6 +1095,108 @@ describe("Conversation Version Restore IndexedDB atomicity", () => {
         restoreConversationId,
       ),
     ).toEqual(restoreFixture().currentMessages);
+  });
+
+  it("fails closed when another tab establishes Snapshot ownership after this tab cached a mutable Conversation", async () => {
+    const fixture = await seedRestoreFixture();
+    expect(new IndexedDBSourceStorage().getAll()).toEqual([]);
+
+    await putStores({
+      sources: [
+        source(2, {
+          id: "cross-tab-snapshot-owner",
+          conversationId: restoreConversationId,
+        }),
+      ],
+    });
+    fakeIndexedDB.transactions.length = 0;
+
+    await expect(
+      editMessage(fixture.currentMessages[0].id, "Stale tab mutation", {
+        conversations: new IndexedDBConversationStorage(),
+        sources: new IndexedDBSourceStorage(),
+        messages: new IndexedDBMessageStorage(),
+      }),
+    ).rejects.toThrow(ShareSnapshotMutationBlockedError);
+
+    expect(
+      fakeIndexedDB.transactions.filter(({ mode }) => mode === "readwrite"),
+    ).toEqual([
+      {
+        storeNames: ["conversations", "sources", "messages"],
+        mode: "readwrite",
+      },
+    ]);
+    expect(await readAll<Message>("messages")).toEqual(fixture.currentMessages);
+    expect(
+      (await readAll<ImportedSource>("sources")).map(({ id }) => id),
+    ).toEqual(["cross-tab-snapshot-owner"]);
+  });
+
+  it("fails closed when another tab removes Snapshot ownership after this tab cached a protected Conversation", async () => {
+    const fixture = await seedRestoreFixture({ snapshotOwned: true });
+    const cachedSources = new IndexedDBSourceStorage().getAll();
+    expect(cachedSources).toHaveLength(1);
+    expect(cachedSources[0]?.shareSnapshot).toBeDefined();
+
+    const ordinarySource = source(2, {
+      id: "cross-tab-ordinary-source",
+      conversationId: restoreConversationId,
+    });
+    delete ordinarySource.shareSnapshot;
+
+    // Simulate Tab B changing durable ownership without refreshing Tab A's cache.
+    await replaceStores({ sources: [ordinarySource] });
+    expect(await readAll<ImportedSource>("sources")).toEqual([ordinarySource]);
+    expect(new IndexedDBSourceStorage().getAll()).toEqual(cachedSources);
+    fakeIndexedDB.transactions.length = 0;
+
+    await expect(
+      editMessage(fixture.currentMessages[0].id, "Stale tab mutation", {
+        conversations: new IndexedDBConversationStorage(),
+        sources: new IndexedDBSourceStorage(),
+        messages: new IndexedDBMessageStorage(),
+      }),
+    ).rejects.toThrow(ShareSnapshotMutationBlockedError);
+
+    expect(
+      fakeIndexedDB.transactions.filter(({ mode }) => mode === "readwrite"),
+    ).toHaveLength(0);
+    expect(await readAll<Message>("messages")).toEqual(fixture.currentMessages);
+    expect(await readAll<ImportedSource>("sources")).toEqual([ordinarySource]);
+  });
+
+  it("rechecks stale-tab Snapshot ownership inside the Version Restore write transaction", async () => {
+    const fixture = await seedRestoreFixture();
+    expect(new IndexedDBSourceStorage().getAll()).toEqual([]);
+
+    await putStores({
+      sources: [
+        source(2, {
+          id: "cross-tab-restore-owner",
+          conversationId: restoreConversationId,
+        }),
+      ],
+    });
+    fakeIndexedDB.transactions.length = 0;
+
+    await expect(restoreVersion()).rejects.toThrow(
+      ShareSnapshotMutationBlockedError,
+    );
+
+    expect(
+      fakeIndexedDB.transactions.filter(({ mode }) => mode === "readwrite"),
+    ).toEqual([
+      {
+        storeNames: ["conversations", "sources", "messages", "rounds"],
+        mode: "readwrite",
+      },
+    ]);
+    expect(await readAll<Conversation>("conversations")).toEqual([
+      fixture.currentConversation,
+    ]);
+    expect(await readAll<Message>("messages")).toEqual(fixture.currentMessages);
+    expect(await readAll<Round>("rounds")).toEqual([fixture.currentRound]);
   });
 });
 

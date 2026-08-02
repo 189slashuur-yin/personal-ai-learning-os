@@ -30,7 +30,11 @@ import { PromptTemplateService } from "@/core/services/prompt-template-service";
 import { ProviderConfigurationService } from "@/core/services/provider-configuration-service";
 import { ProviderService } from "@/core/services/provider-service";
 import { deriveQAPairs } from "@/core/services/qa-pair-service";
-import { isShareSnapshotOwnedConversation } from "@/core/services/share-snapshot-mutation-guard";
+import {
+  executeShareSnapshotTranscriptMutation,
+  isShareSnapshotOwnedConversation,
+  ShareSnapshotMutationBlockedError,
+} from "@/core/services/share-snapshot-mutation-guard";
 import { countWords } from "@/core/services/text-statistics";
 import { TaskService } from "@/core/services/task-service";
 import { WorkspaceService } from "@/core/services/workspace-service";
@@ -459,50 +463,76 @@ export function ConversationDetail({
     }
 
     const autosaveTimer = window.setTimeout(() => {
-      const sourceStorage = createSourceStorage();
-      if (
-        isShareSnapshotOwnedConversation(
+      void (async () => {
+        const sourceStorage = createSourceStorage();
+        if (
+          isShareSnapshotOwnedConversation(
+            sourceStorage,
+            state.conversation.id,
+          )
+        ) {
+          return;
+        }
+
+        const timestamp = new Date().toISOString();
+        const nextSource: ImportedSource = {
+          id: state.source?.id ?? crypto.randomUUID(),
+          conversationId: state.conversation.id,
+          kind: "text",
+          name:
+            state.source?.name ??
+            `${state.conversation.title}-${state.conversation.sourceType}.txt`,
+          content: draft,
+          importedAt: state.source?.importedAt ?? timestamp,
+          updatedAt: timestamp,
+        };
+        const nextConversation: Conversation = {
+          ...state.conversation,
+          updatedAt: timestamp,
+        };
+
+        const conversationStorage = createConversationStorage();
+        await executeShareSnapshotTranscriptMutation(
           sourceStorage,
-          state.conversation.id,
-        )
-      ) {
-        return;
-      }
-
-      const timestamp = new Date().toISOString();
-      const nextSource: ImportedSource = {
-        id: state.source?.id ?? crypto.randomUUID(),
-        conversationId: state.conversation.id,
-        kind: "text",
-        name:
-          state.source?.name ??
-          `${state.conversation.title}-${state.conversation.sourceType}.txt`,
-        content: draft,
-        importedAt: state.source?.importedAt ?? timestamp,
-        updatedAt: timestamp,
-      };
-      const nextConversation: Conversation = {
-        ...state.conversation,
-        updatedAt: timestamp,
-      };
-
-      sourceStorage.save(nextSource);
-      createConversationStorage().save(nextConversation);
-      lastSavedContent.current = draft;
-      setLastSavedAt(timestamp);
-      setSaveStatus("saved");
-      setState((currentState) =>
-        currentState.status === "ready"
-          ? {
-              ...currentState,
-              conversation: nextConversation,
-              source: nextSource,
-              sourceCount: currentState.source
-                ? currentState.sourceCount
-                : currentState.sourceCount + 1,
-            }
-          : currentState,
-      );
+          {
+            conversationIds: [state.conversation.id],
+            operation: "autosave Conversation Source",
+            put: {
+              conversations: [nextConversation],
+              sources: [nextSource],
+            },
+          },
+          () => {
+            sourceStorage.save(nextSource);
+            conversationStorage.save(nextConversation);
+          },
+        );
+        sourceStorage.saveCurrent(nextSource);
+        lastSavedContent.current = draft;
+        setLastSavedAt(timestamp);
+        setSaveStatus("saved");
+        setState((currentState) =>
+          currentState.status === "ready"
+            ? {
+                ...currentState,
+                conversation: nextConversation,
+                source: nextSource,
+                sourceCount: currentState.source
+                  ? currentState.sourceCount
+                  : currentState.sourceCount + 1,
+              }
+            : currentState,
+        );
+      })().catch((error) => {
+        console.error("Conversation Source autosave failed:", error);
+        if (error instanceof ShareSnapshotMutationBlockedError) {
+          setState((currentState) =>
+            currentState.status === "ready"
+              ? { ...currentState, shareSnapshotOwned: true }
+              : currentState,
+          );
+        }
+      });
     }, 800);
 
     return () => window.clearTimeout(autosaveTimer);
@@ -837,7 +867,7 @@ export function ConversationDetail({
     });
   }
 
-  function generateMessages() {
+  async function generateMessages() {
     if (
       state.status !== "ready" ||
       state.shareSnapshotOwned ||
@@ -870,10 +900,34 @@ export function ConversationDetail({
     const messages = profile
       ? importProfileService.parse(draft, state.conversation.id, profile)
       : parseMessagesFromRawText(draft, state.conversation.id);
-    createMessageStorage().replaceByConversationId(
-      state.conversation.id,
-      messages,
-    );
+    const sourceStorage = createSourceStorage();
+    const messageStorage = createMessageStorage();
+    try {
+      await executeShareSnapshotTranscriptMutation(
+        sourceStorage,
+        {
+          conversationIds: [state.conversation.id],
+          operation: "regenerate Conversation Messages",
+          replaceMessages: [
+            {
+              conversationId: state.conversation.id,
+              messages,
+            },
+          ],
+        },
+        () =>
+          messageStorage.replaceByConversationId(
+            state.conversation.id,
+            messages,
+          ),
+      );
+    } catch (error) {
+      console.error("Message regeneration failed:", error);
+      if (error instanceof ShareSnapshotMutationBlockedError) {
+        setState({ ...state, shareSnapshotOwned: true });
+      }
+      return;
+    }
     setSelectedMessageIds(new Set());
     setState({ ...state, messages });
   }
@@ -985,16 +1039,25 @@ export function ConversationDetail({
     setMessageDraft("");
   }
 
-  function saveMessageEditing(messageId: string) {
+  async function saveMessageEditing(messageId: string) {
     if (state.status !== "ready" || state.shareSnapshotOwned) {
       return;
     }
 
-    const result = editMessage(messageId, messageDraft, {
-      conversations: createConversationStorage(),
-      messages: createMessageStorage(),
-      sources: createSourceStorage(),
-    });
+    let result;
+    try {
+      result = await editMessage(messageId, messageDraft, {
+        conversations: createConversationStorage(),
+        messages: createMessageStorage(),
+        sources: createSourceStorage(),
+      });
+    } catch (error) {
+      console.error("Message editing failed:", error);
+      if (error instanceof ShareSnapshotMutationBlockedError) {
+        setState({ ...state, shareSnapshotOwned: true });
+      }
+      return;
+    }
 
     if (!result) {
       return;

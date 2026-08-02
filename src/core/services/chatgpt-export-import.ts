@@ -3,11 +3,11 @@ import type { MessageStorage } from "@/core/contracts/message-storage";
 import type { RoundStorage } from "@/core/contracts/round-storage";
 import type { SourceStorage } from "@/core/contracts/source-storage";
 import type { Message, MessageRole } from "@/core/entities/message";
+import type { Round } from "@/core/entities/round";
 import type { ImportPreview, ParsedMessageDraft } from "@/core/entities/import-parser";
 import { deriveRoundDrafts } from "@/core/services/import-parser-pipeline";
 import { ImportService } from "@/core/services/import-service";
-import { RoundService } from "@/core/services/round-service";
-import { assertShareSnapshotTranscriptMutable } from "@/core/services/share-snapshot-mutation-guard";
+import { executeShareSnapshotTranscriptMutation } from "@/core/services/share-snapshot-mutation-guard";
 
 type ChatGPTNode = {
   id?: string;
@@ -58,6 +58,17 @@ export type ChatGPTImportPreview = ChatGPTConversationPreview & {
   newMessages: number;
   skippedDuplicates: number;
   appendOnly: boolean;
+};
+
+export type ChatGPTAppendToConversationResult = {
+  conversationId: string;
+  appendedMessages: number;
+  appendedRounds: number;
+  skipped: number;
+  unsupported: number;
+  skippedExistingSource?: boolean;
+  messageIds: string[];
+  roundIds: string[];
 };
 
 function isoFromSeconds(value?: number | null) {
@@ -310,11 +321,6 @@ export class ChatGPTExportImportService {
 
     const existing = this.conversations.getById(preview.existingConversationId);
     if (!existing) throw new Error("Existing Conversation is unavailable.");
-    assertShareSnapshotTranscriptMutable(
-      this.sources,
-      existing.id,
-      "append ChatGPT export",
-    );
     const storedMessages = this.messages.getByConversationId(existing.id);
     const externalIds = new Set(storedMessages.flatMap((message) => message.externalMessageId ? [message.externalMessageId] : []));
     const hashes = new Set(storedMessages.map((message) => message.contentHash ?? contentHash(message.role, message.content)));
@@ -337,69 +343,73 @@ export class ChatGPTExportImportService {
       externalMessageId: message.externalMessageId,
       contentHash: message.contentHash,
     }));
-    this.messages.saveMany(newMessages);
-    this.conversations.save({
+    const updatedConversation = {
       ...existing,
       externalSource: "chatgpt",
       externalConversationId: preview.externalConversationId,
       importedAt: existing.importedAt ?? timestamp,
       lastExternalUpdateTime: preview.updateTime,
       updatedAt: newMessages.length ? timestamp : existing.updatedAt,
-    });
+    } as const;
 
     // Generate rounds for appended messages using structured derivation (no text round-trip)
     const appendImportPreview = buildStructuredImportPreview(additions, preview.title);
-    const roundService = new RoundService(this.rounds);
-    let roundsCreated = 0;
-    const createdRoundIds: string[] = [];
-    for (const round of appendImportPreview.rounds) {
+    const startRoundOrder = this.rounds.getByConversationId(existing.id).length + 1;
+    const createdRounds: Round[] = appendImportPreview.rounds.flatMap((round, index) => {
       const mappedIds = round.messageIndexes
         .map((idx: number) => newMessages[idx]?.id)
         .filter(Boolean) as string[];
-      if (mappedIds.length > 0) {
-        const created = roundService.createRound({
-          conversationId: existing.id,
-          title: round.title,
-          question: round.question,
-          answer: round.answer,
-          messageIds: mappedIds,
-        });
-        createdRoundIds.push(created.id);
-        roundsCreated += 1;
-      }
-    }
-    return {
+      if (mappedIds.length === 0) return [];
+      const order = startRoundOrder + index;
+      return [{
+        id: crypto.randomUUID(),
+        conversationId: existing.id,
+        order,
+        title: round.title.trim() || `Round ${order}`,
+        question: round.question.trim(),
+        answer: round.answer.trim(),
+        messageIds: [...new Set(mappedIds)],
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      }];
+    });
+    const mutation = executeShareSnapshotTranscriptMutation(
+      this.sources,
+      {
+        conversationIds: [existing.id],
+        operation: "append ChatGPT export",
+        put: {
+          conversations: [updatedConversation],
+          messages: newMessages,
+          rounds: createdRounds,
+        },
+      },
+      () => {
+        this.messages.saveMany(newMessages);
+        this.conversations.save(updatedConversation);
+        this.rounds.saveMany(createdRounds);
+      },
+    );
+    const result = {
       conversationId: existing.id,
       appended: newMessages.length,
       skipped: preview.messages.length - newMessages.length,
-      roundsCreated,
+      roundsCreated: createdRounds.length,
       messageIds: newMessages.map((message) => message.id),
-      roundIds: createdRoundIds,
+      roundIds: createdRounds.map((round) => round.id),
     };
+    return mutation instanceof Promise ? mutation.then(() => result) : result;
   }
 
   appendToConversation(
     preview: ChatGPTConversationPreview,
     targetConversationId: string,
-  ): {
-    conversationId: string;
-    appendedMessages: number;
-    appendedRounds: number;
-    skipped: number;
-    unsupported: number;
-    skippedExistingSource?: boolean;
-    messageIds: string[];
-    roundIds: string[];
-  } {
+  ):
+    | ChatGPTAppendToConversationResult
+    | Promise<ChatGPTAppendToConversationResult> {
     const timestamp = new Date().toISOString();
     const target = this.conversations.getById(targetConversationId);
     if (!target) throw new Error("Target conversation not found.");
-
-    assertShareSnapshotTranscriptMutable(
-      this.sources,
-      targetConversationId,
-      "append ChatGPT export",
-    );
 
     const existingMessages = this.messages.getByConversationId(targetConversationId);
 
@@ -445,61 +455,27 @@ export class ChatGPTExportImportService {
       externalMessageId: m.externalMessageId,
       contentHash: m.contentHash,
     }));
-    this.messages.saveMany(newMessages);
-
-    // Verify messages are readable after save
-    const savedMessageIds = new Set(
-      this.messages
-        .getByConversationId(target.id)
-        .map((m) => m.id),
-    );
-    const unreadableMessages = newMessages.filter(
-      (m) => !savedMessageIds.has(m.id),
-    );
-    if (unreadableMessages.length > 0) {
-      throw new Error(
-        `appendToConversation: ${unreadableMessages.length} messages not readable after saveMany for conversation ${target.id}`,
-      );
-    }
-
     const appendImportPreview = buildStructuredImportPreview(additions, preview.title);
-
-    const roundService = new RoundService(this.rounds);
-    let appendedRounds = 0;
-    const createdRoundIds: string[] = [];
-    for (const round of appendImportPreview.rounds) {
+    const startRoundOrder = this.rounds.getByConversationId(target.id).length + 1;
+    const createdRounds: Round[] = appendImportPreview.rounds.flatMap((round, index) => {
       const mappedIds = round.messageIndexes
         .map((idx: number) => newMessages[idx]?.id)
         .filter(Boolean) as string[];
-      if (mappedIds.length > 0) {
-        const created = roundService.createRound({
-          conversationId: target.id,
-          title: round.title,
-          question: round.question,
-          answer: round.answer,
-          messageIds: mappedIds,
-        });
-        createdRoundIds.push(created.id);
-        appendedRounds += 1;
-      }
-    }
-
-    // Verify rounds are readable after creation
-    if (appendedRounds > 0) {
-      const readableRoundIds = new Set(
-        this.rounds.getByConversationId(target.id).map((r) => r.id),
-      );
-      const missingRounds = createdRoundIds.filter(
-        (id) => !readableRoundIds.has(id),
-      );
-      if (missingRounds.length > 0) {
-        throw new Error(
-          `appendToConversation: ${missingRounds.length} rounds not readable after creation for conversation ${target.id}`,
-        );
-      }
-    }
-
-    this.sources.save({
+      if (mappedIds.length === 0) return [];
+      const order = startRoundOrder + index;
+      return [{
+        id: crypto.randomUUID(),
+        conversationId: target.id,
+        order,
+        title: round.title.trim() || `Round ${order}`,
+        question: round.question.trim(),
+        answer: round.answer.trim(),
+        messageIds: [...new Set(mappedIds)],
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      }];
+    });
+    const appendedSource = {
       id: crypto.randomUUID(),
       conversationId: target.id,
       kind: "text",
@@ -512,22 +488,66 @@ export class ChatGPTExportImportService {
         .join("\n\n"),
       importedAt: timestamp,
       updatedAt: timestamp,
-    });
-
-    this.conversations.save({
+    } as const;
+    const updatedConversation = {
       ...target,
       importedAt: target.importedAt ?? timestamp,
       updatedAt: timestamp,
-    });
-
-    return {
+    };
+    const mutation = executeShareSnapshotTranscriptMutation(
+      this.sources,
+      {
+        conversationIds: [target.id],
+        operation: "append ChatGPT export",
+        put: {
+          conversations: [updatedConversation],
+          sources: [appendedSource],
+          messages: newMessages,
+          rounds: createdRounds,
+        },
+      },
+      () => {
+        this.messages.saveMany(newMessages);
+        this.rounds.saveMany(createdRounds);
+        this.sources.save(appendedSource);
+        this.conversations.save(updatedConversation);
+      },
+    );
+    const result: ChatGPTAppendToConversationResult = {
       conversationId: target.id,
       appendedMessages: additions.length,
-      appendedRounds,
+      appendedRounds: createdRounds.length,
       skipped,
       unsupported: preview.unsupportedCount,
       messageIds: newMessages.map((message) => message.id),
-      roundIds: createdRoundIds,
+      roundIds: createdRounds.map((round) => round.id),
     };
+    const complete = () => {
+      this.sources.saveCurrent(appendedSource);
+      const savedMessageIds = new Set(
+        this.messages.getByConversationId(target.id).map((message) => message.id),
+      );
+      const unreadableMessages = newMessages.filter(
+        (message) => !savedMessageIds.has(message.id),
+      );
+      if (unreadableMessages.length > 0) {
+        throw new Error(
+          `appendToConversation: ${unreadableMessages.length} messages not readable after authoritative mutation for conversation ${target.id}`,
+        );
+      }
+      const readableRoundIds = new Set(
+        this.rounds.getByConversationId(target.id).map((round) => round.id),
+      );
+      const missingRounds = createdRounds.filter(
+        (round) => !readableRoundIds.has(round.id),
+      );
+      if (missingRounds.length > 0) {
+        throw new Error(
+          `appendToConversation: ${missingRounds.length} rounds not readable after authoritative mutation for conversation ${target.id}`,
+        );
+      }
+      return result;
+    };
+    return mutation instanceof Promise ? mutation.then(complete) : complete();
   }
 }

@@ -15,12 +15,12 @@ PALOS 面向需要与 AI 长期协作的个人用户。产品要解决的不是�
 
 ## 当前阶段
 
-截至 2026-08-03，v1.8.1 hardening candidate 已在 v1.8.0 基线上完成 Snapshot canonical transaction consistency、Snapshot-aware App Restore、explicit legacy migration、shared timestamp semantics、Conversation Restore atomicity、App Restore writer/post-commit no-rollback safety，以及 Migration → Export → Restore → Append 完整链路验证。该路径不修改 Snapshot/IndexedDB schema，不新增 canonical store、journal 或 Import UI。
+截至 2026-08-03，v1.8.1 已发布；当前进入 post-release hardening，并在 working tree 完成 P2-1 authoritative mutation guard。Source autosave、Message edit/regenerate、普通 import/export append、Merge、Duplicate 与 Conversation Version Restore 现在都在实际 IndexedDB write transaction 内读取 authoritative Snapshot ownership 后才写入。该路径不修改 Snapshot/IndexedDB schema，不新增 canonical store、journal、UI 或产品功能。
 
-- Current Version：v1.8.1 hardening candidate（working tree；未 commit、未 tag）
-- Current Focus：最终 release audit 与 clean release commit
-- Automated Status：Vitest 20 files / 374 tests；Playwright 3/3；lint/build/diff-check passed
-- Next Recommended Phase：创建并复核 v1.8.1 release commit/tag；已接受的跨 tab cached mutation guard TOCTOU、Snapshot lifecycle、read UX 与 Search hardening 继续延期
+- Current Version：v1.8.1 released；P2-1 post-release hardening（working tree；未 commit）
+- Current Focus：authoritative mutation guard consistency
+- Automated Status：Vitest 20 files / 376 tests；lint/build/diff-check passed
+- Next Recommended Phase：独立复核 P2-1 working tree；Snapshot lifecycle、read UX 与 Search hardening 仍需另行批准
 
 v1.7 继续把 Conversation 作为 Aggregate Root、Round 作为最小整理单元、Task 作为独立行动实体、Knowledge 作为长期稳定信息。Context 是当前有效状态，不等于所有聊天，也不自动升级为 Knowledge。
 

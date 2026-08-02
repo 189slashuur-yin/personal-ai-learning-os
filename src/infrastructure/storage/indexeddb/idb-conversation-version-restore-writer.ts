@@ -5,8 +5,10 @@ import type {
   ConversationVersionRestoreWriter,
 } from "@/core/contracts/conversation-version-restore-writer";
 import type { Conversation } from "@/core/entities/conversation";
+import type { ImportedSource } from "@/core/entities/imported-source";
 import type { Message } from "@/core/entities/message";
 import type { Round } from "@/core/entities/round";
+import { assertShareSnapshotTranscriptMutableInSources } from "@/core/services/share-snapshot-mutation-guard";
 import {
   drainPendingWritesOrThrow,
   getPendingWriteCount,
@@ -25,6 +27,10 @@ type PersistedRestoreState = {
   conversations: Conversation[];
   messages: Message[];
   rounds: Round[];
+};
+
+type AuthoritativeRestoreState = PersistedRestoreState & {
+  sources: ImportedSource[];
 };
 
 type ValidatedRestore = {
@@ -132,7 +138,7 @@ function withoutMessageIds(round: Round): Omit<Round, "messageIds"> {
 
 function validateRestore(
   command: ConversationVersionRestoreCommand,
-  persisted: PersistedRestoreState,
+  persisted: AuthoritativeRestoreState,
 ): ValidatedRestore {
   const before = normalizeState(command.before);
   const after = normalizeState(command.after);
@@ -147,6 +153,11 @@ function validateRestore(
   assertUniqueIds(after.messages, "restored Message");
   assertUniqueIds(before.rounds, "current Round");
   assertUniqueIds(after.rounds, "restored Round");
+  assertShareSnapshotTranscriptMutableInSources(
+    persisted.sources,
+    conversationId,
+    "restore Conversation version",
+  );
 
   const actualConversation = persisted.conversations.find(
     ({ id }) => id === conversationId,
@@ -231,7 +242,7 @@ async function validateAndWrite(
   const database = await openPalosDB();
   return new Promise<ValidatedRestore>((resolve, reject) => {
     const transaction = database.transaction(
-      ["conversations", "messages", "rounds"],
+      ["conversations", "sources", "messages", "rounds"],
       "readwrite",
     );
     const conversations = transaction
@@ -243,15 +254,19 @@ async function validateAndWrite(
     const rounds = transaction
       .objectStore("rounds")
       .getAll() as IDBRequest<Round[]>;
+    const sources = transaction
+      .objectStore("sources")
+      .getAll() as IDBRequest<ImportedSource[]>;
     let completedReads = 0;
     let validated: ValidatedRestore | null = null;
     let validationError: unknown;
     const handleReadSuccess = () => {
       completedReads += 1;
-      if (completedReads < 3) return;
+      if (completedReads < 4) return;
       try {
         validated = validateRestore(command, {
           conversations: conversations.result,
+          sources: sources.result,
           messages: messages.result,
           rounds: rounds.result,
         });
@@ -280,6 +295,7 @@ async function validateAndWrite(
     conversations.onsuccess = handleReadSuccess;
     messages.onsuccess = handleReadSuccess;
     rounds.onsuccess = handleReadSuccess;
+    sources.onsuccess = handleReadSuccess;
     transaction.oncomplete = () => {
       if (!validated) {
         reject(

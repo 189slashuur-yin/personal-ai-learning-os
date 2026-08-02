@@ -3,7 +3,7 @@ import type { MessageStorage } from "@/core/contracts/message-storage";
 import type { SourceStorage } from "@/core/contracts/source-storage";
 import type { Conversation } from "@/core/entities/conversation";
 import type { Message } from "@/core/entities/message";
-import { assertShareSnapshotTranscriptMutable } from "@/core/services/share-snapshot-mutation-guard";
+import { executeShareSnapshotTranscriptMutation } from "@/core/services/share-snapshot-mutation-guard";
 
 export type MessageEditingStorages = {
   conversations: ConversationStorage;
@@ -16,11 +16,11 @@ export type MessageEditingResult = {
   message: Message;
 };
 
-export function editMessage(
+export async function editMessage(
   messageId: string,
   content: string,
   storages: MessageEditingStorages,
-): MessageEditingResult | null {
+): Promise<MessageEditingResult | null> {
   const nextContent = content.trim();
 
   if (!nextContent) {
@@ -41,12 +41,6 @@ export function editMessage(
     return null;
   }
 
-  assertShareSnapshotTranscriptMutable(
-    storages.sources,
-    conversation.id,
-    "edit Message",
-  );
-
   const timestamp = new Date().toISOString();
   const nextMessage: Message = {
     ...message,
@@ -57,9 +51,22 @@ export function editMessage(
     ...conversation,
     updatedAt: timestamp,
   };
-
-  storages.messages.save(nextMessage);
-  storages.conversations.save(nextConversation);
+  const operation = "edit Message";
+  await executeShareSnapshotTranscriptMutation(
+    storages.sources,
+    {
+      conversationIds: [conversation.id],
+      operation,
+      put: {
+        conversations: [nextConversation],
+        messages: [nextMessage],
+      },
+    },
+    () => {
+      storages.messages.save(nextMessage);
+      storages.conversations.save(nextConversation);
+    },
+  );
 
   return {
     conversation: nextConversation,

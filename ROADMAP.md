@@ -4,11 +4,18 @@
 
 ## Current release
 
-- Current Version：v1.8.1 hardening candidate（working tree；未 commit、未 tag）
-- Phase：v1.8.0 → v1.8.1 reliability and immutable Snapshot hardening
-- Current Focus：最终 release audit 与 clean release commit
-- Automated Status：Vitest 20 files / 374 tests；Playwright 3/3；lint/build/diff-check passed
-- Next Recommended Phase：创建并复核 v1.8.1 release commit/tag；已接受的 cached mutation guard TOCTOU、lifecycle、read UX 与 Search hardening 继续延期
+- Current Version：v1.8.1 released；P2-1 post-release hardening（working tree；未 commit）
+- Phase：v1.8.1 post-release consistency hardening
+- Current Focus：authoritative mutation guard
+- Automated Status：Vitest 20 files / 376 tests；lint/build/diff-check passed
+- Next Recommended Phase：独立复核 P2-1 working tree；lifecycle、read UX 与 Search hardening 继续延期
+
+## v1.8.1 post-release — P2-1 authoritative mutation guard（implemented, uncommitted）
+
+- Source autosave、Message edit/regenerate、普通 import/export append、Merge 与 Duplicate 统一使用包含 authoritative Sources read 的 IndexedDB transcript mutation transaction。
+- Conversation Version Restore transaction 同步纳入 Sources authoritative ownership check。
+- Tab A stale cache / Tab B 建立 Snapshot ownership 的跨 tab 回归验证非 canonical mutation fail closed，durable Conversation/Message/Round 不变。
+- 保留现有 Core mutation guard API 与 canonical Snapshot writer 行为；不修改 Snapshot/IndexedDB schema/store，不新增 UI 或功能。
 
 ## v1.8.1 — Release hardening（candidate）
 
@@ -19,7 +26,7 @@
 - Conversation Version Restore 使用三-store单 transaction，保留新 Message IDs 与 Round.messageIds remap 语义。
 - 端到端自动回归覆盖 legacy v1 → migration → export → restore → append → reload。
 - 未修改 Snapshot/IndexedDB schema、Import workflow，没有新增 store、journal 或产品功能。
-- 当前仍是未提交 working tree；跨 tab cached mutation guard 的 authoritative ownership TOCTOU 已接受为未来 hardening，不是 v1.8.1 blocker。
+- v1.8.1 已发布；release 时接受的 cached mutation guard TOCTOU 已在 P2-1 post-release working tree 关闭。
 
 ## v1.8 — Immutable ChatGPT Conversation Snapshot（release checkpoint complete）
 

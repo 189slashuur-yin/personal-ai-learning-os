@@ -13,7 +13,10 @@ import {
   collectConversationDependencyIds,
   type ConversationDependencyIds,
 } from "@/core/services/conversation-referential-integrity";
-import { assertShareSnapshotTranscriptMutable } from "@/core/services/share-snapshot-mutation-guard";
+import {
+  assertShareSnapshotTranscriptMutable,
+  executeShareSnapshotTranscriptMutation,
+} from "@/core/services/share-snapshot-mutation-guard";
 
 export type ConversationWorkspaceStorages = {
   conversations: ConversationStorage;
@@ -159,10 +162,10 @@ export function deleteConversationWorkspace(
   return batchDeleteConversationWorkspace([conversationId], storages);
 }
 
-export function duplicateConversationWorkspace(
+export async function duplicateConversationWorkspace(
   conversationId: string,
   storages: ConversationWorkspaceStorages,
-): Conversation | null {
+): Promise<Conversation | null> {
   const originalConversation = storages.conversations.getById(conversationId);
 
   if (!originalConversation) {
@@ -188,8 +191,6 @@ export function duplicateConversationWorkspace(
     lastOpenedAt: timestamp,
   };
 
-  storages.conversations.save(duplicatedConversation);
-
   const messageIdMap = new Map<string, string>();
   const duplicatedMessages = storages.messages
     .getByConversationId(conversationId)
@@ -205,8 +206,6 @@ export function duplicateConversationWorkspace(
         updatedAt: timestamp,
       };
     });
-  storages.messages.saveMany(duplicatedMessages);
-
   const roundIdMap = new Map<string, string>();
   const originalRounds = storages.rounds?.getByConversationId(conversationId);
   originalRounds?.forEach((round) => {
@@ -243,23 +242,21 @@ export function duplicateConversationWorkspace(
         updatedAt: timestamp,
       };
     });
-  if (duplicatedRounds) storages.rounds?.saveMany(duplicatedRounds);
-
   const originalSources = storages.sources
     .getAll()
     .filter((source) => source.conversationId === conversationId);
 
   const sourceIdMap = new Map<string, string>();
-  originalSources.forEach((source) => {
+  const duplicatedSources = originalSources.map((source) => {
     const duplicatedSourceId = crypto.randomUUID();
     sourceIdMap.set(source.id, duplicatedSourceId);
-    storages.sources.save({
+    return {
       ...source,
       id: duplicatedSourceId,
       conversationId: duplicatedConversation.id,
       importedAt: timestamp,
       updatedAt: timestamp,
-    });
+    };
   });
 
   const proposalIdMap = new Map<string, string>();
@@ -271,7 +268,7 @@ export function duplicateConversationWorkspace(
         (proposal.sourceId ? sourceIdMap.has(proposal.sourceId) : false),
     );
 
-  originalProposals.forEach((proposal) => {
+  const duplicatedProposals = originalProposals.map((proposal) => {
     const duplicatedProposalId = crypto.randomUUID();
     const duplicatedSourceId = proposal.sourceId
       ? sourceIdMap.get(proposal.sourceId)
@@ -284,7 +281,7 @@ export function duplicateConversationWorkspace(
     );
 
     proposalIdMap.set(proposal.id, duplicatedProposalId);
-    storages.proposals.save({
+    return {
       ...proposal,
       id: duplicatedProposalId,
       sourceId: duplicatedSourceId,
@@ -294,17 +291,17 @@ export function duplicateConversationWorkspace(
       conversationId: duplicatedConversation.id,
       sourceMessageIds: duplicatedMessageIds,
       createdAt: timestamp,
-    });
+    };
   });
 
-  storages.knowledgeCards.getAll().forEach((card) => {
+  const duplicatedKnowledgeCards = storages.knowledgeCards.getAll().flatMap((card) => {
     const duplicatedProposalId = proposalIdMap.get(card.proposalId);
 
     if (!duplicatedProposalId) {
-      return;
+      return [];
     }
 
-    storages.knowledgeCards.save({
+    return [{
       ...card,
       id: crypto.randomUUID(),
       proposalId: duplicatedProposalId,
@@ -312,8 +309,40 @@ export function duplicateConversationWorkspace(
         ? roundIdMap.get(card.sourceRoundId)
         : undefined,
       createdAt: timestamp,
-    });
+    }];
   });
+
+  await executeShareSnapshotTranscriptMutation(
+    storages.sources,
+    {
+      conversationIds: [conversationId],
+      operation: "duplicate Conversation transcript",
+      put: {
+        conversations: [duplicatedConversation],
+        messages: duplicatedMessages,
+        rounds: duplicatedRounds ?? [],
+        sources: duplicatedSources,
+        proposals: duplicatedProposals,
+        knowledgeCards: duplicatedKnowledgeCards,
+      },
+    },
+    () => {
+      storages.conversations.save(duplicatedConversation);
+      storages.messages.saveMany(duplicatedMessages);
+      if (duplicatedRounds) storages.rounds?.saveMany(duplicatedRounds);
+      duplicatedSources.forEach((source) => storages.sources.save(source));
+      duplicatedProposals.forEach((proposal) =>
+        storages.proposals.save(proposal),
+      );
+      duplicatedKnowledgeCards.forEach((card) =>
+        storages.knowledgeCards.save(card),
+      );
+    },
+  );
+  const latestDuplicatedSource = duplicatedSources.at(-1);
+  if (latestDuplicatedSource) {
+    storages.sources.saveCurrent(latestDuplicatedSource);
+  }
 
   if (storages.assets) {
     try {

@@ -27,9 +27,11 @@ import {
 import { WorkspaceService } from "@/core/services/workspace-service";
 import { BrowserWorkspaceStorage } from "@/infrastructure/storage/browser-workspace-storage";
 import { BrowserAppEventLogStorage } from "@/infrastructure/storage/browser-feedback-storage";
-import { RoundService } from "@/core/services/round-service";
 import { ConversationVersionService } from "@/core/services/conversation-version-service";
-import { assertShareSnapshotTranscriptMutable } from "@/core/services/share-snapshot-mutation-guard";
+import {
+  assertShareSnapshotTranscriptMutable,
+  executeShareSnapshotTranscriptMutation,
+} from "@/core/services/share-snapshot-mutation-guard";
 import {
   ChatGPTExportImport,
   type ChatGPTExportImportSharedState,
@@ -329,12 +331,12 @@ export function ImportWorkbench() {
         "merge into Conversation transcript",
       );
 
-      // Auto-snapshot on target before merge
-      new ConversationVersionService({
+      const versionService = new ConversationVersionService({
         conversations: convStorage,
         messages: msgStorage,
         versions: versionStorage,
-      }).createSnapshot(
+      });
+      const automaticVersion = versionService.buildSnapshot(
         mergeTargetId,
         `自动恢复点 — Merge「${mergePreview.sourceTitle}」`,
         `合并来自「${mergePreview.sourceTitle}」的内容前自动创建`,
@@ -344,43 +346,73 @@ export function ImportWorkbench() {
       const sourceMessages = msgStorage.getByConversationId(mergeSourceId);
       const targetMessages = msgStorage.getByConversationId(mergeTargetId);
       const sourceRounds = roundStorage.getByConversationId(mergeSourceId);
+      if (!automaticVersion) {
+        throw new Error("无法创建 Merge 自动恢复点。");
+      }
 
       // Append source messages to target
+      const timestamp = new Date().toISOString();
       const maxOrder = targetMessages.reduce((max, m) => Math.max(max, m.order), -1);
       const appendedMessages = sourceMessages.map((msg, i) => ({
         ...msg,
         id: crypto.randomUUID(),
         conversationId: mergeTargetId,
         order: maxOrder + 1 + i,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+        createdAt: timestamp,
+        updatedAt: timestamp,
       }));
-      msgStorage.replaceByConversationId(mergeTargetId, [...targetMessages, ...appendedMessages]);
       const newMessageIds = appendedMessages.map((m) => m.id);
 
       // Append source rounds to target
-      const roundService = new RoundService(roundStorage);
-      for (const round of sourceRounds) {
+      const startRoundOrder = roundStorage.getByConversationId(mergeTargetId).length + 1;
+      const appendedRounds = sourceRounds.map((round, index) => {
         const mappedMessageIds = round.messageIds.map((mid) => {
           const idx = sourceMessages.findIndex((m) => m.id === mid);
           return idx >= 0 ? newMessageIds[idx] : undefined;
         }).filter(Boolean) as string[];
-        roundService.createRound({
+        const order = startRoundOrder + index;
+        return {
+          id: crypto.randomUUID(),
           conversationId: mergeTargetId,
-          title: round.title,
-          question: round.question,
-          answer: round.answer,
-          messageIds: mappedMessageIds,
-          note: round.note,
-          summary: round.summary,
-        });
-      }
+          order,
+          title: round.title.trim() || `Round ${order}`,
+          question: round.question.trim(),
+          answer: round.answer.trim(),
+          messageIds: [...new Set(mappedMessageIds)],
+          note: round.note?.trim() || undefined,
+          summary: round.summary?.trim() || undefined,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        };
+      });
 
       // Update target conversation timestamp
-      convStorage.save({ ...target, updatedAt: new Date().toISOString() });
-      if (getStorageMode() === "indexedDB") {
-        await flushCachesToIndexedDB();
-      }
+      const updatedTarget = { ...target, updatedAt: timestamp };
+      await executeShareSnapshotTranscriptMutation(
+        sourceStorage,
+        {
+          conversationIds: [mergeSourceId, mergeTargetId],
+          operation: "merge Conversation transcript",
+          put: {
+            conversations: [updatedTarget],
+            rounds: appendedRounds,
+            conversationVersions: [automaticVersion],
+          },
+          replaceMessages: [{
+            conversationId: mergeTargetId,
+            messages: [...targetMessages, ...appendedMessages],
+          }],
+        },
+        () => {
+          versionStorage.save(automaticVersion);
+          msgStorage.replaceByConversationId(mergeTargetId, [
+            ...targetMessages,
+            ...appendedMessages,
+          ]);
+          roundStorage.saveMany(appendedRounds);
+          convStorage.save(updatedTarget);
+        },
+      );
 
       setMergeReport(`✅ 已合并：${appendedMessages.length} Messages · ${sourceRounds.length} Rounds →「${mergePreview.targetTitle}」`);
       setMergePreview(null);
@@ -514,7 +546,7 @@ export function ImportWorkbench() {
           ?.title ?? "未知";
       const result =
         importPath === "existing"
-          ? importService.appendToConversation(effectivePreview, existingTargetId)
+          ? await importService.appendToConversation(effectivePreview, existingTargetId)
           : importService.confirm(effectivePreview, { title, workspaceId });
 
       setImportProgress((current) =>
@@ -526,7 +558,7 @@ export function ImportWorkbench() {
           skippedMessages: result.skippedCount,
         }),
       );
-      if (getStorageMode() === "indexedDB") {
+      if (getStorageMode() === "indexedDB" && importPath === "new") {
         setImportProgress((current) =>
           updateImportOperationProgress(current, { phase: "flushing" }),
         );

@@ -514,7 +514,7 @@ export function ChatGPTExportImport({
       for (let index = 0; index < selectedConversations.length; index += 1) {
         const conv = selectedConversations[index];
         const preview = service().previewImport(conv);
-        const result = service().importConversation(preview, {
+        const result = await service().importConversation(preview, {
           workspaceId,
           forceNew: true,
         });
@@ -804,7 +804,7 @@ export function ChatGPTExportImport({
     try {
       for (let index = 0; index < selectedConversations.length; index += 1) {
         const conv = selectedConversations[index];
-        const result = service().appendToConversation(
+        const result = await service().appendToConversation(
           conv,
           targetConversationId,
         );
@@ -871,8 +871,7 @@ export function ChatGPTExportImport({
       setProgress((current) =>
         updateImportOperationProgress(current, { phase: "flushing" }),
       );
-      await persistIndexedDBImportIfNeeded();
-      lastCompletedAwaitedPhase = "flush";
+      lastCompletedAwaitedPhase = "authoritative mutation transactions";
       recordBulkDiagnostic(operation, "after flush", {
         cacheCounts: getCachedCounts(),
         lastCompletedAwaitedPhase,

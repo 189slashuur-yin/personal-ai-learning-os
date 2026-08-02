@@ -13,6 +13,10 @@ export {
   ConversationVersionRestoreReloadVerificationError,
   IndexedDBConversationVersionRestoreWriter,
 } from "./idb-conversation-version-restore-writer";
+export {
+  ConversationTranscriptMutationReloadError,
+  IndexedDBConversationTranscriptMutationWriter,
+} from "./idb-conversation-transcript-mutation-writer";
 export { IndexedDBConversationStorage } from "./idb-conversation-storage";
 export { IndexedDBMessageStorage } from "./idb-message-storage";
 export { IndexedDBRoundStorage } from "./idb-round-storage";

@@ -2,21 +2,29 @@
 
 ## Current release context
 
-- Current Version：v1.8.1 hardening candidate（working tree；未 commit、未 tag）
-- Current Focus：hardening final release audit 与 clean release commit
-- Automated Status：Vitest 20 files / 374 tests；Playwright 3/3；lint/build/diff-check passed
-- Next Recommended Phase：创建并复核 v1.8.1 release commit/tag；已接受的 cached mutation guard TOCTOU 与其它延期 hardening 需单独批准
+- Current Version：v1.8.1 released；P2-1 post-release hardening（working tree；未 commit）
+- Current Focus：authoritative mutation guard consistency
+- Automated Status：Vitest 20 files / 376 tests；lint/build/diff-check passed
+- Next Recommended Phase：独立复核 P2-1 working tree；Snapshot lifecycle、read UX 与 Search hardening 仍需单独批准
 
 当前架构结论仍受单浏览器、本地优先与浏览器存储边界约束。PALOS 业务数据默认使用 IndexedDB；LocalStorage 保留为轻量配置、UI 偏好、schema/storage metadata 与旧数据迁移来源。v1.0 候选必须先完成范围和验收评审，不能从本文的演进 seam 推定为已批准实现。
 
-## v1.8.1 hardening delta
+## v1.8.1 post-release P2-1 delta
+
+- 新增通用 Conversation transcript mutation command/writer；默认 IndexedDB 路径先 drain 当前 tab pending writes，再在包含 `sources` 与所有 touched canonical stores 的唯一 readwrite transaction 内读取 authoritative Sources、执行 ownership guard，并仅在 mutable 时排队全部写入。
+- Source autosave、Message edit、Message regenerate、普通 Existing text/TXT append、ChatGPT Export existing/target append、Merge 与 Duplicate 共用该 writer；Merge 同时原子保存自动 ConversationVersion，Duplicate 同时保存其 canonical copy records。
+- Conversation Version Restore 保留既有 writer/API 与 Message ID/Round remap 语义，但 write transaction 从 `conversations + messages + rounds` 扩展为 `conversations + sources + messages + rounds`，ownership guard 与 restore writes 位于同一 transaction。
+- Core cache guard API 保留，继续提供即时 UX/fallback 拦截；IndexedDB authoritative writer 是最终 fail-closed 边界。canonical Snapshot writer、App Restore 与 explicit legacy migration 继续使用各自已有 authoritative transaction，不经过 non-canonical writer。
+- commit 后只 reload cache，不执行补偿性 rollback。没有修改 Snapshot metadata/schema、IndexedDB version/store、canonical Snapshot writer、UI 或产品功能。
+
+## v1.8.1 release hardening delta
 
 - Share Snapshot canonical writer 在唯一 `conversations + sources + messages + rounds` readwrite transaction 内完成最终 authoritative validation 与写入；commit 后 verification failure 不执行补偿性 rollback。
 - App Data Restore 在写入前运行 Snapshot-aware lineage/provenance preflight。restore transaction 保持既有 `replaceStores()` 逻辑；writer commit 后的 reload/content/reference verification failure 不再用旧 backup 覆盖其它 tab 的后续写入。
 - legacy Snapshot workflow 保持 `preflight → explicit confirmation → atomic Source metadata migration → reload verification`，并在 preflight/final transaction 中额外锁定 Round baseline。Message order、canonical transcript 与 Round exact-once membership 是 migration/restore/append 的共同 invariant。
-- Conversation Version Restore 默认 IndexedDB writer 使用单个 `conversations + messages + rounds` transaction；新 Message IDs、Round reference remap 与既有 Round enrichment preservation 语义不变。
+- Conversation Version Restore 在 v1.8.1 release 时使用单个 `conversations + messages + rounds` transaction；P2-1 post-release hardening 已将 authoritative Sources 纳入同一 transaction，新 Message IDs、Round reference remap 与既有 Round enrichment preservation 语义不变。
 - 所有 hardening 均复用现有七个 stores；没有 Snapshot metadata/schema、IndexedDB version/store、Import workflow 或 App Restore journal 变更。
-- transcript mutation guard 仍通过当前 tab 的 Source storage view 判断 ownership；跨 tab authoritative Source check 尚未下沉到每个 mutation transaction，已接受为未来 hardening，不作为 v1.8.1 blocker。
+- v1.8.1 release 接受的 cached mutation guard TOCTOU 已由 P2-1 post-release hardening 关闭。
 
 ## v1.8 Conversation Snapshot workflow delta
 
@@ -29,7 +37,7 @@
 - preview 显示 new/append/same/blocked、existing/snapshot/new Message counts、Round extend/create/total impact，以及 Conversation、Message provenance 和 Round enrichment preservation。
 - 输入、target、Workspace、标题或 content kind 改变都会丢弃旧 preview/workflow instance；异步 preview/file read 使用 revision guard，不能用 stale baseline confirm。
 - confirm 仅在 IndexedDB authoritative state 已加载、preview confirmable、baseline 与 target intent 均有效时启用；写入仍由 hardened canonical writer 的单事务与 reload verification 完成。LocalStorage debug mode 不执行 Share Snapshot canonical write。
-- Snapshot-owned Conversation 的通用 Source / Message mutation 统一由 Core ownership guard 阻止；Detail、普通 import/export append、Merge、Duplicate 与 Version Restore 都不能绕过 canonical writer。guard 不下沉到通用 Storage，因此 canonical operation 与权威恢复装载仍可工作。
+- Snapshot-owned Conversation 的通用 Source / Message mutation 统一由 Core ownership guard 阻止；Detail、普通 import/export append、Merge、Duplicate 与 Version Restore 都不能绕过 canonical writer。默认 IndexedDB SourceStorage 暴露 authoritative mutation capability，non-canonical path 在 transaction 内复核 ownership；canonical operation 与权威恢复装载继续走各自 writer，不受影响。
 - 普通 Conversation Version Restore 保留既有“重新生成 Message ID”语义，并按 snapshot/current Message order 将现有 `Round.messageIds` 重映射到恢复后的 canonical Messages；Round 内容、顺序与 enrichment 不变，连续 Restore 和 IndexedDB reload 后引用仍一致。
 - 七个 canonical IndexedDB stores、数据库 schema、Snapshot metadata schema 与 Conversation aggregate boundary 均未改变。
 

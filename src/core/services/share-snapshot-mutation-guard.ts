@@ -1,4 +1,6 @@
 import type { SourceStorage } from "@/core/contracts/source-storage";
+import type { ConversationTranscriptMutationCommand } from "@/core/contracts/conversation-transcript-mutation-writer";
+import type { ImportedSource } from "@/core/entities/imported-source";
 import {
   isChatGPTShareSnapshotMetadata,
   isLegacyChatGPTShareSnapshotMetadata,
@@ -28,12 +30,56 @@ export function isShareSnapshotOwnedConversation(
   );
 }
 
+export function isShareSnapshotOwnedConversationInSources(
+  sources: readonly Readonly<ImportedSource>[],
+  conversationId: string,
+): boolean {
+  return sources.some(
+    (source) =>
+      source.conversationId === conversationId &&
+      (isChatGPTShareSnapshotMetadata(source.shareSnapshot) ||
+        isLegacyChatGPTShareSnapshotMetadata(source.shareSnapshot)),
+  );
+}
+
+export function assertShareSnapshotTranscriptMutableInSources(
+  sources: readonly Readonly<ImportedSource>[],
+  conversationId: string,
+  operation: string,
+): void {
+  if (isShareSnapshotOwnedConversationInSources(sources, conversationId)) {
+    throw new ShareSnapshotMutationBlockedError(conversationId, operation);
+  }
+}
+
 export function assertShareSnapshotTranscriptMutable(
   sources: SourceStorage,
   conversationId: string,
   operation: string,
 ): void {
-  if (isShareSnapshotOwnedConversation(sources, conversationId)) {
-    throw new ShareSnapshotMutationBlockedError(conversationId, operation);
+  assertShareSnapshotTranscriptMutableInSources(
+    sources.getAll(),
+    conversationId,
+    operation,
+  );
+}
+
+export function executeShareSnapshotTranscriptMutation(
+  sources: SourceStorage,
+  command: ConversationTranscriptMutationCommand,
+  fallback: () => void | Promise<void>,
+): void | Promise<void> {
+  for (const conversationId of new Set(command.conversationIds)) {
+    assertShareSnapshotTranscriptMutable(
+      sources,
+      conversationId,
+      command.operation,
+    );
   }
+
+  if (sources.executeAuthoritativeTranscriptMutation) {
+    return sources.executeAuthoritativeTranscriptMutation(command);
+  }
+
+  return fallback();
 }

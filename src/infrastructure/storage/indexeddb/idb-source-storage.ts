@@ -1,4 +1,5 @@
 import type { SourceStorage } from "@/core/contracts/source-storage";
+import type { ConversationTranscriptMutationCommand } from "@/core/contracts/conversation-transcript-mutation-writer";
 import type { ImportedSource } from "@/core/entities/imported-source";
 import {
   clearCurrentSourcePointer,
@@ -7,6 +8,7 @@ import {
 } from "@/infrastructure/storage/flow-pointers";
 import { getSourceCache, setSourceCache } from "./preload";
 import { deleteWhere, persistInBackground, writeOne } from "./database";
+import { IndexedDBConversationTranscriptMutationWriter } from "./idb-conversation-transcript-mutation-writer";
 
 function normalize(source: ImportedSource): ImportedSource {
   return {
@@ -16,6 +18,12 @@ function normalize(source: ImportedSource): ImportedSource {
 }
 
 export class IndexedDBSourceStorage implements SourceStorage {
+  executeAuthoritativeTranscriptMutation(
+    command: ConversationTranscriptMutationCommand,
+  ): Promise<void> {
+    return new IndexedDBConversationTranscriptMutationWriter().execute(command);
+  }
+
   save(source: ImportedSource): void {
     const norm = normalize(source);
     const cache = getSourceCache();

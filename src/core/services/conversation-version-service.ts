@@ -54,6 +54,23 @@ export class ConversationVersionService {
     description: string,
     options: CreateConversationSnapshotOptions = {},
   ): ConversationVersion | null {
+    const version = this.buildSnapshot(
+      conversationId,
+      name,
+      description,
+      options,
+    );
+    if (!version) return null;
+    this.storages.versions.save(version);
+    return version;
+  }
+
+  buildSnapshot(
+    conversationId: string,
+    name: string,
+    description: string,
+    options: CreateConversationSnapshotOptions = {},
+  ): ConversationVersion | null {
     const conversation = this.storages.conversations.getById(conversationId);
     const normalizedName = name.trim();
 
@@ -83,7 +100,6 @@ export class ConversationVersionService {
       contextChanges: options.contextChanges?.map((change) => ({ ...change })),
     };
 
-    this.storages.versions.save(version);
     return version;
   }
 

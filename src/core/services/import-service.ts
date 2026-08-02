@@ -6,7 +6,7 @@ import type { ConversationSourceType } from "@/core/entities/conversation";
 import type { ConversationParserId, ImportPreview } from "@/core/entities/import-parser";
 import type { Message } from "@/core/entities/message";
 import type { Round } from "@/core/entities/round";
-import { assertShareSnapshotTranscriptMutable } from "@/core/services/share-snapshot-mutation-guard";
+import { executeShareSnapshotTranscriptMutation } from "@/core/services/share-snapshot-mutation-guard";
 
 export type ConfirmImportInput = {
   title?: string;
@@ -105,12 +105,6 @@ export class ImportService {
       throw new Error("Target conversation not found.");
     }
 
-    assertShareSnapshotTranscriptMutable(
-      this.sources,
-      conversationId,
-      "append imported transcript",
-    );
-
     const timestamp = new Date().toISOString();
     const existingMessages = this.messages.getByConversationId(conversationId);
     const startOrder =
@@ -141,7 +135,7 @@ export class ImportService {
     }));
 
     const sourceId = crypto.randomUUID();
-    this.sources.save({
+    const appendedSource = {
       id: sourceId,
       conversationId,
       kind: "text",
@@ -149,16 +143,32 @@ export class ImportService {
       content: preview.artifact.content,
       importedAt: timestamp,
       updatedAt: timestamp,
-    });
-    this.messages.saveMany(appendedMessages);
-    this.rounds.saveMany(appendedRounds);
-    this.conversations.save({
+    } as const;
+    const updatedConversation = {
       ...conversation,
       updatedAt: timestamp,
       lastOpenedAt: timestamp,
-    });
-
-    return {
+    };
+    const mutation = executeShareSnapshotTranscriptMutation(
+      this.sources,
+      {
+        conversationIds: [conversationId],
+        operation: "append imported transcript",
+        put: {
+          conversations: [updatedConversation],
+          sources: [appendedSource],
+          messages: appendedMessages,
+          rounds: appendedRounds,
+        },
+      },
+      () => {
+        this.sources.save(appendedSource);
+        this.messages.saveMany(appendedMessages);
+        this.rounds.saveMany(appendedRounds);
+        this.conversations.save(updatedConversation);
+      },
+    );
+    const result = {
       conversationId,
       messageCount: appendedMessages.length,
       roundCount: appendedRounds.length,
@@ -169,5 +179,10 @@ export class ImportService {
       roundIds: appendedRounds.map((round) => round.id),
       skippedCount: 0,
     };
+    const complete = () => {
+      this.sources.saveCurrent(appendedSource);
+      return result;
+    };
+    return mutation instanceof Promise ? mutation.then(complete) : complete();
   }
 }

@@ -205,9 +205,11 @@ export function ConversationList() {
   const importedConversationIds = quickFilterIds.imported;
   const failedImportIds = quickFilterIds.failedImport;
 
-  async function persistAndReload() {
+  async function persistAndReload(authoritativeMutationCommitted = false) {
     if (getStorageMode() === "indexedDB") {
-      await flushCachesToIndexedDB();
+      if (!authoritativeMutationCommitted) {
+        await flushCachesToIndexedDB();
+      }
       clearCaches();
       await ensureIndexedDBLoaded();
     }
@@ -281,11 +283,11 @@ export function ConversationList() {
 
   async function handleDuplicate(conversation: Conversation) {
     try {
-      duplicateConversationWorkspace(
+      await duplicateConversationWorkspace(
         conversation.id,
         createWorkspaceStorages(),
       );
-      await persistAndReload();
+      await persistAndReload(true);
     } catch (error) {
       alert(
         error instanceof Error
