@@ -15,11 +15,12 @@ PALOS 面向需要与 AI 长期协作的个人用户。产品要解决的不是�
 
 ## 当前阶段
 
-截至 2026-07-29，v1.8 immutable ChatGPT Conversation Snapshot core、delta projector、canonical writer、legacy migration、ImportWorkbench workflow integration 与 release hardening 已完成。导入内容必须来自本地 saved HTML 或完整 rendered transcript；来源 identity 可选。Snapshot-owned Conversation 的通用 Source / Message mutation 已由 Core guard 阻止，普通 Conversation Restore 的 Round → Message 引用也会随新 Message IDs 自动更新。该路径不修改 IndexedDB schema，也不新增 canonical store。
+截至 2026-08-03，v1.8.1 hardening candidate 已在 v1.8.0 基线上完成 Snapshot canonical transaction consistency、Snapshot-aware App Restore、explicit legacy migration、shared timestamp semantics、Conversation Restore atomicity、App Restore writer/post-commit no-rollback safety，以及 Migration → Export → Restore → Append 完整链路验证。该路径不修改 Snapshot/IndexedDB schema，不新增 canonical store、journal 或 Import UI。
 
-- Current Version：v1.8 release checkpoint complete（`v1.8.0-rc1`）
-- Current Focus：release documentation closure 与最终产品验收
-- Next Recommended Phase：确认最终 `v1.8.0` release；Snapshot lifecycle、read UX 与 Search hardening 继续留在后续已延期范围
+- Current Version：v1.8.1 hardening candidate（working tree；未 commit、未 tag）
+- Current Focus：最终 release audit 与 clean release commit
+- Automated Status：Vitest 20 files / 374 tests；Playwright 3/3；lint/build/diff-check passed
+- Next Recommended Phase：创建并复核 v1.8.1 release commit/tag；已接受的跨 tab cached mutation guard TOCTOU、Snapshot lifecycle、read UX 与 Search hardening 继续延期
 
 v1.7 继续把 Conversation 作为 Aggregate Root、Round 作为最小整理单元、Task 作为独立行动实体、Knowledge 作为长期稳定信息。Context 是当前有效状态，不等于所有聊天，也不自动升级为 Knowledge。
 

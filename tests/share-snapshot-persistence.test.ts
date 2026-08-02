@@ -3,18 +3,26 @@ import type { Conversation } from "@/core/entities/conversation";
 import type {
   ChatGPTShareSnapshotMetadata,
   ImportedSource,
+  LegacyChatGPTShareSnapshotMetadata,
 } from "@/core/entities/imported-source";
 import { isChatGPTShareSnapshotMetadata } from "@/core/entities/imported-source";
 import type { Message } from "@/core/entities/message";
 import type { Round } from "@/core/entities/round";
 import { shareSnapshotTargetSelectionError } from "@/app/import/chatgpt-share-snapshot-import";
 import { ConversationVersionService } from "@/core/services/conversation-version-service";
+import { hashChatGPTShareSnapshot } from "@/core/services/chatgpt-share-snapshot-comparator";
 import { prepareChatGPTShareSnapshot } from "@/core/services/chatgpt-share-snapshot-service";
+import { identifyChatGPTShareUrl } from "@/core/services/chatgpt-share-snapshot-url";
+import { ShareSnapshotMutationBlockedError } from "@/core/services/share-snapshot-mutation-guard";
 import {
   ChatGPTShareSnapshotWorkflow,
   type ChatGPTShareSnapshotWorkflowStorages,
 } from "@/core/services/chatgpt-share-snapshot-workflow";
-import { AppDataStorage } from "@/infrastructure/storage/app-data-storage";
+import {
+  AppDataRestoreError,
+  AppDataStorage,
+  type AppDataBundle,
+} from "@/infrastructure/storage/app-data-storage";
 import { BrowserMessageStorage } from "@/infrastructure/storage/browser-message-storage";
 import { BrowserSourceStorage } from "@/infrastructure/storage/browser-source-storage";
 import { BrowserTaskStorage } from "@/infrastructure/storage/browser-task-storage";
@@ -29,16 +37,19 @@ import {
 } from "@/infrastructure/storage/indexeddb/database";
 import { IndexedDBConversationStorage } from "@/infrastructure/storage/indexeddb/idb-conversation-storage";
 import { IndexedDBConversationVersionStorage } from "@/infrastructure/storage/indexeddb/idb-conversation-version-storage";
+import { IndexedDBConversationVersionRestoreWriter } from "@/infrastructure/storage/indexeddb/idb-conversation-version-restore-writer";
 import { IndexedDBMessageStorage } from "@/infrastructure/storage/indexeddb/idb-message-storage";
 import { IndexedDBRoundStorage } from "@/infrastructure/storage/indexeddb/idb-round-storage";
 import { IndexedDBShareSnapshotCanonicalWriter } from "@/infrastructure/storage/indexeddb/idb-share-snapshot-canonical-writer";
 import { IndexedDBSourceStorage } from "@/infrastructure/storage/indexeddb/idb-source-storage";
+import { IndexedDBLegacyShareSnapshotMigrationWorkflow } from "@/infrastructure/storage/indexeddb/legacy-share-snapshot-migration-workflow";
 import {
   clearCaches,
   preloadAll,
 } from "@/infrastructure/storage/indexeddb/preload";
 import {
   executeShareSnapshotCanonicalOperation,
+  ShareSnapshotReloadVerificationError,
   type ShareSnapshotCanonicalPlan,
 } from "@/infrastructure/storage/indexeddb/share-snapshot-operation";
 import {
@@ -77,6 +88,7 @@ class AtomicFakeTransaction {
     private readonly storeNames: string[],
     private readonly mode: IDBTransactionMode,
     private readonly fail: boolean,
+    private readonly afterCommit?: () => void,
   ) {
     for (const name of storeNames) {
       const stored = stores.get(name) ?? new Map<string, unknown>();
@@ -106,6 +118,13 @@ class AtomicFakeTransaction {
     this.completeSoon();
   }
 
+  abort(): void {
+    if (this.completed) return;
+    this.completed = true;
+    this.error = new DOMException("transaction aborted", "AbortError");
+    queueMicrotask(() => this.onabort?.());
+  }
+
   private completeSoon(): void {
     queueMicrotask(() => {
       if (this.completed || this.pending > 0) return;
@@ -119,6 +138,7 @@ class AtomicFakeTransaction {
         for (const name of this.storeNames) {
           this.stores.set(name, this.views.get(name) as StoreData);
         }
+        this.afterCommit?.();
       }
       this.oncomplete?.();
     });
@@ -199,7 +219,7 @@ class AtomicFakeDatabase {
     private readonly onTransaction: (
       storeNames: readonly string[],
       mode: IDBTransactionMode,
-    ) => void,
+    ) => (() => void) | undefined,
   ) {}
 
   createObjectStore(name: string): IDBObjectStore {
@@ -212,12 +232,13 @@ class AtomicFakeDatabase {
     mode: IDBTransactionMode = "readonly",
   ): IDBTransaction {
     const names = Array.isArray(storeNames) ? storeNames : [storeNames];
-    this.onTransaction(names, mode);
+    const afterCommit = this.onTransaction(names, mode);
     return new AtomicFakeTransaction(
       this.stores,
       names,
       mode,
       mode === "readwrite" && this.shouldFailReadwrite(),
+      afterCommit,
     ) as unknown as IDBTransaction;
   }
 
@@ -233,6 +254,8 @@ class AtomicFakeIndexedDB {
     mode: IDBTransactionMode;
   }> = [];
   failReadwriteTransactions = 0;
+  beforeNextReadwriteTransaction: (() => void) | null = null;
+  afterNextReadwriteCommit: (() => void) | null = null;
 
   open(): IDBOpenDBRequest {
     const request = new FakeOpenRequest();
@@ -242,6 +265,13 @@ class AtomicFakeIndexedDB {
       return true;
     }, (storeNames, mode) => {
       this.transactions.push({ storeNames: [...storeNames], mode });
+      if (mode !== "readwrite") return undefined;
+      const beforeTransaction = this.beforeNextReadwriteTransaction;
+      this.beforeNextReadwriteTransaction = null;
+      beforeTransaction?.();
+      const afterCommit = this.afterNextReadwriteCommit ?? undefined;
+      this.afterNextReadwriteCommit = null;
+      return afterCommit;
     }) as unknown as IDBDatabase;
     queueMicrotask(() => {
       request.result = database;
@@ -418,6 +448,50 @@ function appendPlan(): ShareSnapshotCanonicalPlan {
   };
 }
 
+function initialPlan(): ShareSnapshotCanonicalPlan {
+  const initialMessages = [
+    message("message-a", "A", 0),
+    message("message-b", "B", 1),
+  ];
+  return {
+    conversation: conversation(),
+    source: source(2),
+    messages: initialMessages,
+    rounds: [
+      round(
+        "round-existing",
+        initialMessages.map(({ id }) => id),
+        1,
+        {
+          question: "A",
+          answer: "B",
+        },
+      ),
+    ],
+  };
+}
+
+function commitPlanFromOtherTab(plan: ShareSnapshotCanonicalPlan): void {
+  const recordsByStore: Record<
+    "conversations" | "sources" | "messages" | "rounds",
+    readonly { id: string }[]
+  > = {
+    conversations: [plan.conversation],
+    sources: [plan.source],
+    messages: plan.messages,
+    rounds: plan.rounds,
+  };
+  for (const [storeName, records] of Object.entries(recordsByStore)) {
+    const store = fakeIndexedDB.stores.get(storeName);
+    if (!store) {
+      throw new Error(`Missing fake IndexedDB store ${storeName}.`);
+    }
+    for (const record of records) {
+      store.set(record.id, record);
+    }
+  }
+}
+
 function assistantExtensionFixture(): {
   storedSource: ImportedSource;
   storedMessages: Message[];
@@ -580,6 +654,164 @@ async function reloadIndexedDBStorages(): Promise<{
   };
 }
 
+async function createValidSnapshotAppDataBundle(): Promise<AppDataBundle> {
+  const workflow = createPhase2FIndexedDBWorkflow();
+  const initialPreview = await workflow.preview({
+    shareUrl: PHASE_2F_SHARE_URL,
+    snapshot: loadPhase2FSavedHtml(
+      "chatgpt-share-snapshot-initial.html",
+    ),
+    newConversation: phase2FConversation(),
+  });
+  const initialResult = await workflow.confirm({
+    previewId: initialPreview.previewId,
+    baselineFingerprint: initialPreview.baselineFingerprint as string,
+  });
+  if (initialResult.status !== "success") {
+    throw new Error("Unable to create initial Snapshot restore fixture.");
+  }
+  const appendPreview = await workflow.preview({
+    shareUrl: PHASE_2F_SHARE_URL,
+    snapshot: loadPhase2FSavedHtml(
+      "chatgpt-share-snapshot-assistant-append.html",
+    ),
+    newConversation: phase2FConversation({
+      id: "snapshot-restore-unused-conversation",
+    }),
+  });
+  const appendResult = await workflow.confirm({
+    previewId: appendPreview.previewId,
+    baselineFingerprint: appendPreview.baselineFingerprint as string,
+  });
+  if (appendResult.status !== "success") {
+    throw new Error("Unable to create appended Snapshot restore fixture.");
+  }
+  return new AppDataStorage().exportData();
+}
+
+function cloneAppDataBundle(bundle: AppDataBundle): AppDataBundle {
+  return JSON.parse(JSON.stringify(bundle)) as AppDataBundle;
+}
+
+async function canonicalRestoreState(): Promise<string> {
+  return JSON.stringify({
+    conversations: await readAll("conversations"),
+    sources: await readAll("sources"),
+    messages: await readAll("messages"),
+    rounds: await readAll("rounds"),
+  });
+}
+
+type LegacyMigrationFixture = {
+  conversations: Conversation[];
+  sources: ImportedSource[];
+  messages: Message[];
+  rounds: Round[];
+  source: ImportedSource;
+};
+
+const legacyMigrationConversationId = "legacy-migration-conversation";
+const legacyMigrationSourceId = "legacy-migration-source";
+const legacyMigrationCapturedAt = "2025-11-02T03:04:05.000Z";
+const legacyMigrationShareId = "legacy-migration-resource";
+const legacyMigrationShareUrl =
+  `https://chatgpt.com/share/${legacyMigrationShareId}`;
+const legacyMigrationTranscript =
+  "User:\nLegacy question\n\nAssistant:\nLegacy answer";
+
+async function legacyMigrationFixture(): Promise<LegacyMigrationFixture> {
+  const drafts = [
+    { role: "user" as const, content: "Legacy question", ordinal: 0 },
+    { role: "assistant" as const, content: "Legacy answer", ordinal: 1 },
+  ];
+  const legacyMetadata: LegacyChatGPTShareSnapshotMetadata = {
+    schemaVersion: 1,
+    shareId: legacyMigrationShareId,
+    normalizedShareUrl: legacyMigrationShareUrl,
+    snapshotHash: await hashChatGPTShareSnapshot(drafts),
+    snapshotMessageCount: drafts.length,
+    capturedAt: legacyMigrationCapturedAt,
+    parserVersion: "1.0.0",
+    inputKind: "pasted-text",
+    hashAlgorithm: "sha256-json-role-content-v1",
+  };
+  const legacyConversation = conversation({
+    id: legacyMigrationConversationId,
+    title: "Legacy migration",
+  });
+  const legacySource: ImportedSource = {
+    id: legacyMigrationSourceId,
+    conversationId: legacyMigrationConversationId,
+    kind: "text",
+    name: "Legacy Share Snapshot",
+    content: legacyMigrationTranscript,
+    importedAt: "2025-11-02T03:04:06.000Z",
+    updatedAt: "2025-11-02T03:04:07.000Z",
+    shareSnapshot: legacyMetadata,
+  };
+  const legacyMessages = drafts.map(
+    (draft): Message => ({
+      id: `legacy-migration-message-${draft.ordinal}`,
+      conversationId: legacyMigrationConversationId,
+      role: draft.role,
+      content: draft.content,
+      order: draft.ordinal,
+      createdAt: legacyMigrationCapturedAt,
+      updatedAt: legacyMigrationCapturedAt,
+      sourceId: legacyMigrationSourceId,
+      sourceOrdinal: draft.ordinal,
+    }),
+  );
+  const legacyRounds: Round[] = [
+    {
+      id: "legacy-migration-round-1",
+      conversationId: legacyMigrationConversationId,
+      order: 1,
+      title: "Legacy Round 1",
+      question: drafts[0].content,
+      answer: drafts[1].content,
+      messageIds: legacyMessages.map(({ id }) => id),
+      createdAt: legacyMigrationCapturedAt,
+      updatedAt: legacyMigrationCapturedAt,
+    },
+  ];
+  return {
+    conversations: [legacyConversation],
+    sources: [legacySource],
+    messages: legacyMessages,
+    rounds: legacyRounds,
+    source: legacySource,
+  };
+}
+
+async function seedLegacyMigrationFixture(
+  fixture: LegacyMigrationFixture,
+): Promise<void> {
+  await replaceStores({
+    conversations: fixture.conversations,
+    sources: fixture.sources,
+    messages: fixture.messages,
+    rounds: fixture.rounds,
+  });
+  fakeIndexedDB.transactions.length = 0;
+}
+
+async function legacyMigrationCanonicalState(): Promise<string> {
+  return JSON.stringify({
+    conversations: await readAll("conversations"),
+    sources: await readAll("sources"),
+    messages: await readAll("messages"),
+    rounds: await readAll("rounds"),
+  });
+}
+
+function legacyMigrationWorkflow(): IndexedDBLegacyShareSnapshotMigrationWorkflow {
+  let previewSequence = 0;
+  return new IndexedDBLegacyShareSnapshotMigrationWorkflow(
+    () => `legacy-migration-preview-${++previewSequence}`,
+  );
+}
+
 let fakeIndexedDB: AtomicFakeIndexedDB;
 let localStorage: FakeLocalStorage;
 
@@ -600,6 +832,756 @@ beforeEach(async () => {
     },
   });
   await preloadAll();
+});
+
+describe("Conversation Version Restore IndexedDB atomicity", () => {
+  const restoreConversationId = "conversation-version-atomic";
+
+  function restoreFixture() {
+    const currentConversation = conversation({
+      id: restoreConversationId,
+      title: "Current title",
+    });
+    const snapshotConversation = {
+      ...currentConversation,
+      title: "Checkpoint title",
+      summary: "Checkpoint summary",
+    };
+    const currentMessages = [
+      message("restore-current-user", "Current question", 0, {
+        conversationId: restoreConversationId,
+        sourceId: undefined,
+        sourceOrdinal: undefined,
+      }),
+      message("restore-current-assistant", "Current answer", 1, {
+        conversationId: restoreConversationId,
+        sourceId: undefined,
+        sourceOrdinal: undefined,
+      }),
+    ];
+    const snapshotMessages = [
+      message("restore-snapshot-user", "Checkpoint question", 0, {
+        conversationId: restoreConversationId,
+        sourceId: undefined,
+        sourceOrdinal: undefined,
+      }),
+      message("restore-snapshot-assistant", "Checkpoint answer", 1, {
+        conversationId: restoreConversationId,
+        sourceId: undefined,
+        sourceOrdinal: undefined,
+      }),
+    ];
+    const currentRound = round(
+      "restore-stable-round",
+      currentMessages.map(({ id }) => id),
+      4,
+      {
+        conversationId: restoreConversationId,
+        title: "Preserved title",
+        question: "Preserved question",
+        answer: "Preserved answer",
+        note: "Preserved note",
+        summary: "Preserved summary",
+        context: {
+          inheritanceMode: "exclude",
+          excludedFields: ["decisions"],
+          snapshot: { currentState: "Preserved context" },
+          confirmedAt: now,
+        },
+      },
+    );
+    return {
+      currentConversation,
+      currentMessages,
+      currentRound,
+      version: {
+        id: "restore-atomic-version",
+        conversationId: restoreConversationId,
+        name: "Atomic checkpoint",
+        description: "",
+        createdAt: now,
+        sourceVersion: 1,
+        messageCount: snapshotMessages.length,
+        snapshotData: {
+          conversation: snapshotConversation,
+          messages: snapshotMessages,
+        },
+      },
+    };
+  }
+
+  async function seedRestoreFixture(options?: {
+    snapshotOwned?: boolean;
+  }): Promise<ReturnType<typeof restoreFixture>> {
+    const fixture = restoreFixture();
+    await replaceStores({
+      conversations: [fixture.currentConversation],
+      sources: options?.snapshotOwned
+        ? [
+            source(2, {
+              id: "restore-snapshot-owner",
+              conversationId: restoreConversationId,
+            }),
+          ]
+        : [],
+      messages: fixture.currentMessages,
+      rounds: [fixture.currentRound],
+      "conversation-versions": [fixture.version],
+    });
+    clearCaches();
+    await preloadAll();
+    fakeIndexedDB.transactions.length = 0;
+    return fixture;
+  }
+
+  async function restoreVersion() {
+    const conversations = new IndexedDBConversationStorage();
+    const messages = new IndexedDBMessageStorage();
+    const rounds = new IndexedDBRoundStorage();
+    const result = await new ConversationVersionService({
+      conversations,
+      messages,
+      versions: new IndexedDBConversationVersionStorage(),
+    }).restoreSnapshot(
+      restoreConversationId,
+      "restore-atomic-version",
+      {
+        sources: new IndexedDBSourceStorage(),
+        rounds,
+        writer: new IndexedDBConversationVersionRestoreWriter(),
+      },
+    );
+    return { conversations, messages, rounds, result };
+  }
+
+  it("commits Conversation, Message, and Round replacement in one transaction and verifies reloaded references", async () => {
+    const fixture = await seedRestoreFixture();
+
+    const { conversations, messages, rounds, result } =
+      await restoreVersion();
+
+    expect(result).not.toBeNull();
+    expect(
+      fakeIndexedDB.transactions.filter(({ mode }) => mode === "readwrite"),
+    ).toEqual([
+      {
+        storeNames: ["conversations", "messages", "rounds"],
+        mode: "readwrite",
+      },
+    ]);
+    expect(result?.conversation).toMatchObject({
+      id: restoreConversationId,
+      title: "Checkpoint title",
+      summary: "Checkpoint summary",
+    });
+    expect(result?.messages.map(({ id }) => id)).not.toEqual(
+      fixture.currentMessages.map(({ id }) => id),
+    );
+    expect(result?.messages.map(({ content }) => content)).toEqual([
+      "Checkpoint question",
+      "Checkpoint answer",
+    ]);
+    const restoredMessageIds = result?.messages.map(({ id }) => id) ?? [];
+    expect(result?.rounds).toEqual([
+      {
+        ...fixture.currentRound,
+        messageIds: restoredMessageIds,
+      },
+    ]);
+    expect(conversations.getById(restoreConversationId)).toEqual(
+      result?.conversation,
+    );
+    expect(messages.getByConversationId(restoreConversationId)).toEqual(
+      result?.messages,
+    );
+    expect(rounds.getByConversationId(restoreConversationId)).toEqual(
+      result?.rounds,
+    );
+
+    const durableMessageIds = new Set(
+      (await readAll<Message>("messages"))
+        .filter(
+          ({ conversationId }) =>
+            conversationId === restoreConversationId,
+        )
+        .map(({ id }) => id),
+    );
+    const [durableRound] = (await readAll<Round>("rounds")).filter(
+      ({ conversationId }) => conversationId === restoreConversationId,
+    );
+    expect(
+      durableRound?.messageIds.every((messageId) =>
+        durableMessageIds.has(messageId),
+      ),
+    ).toBe(true);
+  });
+
+  it("leaves all three stores and caches unchanged when the transaction aborts", async () => {
+    await seedRestoreFixture();
+    const conversations = new IndexedDBConversationStorage();
+    const messages = new IndexedDBMessageStorage();
+    const rounds = new IndexedDBRoundStorage();
+    const durableBefore = {
+      conversations: await readAll<Conversation>("conversations"),
+      messages: await readAll<Message>("messages"),
+      rounds: await readAll<Round>("rounds"),
+    };
+    const cacheBefore = {
+      conversation: conversations.getById(restoreConversationId),
+      messages: messages.getByConversationId(restoreConversationId),
+      rounds: rounds.getByConversationId(restoreConversationId),
+    };
+    fakeIndexedDB.transactions.length = 0;
+    fakeIndexedDB.failReadwriteTransactions = 1;
+
+    await expect(restoreVersion()).rejects.toThrow(
+      "forced transaction failure",
+    );
+
+    expect(
+      fakeIndexedDB.transactions.filter(({ mode }) => mode === "readwrite"),
+    ).toEqual([
+      {
+        storeNames: ["conversations", "messages", "rounds"],
+        mode: "readwrite",
+      },
+    ]);
+    expect(await readAll<Conversation>("conversations")).toEqual(
+      durableBefore.conversations,
+    );
+    expect(await readAll<Message>("messages")).toEqual(
+      durableBefore.messages,
+    );
+    expect(await readAll<Round>("rounds")).toEqual(durableBefore.rounds);
+    expect({
+      conversation: conversations.getById(restoreConversationId),
+      messages: messages.getByConversationId(restoreConversationId),
+      rounds: rounds.getByConversationId(restoreConversationId),
+    }).toEqual(cacheBefore);
+  });
+
+  it("supports consecutive atomic restores and remaps current Round references each time", async () => {
+    await seedRestoreFixture();
+
+    const first = await restoreVersion();
+    const second = await restoreVersion();
+
+    expect(first.result).not.toBeNull();
+    expect(second.result).not.toBeNull();
+    expect(second.result?.messages.map(({ id }) => id)).not.toEqual(
+      first.result?.messages.map(({ id }) => id),
+    );
+    expect(second.result?.rounds[0].messageIds).toEqual(
+      second.result?.messages.map(({ id }) => id),
+    );
+    expect(
+      fakeIndexedDB.transactions.filter(({ mode }) => mode === "readwrite"),
+    ).toHaveLength(2);
+  });
+
+  it("blocks Snapshot-owned Conversation before opening a restore write transaction", async () => {
+    await seedRestoreFixture({ snapshotOwned: true });
+
+    await expect(restoreVersion()).rejects.toThrow(
+      ShareSnapshotMutationBlockedError,
+    );
+
+    expect(
+      fakeIndexedDB.transactions.filter(({ mode }) => mode === "readwrite"),
+    ).toHaveLength(0);
+    expect(
+      new IndexedDBMessageStorage().getByConversationId(
+        restoreConversationId,
+      ),
+    ).toEqual(restoreFixture().currentMessages);
+  });
+});
+
+describe("Legacy Share Snapshot IndexedDB migration workflow", () => {
+  it("requires explicit confirmation, migrates atomically, reload-verifies, and then returns noop", async () => {
+    const fixture = await legacyMigrationFixture();
+    await seedLegacyMigrationFixture(fixture);
+    const workflow = legacyMigrationWorkflow();
+    const before = await legacyMigrationCanonicalState();
+    const sourceBefore = structuredClone(fixture.source);
+    const messagesBefore = structuredClone(fixture.messages);
+    fakeIndexedDB.transactions.length = 0;
+
+    const declinedPreflight = await workflow.preflight(
+      legacyMigrationSourceId,
+    );
+
+    expect(declinedPreflight).toMatchObject({
+      status: "migrated",
+      phase: "preflight",
+      confirmable: true,
+      sourceId: legacyMigrationSourceId,
+      conversationId: legacyMigrationConversationId,
+    });
+    expect(
+      fakeIndexedDB.transactions.filter(({ mode }) => mode === "readwrite"),
+    ).toHaveLength(0);
+    expect(await legacyMigrationCanonicalState()).toBe(before);
+    const declined = await workflow.confirm({
+      previewId: declinedPreflight.previewId,
+      confirmed: false,
+    });
+    expect(declined).toMatchObject({
+      status: "blocked",
+      reason: "confirmation-required",
+    });
+    expect(await legacyMigrationCanonicalState()).toBe(before);
+
+    const confirmedPreflight = await workflow.preflight(
+      legacyMigrationSourceId,
+    );
+    expect(confirmedPreflight.status).toBe("migrated");
+    fakeIndexedDB.transactions.length = 0;
+    const migrated = await workflow.confirm({
+      previewId: confirmedPreflight.previewId,
+      confirmed: true,
+    });
+
+    expect(migrated).toMatchObject({
+      status: "migrated",
+      phase: "committed",
+      verification: {
+        sourceId: legacyMigrationSourceId,
+        conversationId: legacyMigrationConversationId,
+        snapshotSequence: 1,
+        sourceIdPreserved: true,
+        messageIdsPreserved: true,
+        messageProvenancePreserved: true,
+        transcriptPreserved: true,
+        capturedAtPreserved: true,
+        pendingWriteCount: 0,
+      },
+    });
+    expect(
+      fakeIndexedDB.transactions.filter(({ mode }) => mode === "readwrite"),
+    ).toEqual([
+      {
+        storeNames: ["conversations", "sources", "messages", "rounds"],
+        mode: "readwrite",
+      },
+    ]);
+    const [reloadedSource] = await readAll<ImportedSource>("sources");
+    const reloadedMessages = await readAll<Message>("messages");
+    expect(reloadedSource).toMatchObject({
+      id: sourceBefore.id,
+      conversationId: sourceBefore.conversationId,
+      content: sourceBefore.content,
+      importedAt: sourceBefore.importedAt,
+      updatedAt: sourceBefore.updatedAt,
+      shareSnapshot: {
+        schemaVersion: 2,
+        capturedAt: legacyMigrationCapturedAt,
+        snapshotSequence: 1,
+      },
+    });
+    expect(reloadedSource.shareSnapshot).not.toHaveProperty(
+      "previousSnapshotSourceId",
+    );
+    expect(reloadedSource.shareSnapshot).not.toHaveProperty(
+      "normalizedShareUrl",
+    );
+    expect(reloadedSource.shareSnapshot).not.toHaveProperty("shareId");
+    expect(reloadedMessages).toEqual(messagesBefore);
+
+    fakeIndexedDB.transactions.length = 0;
+    const noop = await workflow.preflight(legacyMigrationSourceId);
+    expect(noop).toMatchObject({
+      status: "noop",
+      phase: "preflight",
+      confirmable: false,
+      sourceId: legacyMigrationSourceId,
+    });
+    expect(
+      fakeIndexedDB.transactions.filter(({ mode }) => mode === "readwrite"),
+    ).toHaveLength(0);
+  });
+
+  it("migrates, exports, restores, appends, and reload-verifies a legacy v1 Snapshot", async () => {
+    const fixture = await legacyMigrationFixture();
+    await seedLegacyMigrationFixture(fixture);
+    const workflow = legacyMigrationWorkflow();
+    const preflight = await workflow.preflight(legacyMigrationSourceId);
+    expect(preflight.status).toBe("migrated");
+    const migration = await workflow.confirm({
+      previewId: preflight.previewId,
+      confirmed: true,
+    });
+    expect(migration.status).toBe("migrated");
+
+    const storage = new AppDataStorage();
+    const bundle = await storage.exportData();
+    const migratedSource = bundle.indexedDB?.sources?.find(
+      ({ id }) => id === legacyMigrationSourceId,
+    );
+    expect(migratedSource).toMatchObject({
+      importedAt: "2025-11-02T03:04:06.000Z",
+      updatedAt: "2025-11-02T03:04:07.000Z",
+      shareSnapshot: {
+        schemaVersion: 2,
+        capturedAt: legacyMigrationCapturedAt,
+        snapshotSequence: 1,
+      },
+    });
+    expect(migratedSource?.importedAt).not.toBe(
+      migratedSource?.shareSnapshot?.capturedAt,
+    );
+    expect(migratedSource?.updatedAt).not.toBe(migratedSource?.importedAt);
+
+    const restorePreview = await storage.previewRestore(
+      JSON.stringify(bundle),
+    );
+    expect(restorePreview.snapshotPreflight).toMatchObject({
+      status: "valid",
+      snapshotSourceCount: 1,
+      resourceCount: 1,
+    });
+    await replaceStores({
+      conversations: [],
+      sources: [],
+      messages: [],
+      rounds: [],
+      proposals: [],
+      "knowledge-cards": [],
+      "conversation-versions": [],
+    });
+
+    const restored = await storage.importData(bundle, []);
+
+    expect("status" in restored).toBe(false);
+    clearCaches();
+    await preloadAll();
+    expect(
+      (await readAll<ImportedSource>("sources")).find(
+        ({ id }) => id === legacyMigrationSourceId,
+      ),
+    ).toEqual(migratedSource);
+    expect(await readAll<Message>("messages")).toEqual(fixture.messages);
+    expect(await readAll<Round>("rounds")).toEqual(fixture.rounds);
+
+    const appendWorkflow = indexedDBWorkflow();
+    const appendPreview = await appendWorkflow.preview({
+      shareUrl: legacyMigrationShareUrl,
+      snapshot: {
+        kind: "pasted-text",
+        content:
+          `${legacyMigrationTranscript}\n\n` +
+          "User:\nLegacy follow-up\n\nAssistant:\nLegacy follow-up answer",
+      },
+      newConversation: conversation({
+        id: "legacy-migration-unused-conversation",
+      }),
+      target: {
+        kind: "existing",
+        conversationId: legacyMigrationConversationId,
+      },
+    });
+    expect(appendPreview).toMatchObject({
+      status: "append",
+      confirmable: true,
+      summary: {
+        existingMessageCount: 2,
+        snapshotMessageCount: 4,
+        newMessageCount: 2,
+        existingRoundCount: 1,
+        newRoundCount: 1,
+      },
+    });
+
+    const appended = await appendWorkflow.confirm({
+      previewId: appendPreview.previewId,
+      baselineFingerprint: appendPreview.baselineFingerprint as string,
+    });
+    expect(appended).toMatchObject({
+      status: "success",
+      mode: "append",
+    });
+
+    clearCaches();
+    await preloadAll();
+    const reloadedSources = await readAll<ImportedSource>("sources");
+    const reloadedMessages = await readAll<Message>("messages");
+    const reloadedRounds = await readAll<Round>("rounds");
+    const head = reloadedSources.find(
+      ({ id }) => id !== legacyMigrationSourceId,
+    );
+    expect(head?.shareSnapshot).toMatchObject({
+      schemaVersion: 2,
+      snapshotSequence: 2,
+      previousSnapshotSourceId: legacyMigrationSourceId,
+      snapshotMessageCount: 4,
+    });
+    expect(reloadedMessages.map(({ order }) => order)).toEqual([0, 1, 2, 3]);
+    expect(reloadedMessages.map(({ sourceOrdinal }) => sourceOrdinal)).toEqual([
+      0, 1, 2, 3,
+    ]);
+    expect(reloadedRounds).toHaveLength(2);
+    const membership = new Map(
+      reloadedMessages.map(({ id }) => [id, 0]),
+    );
+    for (const round of reloadedRounds) {
+      for (const messageId of round.messageIds) {
+        membership.set(messageId, (membership.get(messageId) ?? 0) + 1);
+      }
+    }
+    expect([...membership.values()]).toEqual([1, 1, 1, 1]);
+  });
+
+  it.each([
+    {
+      label: "URL normalization failure",
+      reason: "invalid-url-normalization",
+      mutate(fixture: LegacyMigrationFixture) {
+        const metadata =
+          fixture.source
+            .shareSnapshot as LegacyChatGPTShareSnapshotMetadata;
+        fixture.source = {
+          ...fixture.source,
+          shareSnapshot: {
+            ...metadata,
+            normalizedShareUrl: `${metadata.normalizedShareUrl}?legacy=1`,
+          },
+        };
+        fixture.sources[0] = fixture.source;
+      },
+    },
+    {
+      label: "unsupported hash algorithm",
+      reason: "unsupported-hash-algorithm",
+      mutate(fixture: LegacyMigrationFixture) {
+        fixture.source = {
+          ...fixture.source,
+          shareSnapshot: {
+            ...fixture.source
+              .shareSnapshot as LegacyChatGPTShareSnapshotMetadata,
+            hashAlgorithm: "md5",
+          } as unknown as LegacyChatGPTShareSnapshotMetadata,
+        };
+        fixture.sources[0] = fixture.source;
+      },
+    },
+    {
+      label: "missing ownership",
+      reason: "missing-source-ownership",
+      mutate(fixture: LegacyMigrationFixture) {
+        fixture.source = {
+          ...fixture.source,
+          conversationId: "missing-owner",
+        };
+        fixture.sources[0] = fixture.source;
+      },
+    },
+    {
+      label: "broken ordinal",
+      reason: "broken-source-ordinal",
+      mutate(fixture: LegacyMigrationFixture) {
+        fixture.messages[1] = {
+          ...fixture.messages[1],
+          sourceOrdinal: 4,
+        };
+      },
+    },
+    {
+      label: "non-zero Message order",
+      reason: "broken-source-ordinal",
+      mutate(fixture: LegacyMigrationFixture) {
+        fixture.messages = fixture.messages.map((message) => ({
+          ...message,
+          order: message.order + 1,
+        }));
+      },
+    },
+    {
+      label: "non-canonical transcript coverage",
+      reason: "canonical-transcript-mismatch",
+      mutate(fixture: LegacyMigrationFixture) {
+        fixture.source = {
+          ...fixture.source,
+          content: `${fixture.source.content}\n`,
+        };
+        fixture.sources[0] = fixture.source;
+      },
+    },
+    {
+      label: "incomplete Round membership",
+      reason: "canonical-transcript-mismatch",
+      mutate(fixture: LegacyMigrationFixture) {
+        fixture.rounds[0] = {
+          ...fixture.rounds[0],
+          messageIds: [fixture.messages[0].id],
+        };
+      },
+    },
+    {
+      label: "transcript mismatch",
+      reason: "canonical-transcript-mismatch",
+      mutate(fixture: LegacyMigrationFixture) {
+        fixture.messages[1] = {
+          ...fixture.messages[1],
+          content: "Tampered legacy answer",
+        };
+      },
+    },
+    {
+      label: "Message provenance mismatch",
+      reason: "message-provenance-mismatch",
+      mutate(fixture: LegacyMigrationFixture) {
+        fixture.messages[1] = {
+          ...fixture.messages[1],
+          sourceId: "another-source",
+        };
+      },
+    },
+    {
+      label: "resourceHash collision",
+      reason: "resource-hash-collision",
+      async mutate(fixture: LegacyMigrationFixture) {
+        const { resourceHash: collisionHash } =
+          await identifyChatGPTShareUrl(legacyMigrationShareUrl);
+        fixture.conversations.push(
+          conversation({
+            id: "legacy-migration-collision-owner",
+            title: "Collision owner",
+          }),
+        );
+        fixture.sources.push({
+          ...fixture.source,
+          id: "legacy-migration-collision-source",
+          conversationId: "legacy-migration-collision-owner",
+          shareSnapshot: {
+            schemaVersion: 2,
+            resourceHash: collisionHash,
+            snapshotHash: "collision-snapshot",
+            snapshotMessageCount: 1,
+            capturedAt: legacyMigrationCapturedAt,
+            parserVersion: "1.0.0",
+            inputKind: "pasted-text",
+            hashAlgorithm: "sha256-json-role-content-v1",
+            snapshotSequence: 1,
+          },
+        });
+      },
+    },
+  ])("blocks $label in zero-write preflight", async ({ reason, mutate }) => {
+    const fixture = await legacyMigrationFixture();
+    await mutate(fixture);
+    await seedLegacyMigrationFixture(fixture);
+    const workflow = legacyMigrationWorkflow();
+    const before = await legacyMigrationCanonicalState();
+    fakeIndexedDB.transactions.length = 0;
+
+    const preflight = await workflow.preflight(legacyMigrationSourceId);
+
+    expect(preflight).toMatchObject({
+      status: "blocked",
+      phase: "preflight",
+      confirmable: false,
+      reason,
+    });
+    expect(
+      fakeIndexedDB.transactions.filter(({ mode }) => mode === "readwrite"),
+    ).toHaveLength(0);
+    expect(await legacyMigrationCanonicalState()).toBe(before);
+  });
+
+  it("blocks a stale preflight inside the authoritative transaction without overwriting the competing write", async () => {
+    const fixture = await legacyMigrationFixture();
+    await seedLegacyMigrationFixture(fixture);
+    const workflow = legacyMigrationWorkflow();
+    const preflight = await workflow.preflight(legacyMigrationSourceId);
+    expect(preflight.status).toBe("migrated");
+    await putStores({
+      sources: [
+        {
+          ...fixture.source,
+          name: "Changed by another tab",
+        },
+      ],
+    });
+    const competingState = await legacyMigrationCanonicalState();
+    fakeIndexedDB.transactions.length = 0;
+
+    const result = await workflow.confirm({
+      previewId: preflight.previewId,
+      confirmed: true,
+    });
+
+    expect(result).toMatchObject({
+      status: "blocked",
+      reason: "authoritative-state-changed",
+    });
+    expect(await legacyMigrationCanonicalState()).toBe(competingState);
+    expect(
+      (await readAll<ImportedSource>("sources"))[0].shareSnapshot,
+    ).toMatchObject({ schemaVersion: 1 });
+  });
+
+  it("rolls back the Source update when the migration transaction aborts", async () => {
+    const fixture = await legacyMigrationFixture();
+    await seedLegacyMigrationFixture(fixture);
+    const workflow = legacyMigrationWorkflow();
+    const preflight = await workflow.preflight(legacyMigrationSourceId);
+    expect(preflight.status).toBe("migrated");
+    const before = await legacyMigrationCanonicalState();
+    fakeIndexedDB.failReadwriteTransactions = 1;
+
+    const result = await workflow.confirm({
+      previewId: preflight.previewId,
+      confirmed: true,
+    });
+
+    expect(result).toMatchObject({
+      status: "blocked",
+      reason: "transaction-failed",
+    });
+    expect(await legacyMigrationCanonicalState()).toBe(before);
+    expect(getPendingWriteCount()).toBe(0);
+  });
+
+  it("reports reload verification failure without rolling back over a later tab write", async () => {
+    const fixture = await legacyMigrationFixture();
+    await seedLegacyMigrationFixture(fixture);
+    const workflow = legacyMigrationWorkflow();
+    const preflight = await workflow.preflight(legacyMigrationSourceId);
+    expect(preflight.status).toBe("migrated");
+    fakeIndexedDB.transactions.length = 0;
+    fakeIndexedDB.afterNextReadwriteCommit = () => {
+      const sources = fakeIndexedDB.stores.get("sources");
+      const migrated = sources?.get(
+        legacyMigrationSourceId,
+      ) as ImportedSource;
+      sources?.set(legacyMigrationSourceId, {
+        ...migrated,
+        name: "Changed by another tab after migration commit",
+      });
+    };
+
+    const result = await workflow.confirm({
+      previewId: preflight.previewId,
+      confirmed: true,
+    });
+
+    expect(result).toMatchObject({
+      status: "blocked",
+      reason: "reload-verification-failed",
+    });
+    expect(
+      fakeIndexedDB.transactions.filter(({ mode }) => mode === "readwrite"),
+    ).toHaveLength(1);
+    const [sourceAfterFailure] =
+      await readAll<ImportedSource>("sources");
+    expect(sourceAfterFailure).toMatchObject({
+      name: "Changed by another tab after migration commit",
+      shareSnapshot: {
+        schemaVersion: 2,
+        snapshotSequence: 1,
+      },
+    });
+  });
 });
 
 describe("Share Snapshot optional-field compatibility", () => {
@@ -696,9 +1678,9 @@ describe("Share Snapshot optional-field compatibility", () => {
     expect(reloaded?.snapshotData.messages[1].sourceOrdinal).toBeUndefined();
   });
 
-  it("preserves optional fields through App Data export/import", async () => {
+  it("preserves optional Message provenance through ordinary App Data export/import", async () => {
     const versionMessage = message("app-message", "app", 0);
-    const appSource = source(1);
+    const appSource = source(1, { shareSnapshot: undefined });
     await replaceStores({
       conversations: [conversation()],
       sources: [appSource],
@@ -744,7 +1726,7 @@ describe("Share Snapshot optional-field compatibility", () => {
       sourceOrdinal: 0,
     });
     expect((await readAll<ImportedSource>("sources"))[0].shareSnapshot).toEqual(
-      appSource.shareSnapshot,
+      undefined,
     );
     expect(
       (
@@ -756,6 +1738,370 @@ describe("Share Snapshot optional-field compatibility", () => {
       sourceId,
       sourceOrdinal: 0,
     });
+  });
+});
+
+describe("Snapshot-aware App Data Restore", () => {
+  it("restores a valid immutable Snapshot chain and verifies it after reload", async () => {
+    const bundle = await createValidSnapshotAppDataBundle();
+    const storage = new AppDataStorage();
+    const preview = await storage.previewRestore(JSON.stringify(bundle));
+    expect(preview.snapshotPreflight).toMatchObject({
+      status: "valid",
+      snapshotSourceCount: 2,
+      resourceCount: 1,
+    });
+    await replaceStores({
+      conversations: [],
+      sources: [],
+      messages: [],
+      rounds: [],
+      proposals: [],
+      "knowledge-cards": [],
+      "conversation-versions": [],
+    });
+
+    const result = await storage.importData(bundle, []);
+
+    expect("status" in result).toBe(false);
+    if ("status" in result) {
+      throw new Error("Valid Snapshot restore was unexpectedly blocked.");
+    }
+    expect(result).toMatchObject({
+      importedIndexedDBStores: 7,
+      verifiedIndexedDBRecords: 9,
+      backupIndexedDBRecords: 0,
+    });
+    clearCaches();
+    await preloadAll();
+    const sources = await readAll<ImportedSource>("sources");
+    const messages = await readAll<Message>("messages");
+    const rounds = await readAll<Round>("rounds");
+    expect(sources).toHaveLength(2);
+    expect(sources[1].shareSnapshot).toMatchObject({
+      previousSnapshotSourceId: sources[0].id,
+      snapshotSequence: 2,
+      snapshotMessageCount: 4,
+    });
+    expect(messages.map(({ sourceOrdinal }) => sourceOrdinal)).toEqual([
+      0, 1, 2, 3,
+    ]);
+    expect(rounds).toHaveLength(2);
+    expect(
+      rounds.flatMap(({ messageIds }) => messageIds).every((messageId) =>
+        messages.some(({ id }) => id === messageId),
+      ),
+    ).toBe(true);
+  });
+
+  it("preserves a concurrent post-commit write when Snapshot verification fails", async () => {
+    const bundle = await createValidSnapshotAppDataBundle();
+    const restoredConversation = bundle.indexedDB?.conversations?.[0];
+    if (!restoredConversation) {
+      throw new Error("Snapshot restore fixture has no Conversation.");
+    }
+    const concurrentConversation = {
+      ...restoredConversation,
+      title: "Changed by another tab after restore commit",
+    };
+    const storage = new AppDataStorage(async (batch) => {
+      await replaceStores(batch);
+      await putStores({ conversations: [concurrentConversation] });
+    });
+
+    const restore = storage.importData(bundle, []);
+
+    await expect(restore).rejects.toBeInstanceOf(AppDataRestoreError);
+    await expect(restore).rejects.toMatchObject({ rollbackSucceeded: false });
+    await expect(restore).rejects.toThrow(
+      "Restore committed, but verification failed",
+    );
+    expect(
+      (await readAll<Conversation>("conversations")).find(
+        ({ id }) => id === concurrentConversation.id,
+      ),
+    ).toEqual(concurrentConversation);
+    expect(await readAll<ImportedSource>("sources")).toEqual(
+      bundle.indexedDB?.sources,
+    );
+    expect(await readAll<Message>("messages")).toEqual(
+      bundle.indexedDB?.messages,
+    );
+    expect(await readAll<Round>("rounds")).toEqual(
+      bundle.indexedDB?.rounds,
+    );
+  });
+
+  it("blocks tampered Snapshot Source metadata before mutation", async () => {
+    const bundle = cloneAppDataBundle(
+      await createValidSnapshotAppDataBundle(),
+    );
+    const headSource = bundle.indexedDB?.sources?.[1];
+    if (!headSource?.shareSnapshot) {
+      throw new Error("Snapshot restore fixture has no head metadata.");
+    }
+    headSource.importedAt = new Date(
+      Date.parse(headSource.shareSnapshot.capturedAt) + 1_000,
+    ).toISOString();
+    headSource.updatedAt = new Date(
+      Date.parse(headSource.shareSnapshot.capturedAt) + 2_000,
+    ).toISOString();
+    headSource.shareSnapshot.snapshotHash = "0".repeat(64);
+    const before = await canonicalRestoreState();
+    const storage = new AppDataStorage();
+
+    const preview = await storage.previewRestore(JSON.stringify(bundle));
+    const result = await storage.importData(bundle, []);
+
+    expect(preview.snapshotPreflight).toMatchObject({ status: "blocked" });
+    expect(
+      preview.snapshotPreflight.status === "blocked"
+        ? preview.snapshotPreflight.reasons.join(" ")
+        : "",
+    ).toContain("does not match snapshotHash");
+    expect(result).toMatchObject({ status: "blocked" });
+    expect(await canonicalRestoreState()).toBe(before);
+  });
+
+  it.each([
+    {
+      label: "a future updatedAt",
+      mutate(bundle: AppDataBundle) {
+        const source = bundle.indexedDB?.sources?.[0];
+        if (!source) throw new Error("Snapshot timestamp fixture is missing.");
+        source.updatedAt = new Date(Date.now() + 60_000).toISOString();
+      },
+      expectedError: "updatedAt cannot be in the future",
+    },
+    {
+      label: "an importedAt earlier than capturedAt",
+      mutate(bundle: AppDataBundle) {
+        const source = bundle.indexedDB?.sources?.[0];
+        if (!source?.shareSnapshot) {
+          throw new Error("Snapshot timestamp fixture is missing.");
+        }
+        source.importedAt = new Date(
+          Date.parse(source.shareSnapshot.capturedAt) - 1,
+        ).toISOString();
+      },
+      expectedError: "capturedAt cannot be later than importedAt",
+    },
+    {
+      label: "a capturedAt that precedes its lineage predecessor",
+      mutate(bundle: AppDataBundle) {
+        const sources = bundle.indexedDB?.sources;
+        const previous = sources?.[0]?.shareSnapshot;
+        const head = sources?.[1];
+        if (!previous || !head?.shareSnapshot) {
+          throw new Error("Snapshot timestamp fixture is missing.");
+        }
+        head.shareSnapshot.capturedAt = new Date(
+          Date.parse(previous.capturedAt) - 1,
+        ).toISOString();
+      },
+      expectedError: "capturedAt precedes its lineage predecessor",
+    },
+  ])("blocks timestamp tampering with $label", async ({
+    mutate,
+    expectedError,
+  }) => {
+    const bundle = cloneAppDataBundle(
+      await createValidSnapshotAppDataBundle(),
+    );
+    mutate(bundle);
+    const before = await canonicalRestoreState();
+    const storage = new AppDataStorage();
+
+    const preview = await storage.previewRestore(JSON.stringify(bundle));
+    const result = await storage.importData(bundle, []);
+
+    expect(preview.snapshotPreflight).toMatchObject({ status: "blocked" });
+    expect(
+      preview.snapshotPreflight.status === "blocked"
+        ? preview.snapshotPreflight.reasons.join(" ")
+        : "",
+    ).toContain(expectedError);
+    expect(result).toMatchObject({ status: "blocked" });
+    expect(await canonicalRestoreState()).toBe(before);
+  });
+
+  it("blocks resourceHash collision across Conversations", async () => {
+    const bundle = cloneAppDataBundle(
+      await createValidSnapshotAppDataBundle(),
+    );
+    const originalConversation = bundle.indexedDB?.conversations?.[0];
+    const initialSource = bundle.indexedDB?.sources?.[0];
+    if (!originalConversation || !initialSource) {
+      throw new Error("Snapshot collision fixture is incomplete.");
+    }
+    bundle.indexedDB?.conversations?.push({
+      ...originalConversation,
+      id: "snapshot-collision-conversation",
+    });
+    bundle.indexedDB?.sources?.push({
+      ...initialSource,
+      id: "snapshot-collision-source",
+      conversationId: "snapshot-collision-conversation",
+    });
+    const before = await canonicalRestoreState();
+
+    const result = await new AppDataStorage().importData(bundle, []);
+
+    expect(result).toMatchObject({ status: "blocked" });
+    expect(
+      "status" in result ? result.reasons.join(" ") : "",
+    ).toContain("resourceHash collision");
+    expect(await canonicalRestoreState()).toBe(before);
+  });
+
+  it("blocks broken Snapshot Message provenance", async () => {
+    const bundle = cloneAppDataBundle(
+      await createValidSnapshotAppDataBundle(),
+    );
+    const messages = bundle.indexedDB?.messages;
+    const sources = bundle.indexedDB?.sources;
+    if (!messages?.[0] || !sources?.[1]) {
+      throw new Error("Snapshot provenance fixture is incomplete.");
+    }
+    messages[0].sourceId = sources[1].id;
+    const before = await canonicalRestoreState();
+
+    const result = await new AppDataStorage().importData(bundle, []);
+
+    expect(result).toMatchObject({ status: "blocked" });
+    expect(
+      "status" in result ? result.reasons.join(" ") : "",
+    ).toContain("broken sourceId provenance");
+    expect(await canonicalRestoreState()).toBe(before);
+  });
+
+  it("blocks dangling Snapshot Round references", async () => {
+    const bundle = cloneAppDataBundle(
+      await createValidSnapshotAppDataBundle(),
+    );
+    const targetRound = bundle.indexedDB?.rounds?.[0];
+    if (!targetRound) {
+      throw new Error("Snapshot Round fixture is incomplete.");
+    }
+    targetRound.messageIds.push("missing-snapshot-message");
+    const before = await canonicalRestoreState();
+
+    const result = await new AppDataStorage().importData(bundle, []);
+
+    expect(result).toMatchObject({ status: "blocked" });
+    expect(
+      "status" in result ? result.reasons.join(" ") : "",
+    ).toContain("references missing message missing-snapshot-message");
+    expect(await canonicalRestoreState()).toBe(before);
+  });
+
+  it.each([
+    {
+      label: "missing membership",
+      mutate(bundle: AppDataBundle) {
+        const targetRound = bundle.indexedDB?.rounds?.[0];
+        if (!targetRound?.messageIds[0]) {
+          throw new Error("Snapshot Round fixture is incomplete.");
+        }
+        targetRound.messageIds = targetRound.messageIds.slice(1);
+      },
+    },
+    {
+      label: "membership in multiple Rounds",
+      mutate(bundle: AppDataBundle) {
+        const rounds = bundle.indexedDB?.rounds;
+        const duplicatedMessageId = rounds?.[0]?.messageIds[0];
+        if (!duplicatedMessageId || !rounds?.[1]) {
+          throw new Error("Snapshot Round fixture is incomplete.");
+        }
+        rounds[1].messageIds.push(duplicatedMessageId);
+      },
+    },
+  ])("blocks Snapshot Message $label", async ({ mutate }) => {
+    const bundle = cloneAppDataBundle(
+      await createValidSnapshotAppDataBundle(),
+    );
+    mutate(bundle);
+    const before = await canonicalRestoreState();
+
+    const result = await new AppDataStorage().importData(bundle, []);
+
+    expect(result).toMatchObject({ status: "blocked" });
+    expect(
+      "status" in result ? result.reasons.join(" ") : "",
+    ).toContain("must belong to exactly one Round");
+    expect(await canonicalRestoreState()).toBe(before);
+  });
+
+  it("keeps ordinary Conversation backup restore behavior unchanged", async () => {
+    const ordinaryConversation = conversation({
+      id: "ordinary-restore-conversation",
+      sourceType: "Manual",
+    });
+    const ordinarySource = source(0, {
+      id: "ordinary-restore-source",
+      conversationId: ordinaryConversation.id,
+      shareSnapshot: undefined,
+    });
+    const ordinaryMessages = [
+      message("ordinary-restore-message", "ordinary", 0, {
+        conversationId: ordinaryConversation.id,
+        sourceId: ordinarySource.id,
+        sourceOrdinal: undefined,
+      }),
+    ];
+    const ordinaryRounds = [
+      round("ordinary-restore-round", [ordinaryMessages[0].id], 1, {
+        conversationId: ordinaryConversation.id,
+        question: "ordinary",
+        answer: "",
+      }),
+    ];
+    await replaceStores({
+      conversations: [ordinaryConversation],
+      sources: [ordinarySource],
+      messages: ordinaryMessages,
+      rounds: ordinaryRounds,
+      proposals: [],
+      "knowledge-cards": [],
+      "conversation-versions": [],
+    });
+    const storage = new AppDataStorage();
+    const bundle = await storage.exportData();
+    const ordinaryPreview = storage.preview(JSON.stringify(bundle));
+    expect(ordinaryPreview.indexedDBCounts).toMatchObject({
+      conversations: 1,
+      sources: 1,
+      messages: 1,
+      rounds: 1,
+    });
+    const preview = await storage.previewRestore(JSON.stringify(bundle));
+    expect(preview.snapshotPreflight.status).toBe("not-applicable");
+    await replaceStores({
+      conversations: [],
+      sources: [],
+      messages: [],
+      rounds: [],
+      proposals: [],
+      "knowledge-cards": [],
+      "conversation-versions": [],
+    });
+
+    const result = await storage.importData(bundle, []);
+
+    expect("status" in result).toBe(false);
+    if ("status" in result) {
+      throw new Error("Ordinary restore was unexpectedly blocked.");
+    }
+    expect(result.verifiedIndexedDBRecords).toBe(4);
+    expect(await readAll<Conversation>("conversations")).toEqual([
+      ordinaryConversation,
+    ]);
+    expect(await readAll<ImportedSource>("sources")).toEqual([
+      ordinarySource,
+    ]);
+    expect(await readAll<Message>("messages")).toEqual(ordinaryMessages);
+    expect(await readAll<Round>("rounds")).toEqual(ordinaryRounds);
   });
 });
 
@@ -1188,6 +2534,187 @@ describe("Share Snapshot canonical operation", () => {
       new IndexedDBMessageStorage().getByConversationId(conversationId),
     ).toHaveLength(4);
     expect(getPendingWriteCount()).toBe(0);
+  });
+
+  it("rejects a concurrent append before final readwrite validation", async () => {
+    await seedShareWorkspace();
+    const competingPlan = appendPlan();
+    const competingSourceId = "competing-source";
+    const competingMessageIds = ["competing-message-c", "competing-message-d"];
+    const competingAppend: ShareSnapshotCanonicalPlan = {
+      ...competingPlan,
+      source: {
+        ...competingPlan.source,
+        id: competingSourceId,
+      },
+      messages: competingPlan.messages.map((candidate, index) => ({
+        ...candidate,
+        id: competingMessageIds[index],
+        sourceId: competingSourceId,
+      })),
+      rounds: competingPlan.rounds.map((candidate) => ({
+        ...candidate,
+        id: "competing-round",
+        messageIds: competingMessageIds,
+      })),
+    };
+    fakeIndexedDB.beforeNextReadwriteTransaction = () => {
+      commitPlanFromOtherTab(competingAppend);
+    };
+
+    await expect(
+      executeShareSnapshotCanonicalOperation(appendPlan()),
+    ).rejects.toThrow("is not the current history head");
+
+    expect(
+      (await readAll<ImportedSource>("sources")).map(({ id }) => id),
+    ).toEqual([sourceId, competingSourceId]);
+    expect(
+      (await readAll<Message>("messages")).map(({ id }) => id),
+    ).toEqual([
+      "message-a",
+      "message-b",
+      ...competingMessageIds,
+    ]);
+    expect(
+      (await readAll<Round>("rounds")).map(({ id }) => id),
+    ).toEqual(["round-existing", "competing-round"]);
+  });
+
+  it("rejects a concurrent new baseline for the same resourceHash", async () => {
+    const plan = initialPlan();
+    const competingSourceId = "competing-initial-source";
+    const competingMessageIds = [
+      "competing-initial-message-a",
+      "competing-initial-message-b",
+    ];
+    const competingInitial: ShareSnapshotCanonicalPlan = {
+      ...plan,
+      source: {
+        ...plan.source,
+        id: competingSourceId,
+      },
+      messages: plan.messages.map((candidate, index) => ({
+        ...candidate,
+        id: competingMessageIds[index],
+        sourceId: competingSourceId,
+      })),
+      rounds: plan.rounds.map((candidate) => ({
+        ...candidate,
+        id: "competing-initial-round",
+        messageIds: competingMessageIds,
+      })),
+    };
+    fakeIndexedDB.beforeNextReadwriteTransaction = () => {
+      commitPlanFromOtherTab(competingInitial);
+    };
+
+    await expect(
+      executeShareSnapshotCanonicalOperation(plan),
+    ).rejects.toThrow("would create a duplicate head");
+
+    expect(await readAll<Conversation>("conversations")).toEqual([
+      competingInitial.conversation,
+    ]);
+    expect(await readAll<ImportedSource>("sources")).toEqual([
+      competingInitial.source,
+    ]);
+    expect(await readAll<Message>("messages")).toEqual(
+      competingInitial.messages,
+    );
+    expect(await readAll<Round>("rounds")).toEqual(competingInitial.rounds);
+  });
+
+  it("rejects duplicate heads found by final readwrite validation", async () => {
+    await seedShareWorkspace();
+    const duplicateHead = source(2, {
+      id: "duplicate-head",
+      name: "Concurrent duplicate head",
+    });
+    fakeIndexedDB.beforeNextReadwriteTransaction = () => {
+      const sources = fakeIndexedDB.stores.get("sources");
+      sources?.set(duplicateHead.id, duplicateHead);
+    };
+
+    await expect(
+      executeShareSnapshotCanonicalOperation(appendPlan()),
+    ).rejects.toThrow("current history is invalid: multiple-heads");
+
+    expect(await readAll<ImportedSource>("sources")).toEqual([
+      source(2),
+      duplicateHead,
+    ]);
+    expect(await readAll<Message>("messages")).toHaveLength(2);
+    expect(await readAll<Round>("rounds")).toHaveLength(1);
+  });
+
+  it("atomically rolls back when the validated readwrite transaction aborts", async () => {
+    const { oldMessages, oldRound } = await seedShareWorkspace();
+    const originalConversation = await readAll<Conversation>("conversations");
+    const originalSources = await readAll<ImportedSource>("sources");
+    fakeIndexedDB.transactions.length = 0;
+    fakeIndexedDB.failReadwriteTransactions = 1;
+
+    await expect(
+      executeShareSnapshotCanonicalOperation(appendPlan()),
+    ).rejects.toThrow("forced transaction failure");
+
+    expect(
+      fakeIndexedDB.transactions.filter(({ mode }) => mode === "readwrite"),
+    ).toEqual([
+      {
+        storeNames: ["conversations", "sources", "messages", "rounds"],
+        mode: "readwrite",
+      },
+    ]);
+    expect(await readAll<Conversation>("conversations")).toEqual(
+      originalConversation,
+    );
+    expect(await readAll<ImportedSource>("sources")).toEqual(originalSources);
+    expect(await readAll<Message>("messages")).toEqual(oldMessages);
+    expect(await readAll<Round>("rounds")).toEqual([oldRound]);
+  });
+
+  it("reports post-commit reload failure without rolling back another tab", async () => {
+    await seedShareWorkspace();
+    const otherTabUpdatedAt = "2026-07-27T01:30:00.000Z";
+    fakeIndexedDB.afterNextReadwriteCommit = () => {
+      const conversations = fakeIndexedDB.stores.get("conversations");
+      const committed = conversations?.get(conversationId) as
+        | Conversation
+        | undefined;
+      if (!conversations || !committed) {
+        throw new Error("Committed Conversation is unavailable.");
+      }
+      conversations.set(conversationId, {
+        ...committed,
+        note: "other tab note after Snapshot commit",
+        updatedAt: otherTabUpdatedAt,
+      });
+    };
+
+    let failure: unknown;
+    try {
+      await executeShareSnapshotCanonicalOperation(appendPlan());
+    } catch (error) {
+      failure = error;
+    }
+
+    expect(failure).toBeInstanceOf(ShareSnapshotReloadVerificationError);
+    expect(failure).toMatchObject({
+      committed: true,
+      cause: expect.objectContaining({
+        message:
+          "Share Snapshot reload verification found a canonical store mismatch.",
+      }),
+    });
+    expect((await readAll<Conversation>("conversations"))[0]).toMatchObject({
+      note: "other tab note after Snapshot commit",
+      updatedAt: otherTabUpdatedAt,
+    });
+    expect(await readAll<ImportedSource>("sources")).toHaveLength(2);
+    expect(await readAll<Message>("messages")).toHaveLength(4);
+    expect(await readAll<Round>("rounds")).toHaveLength(2);
   });
 
   it("rejects invalid source lineage before writing", async () => {

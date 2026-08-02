@@ -4,10 +4,10 @@ PALOS 是一个本地优先的个人 AI 上下文管理工作区。它保留可�
 
 ## Project Status
 
-- Current Version：v1.7 release candidate（final QA passed；release commit pending）
-- Current Phase：Personal AI Context Management
-- Current Focus：v1.7 Final Release QA — data semantics、autosave reliability、minimal closure
-- Verification：9 个 Vitest 文件 / 213 tests；Playwright release gate 2/2；lint/build/diff-check passed；真实三轮浏览器 QA 与 1280/390px 可视复核通过
+- Current Version：v1.8.1 hardening candidate（working tree；未 commit、未 tag）
+- Current Phase：Immutable ChatGPT Conversation Snapshot release hardening
+- Current Focus：最终 release audit 与 clean release commit
+- Verification：20 个 Vitest 文件 / 374 tests；Playwright release gate 3/3；lint/build/diff-check passed
 
 ### Feature Matrix
 

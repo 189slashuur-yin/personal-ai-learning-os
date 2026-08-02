@@ -5,6 +5,7 @@ import type {
   LegacyChatGPTShareSnapshotMetadata,
 } from "@/core/entities/imported-source";
 import type { Message } from "@/core/entities/message";
+import type { Round } from "@/core/entities/round";
 import { hashChatGPTShareSnapshot } from "@/core/services/chatgpt-share-snapshot-comparator";
 import {
   migrateLegacyMutableShareSnapshotSource,
@@ -27,6 +28,7 @@ const drafts = [
 type LegacyFixture = {
   source: ImportedSource;
   messages: Message[];
+  rounds: Round[];
   sources: ImportedSource[];
 };
 
@@ -63,13 +65,39 @@ async function legacyFixture(): Promise<LegacyFixture> {
     sourceId,
     sourceOrdinal: draft.ordinal,
   }));
-  return { source, messages, sources: [source] };
+  const rounds: Round[] = [
+    {
+      id: "round-1",
+      conversationId,
+      order: 1,
+      title: "Round 1",
+      question: drafts[0].content,
+      answer: drafts[1].content,
+      messageIds: messages.map(({ id }) => id),
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    },
+  ];
+  return { source, messages, rounds, sources: [source] };
 }
 
 async function migrate(
   fixture: LegacyFixture,
 ): Promise<ReturnType<typeof migrateLegacyMutableShareSnapshotSource> extends Promise<infer Result> ? Result : never> {
   return migrateLegacyMutableShareSnapshotSource(fixture);
+}
+
+function withSource(
+  fixture: LegacyFixture,
+  source: ImportedSource,
+): LegacyFixture {
+  return {
+    ...fixture,
+    source,
+    sources: fixture.sources.map((candidate) =>
+      candidate.id === source.id ? source : candidate,
+    ),
+  };
 }
 
 describe("legacy mutable Share Snapshot migration", () => {
@@ -110,6 +138,7 @@ describe("legacy mutable Share Snapshot migration", () => {
     const result = await migrateLegacyMutableShareSnapshotSource({
       source: immutableSource,
       messages: fixture.messages,
+      rounds: fixture.rounds,
       sources: [immutableSource],
     });
 
@@ -175,6 +204,121 @@ describe("legacy mutable Share Snapshot migration", () => {
       status: "blocked",
       reason: "unsupported-hash-algorithm",
     });
+  });
+
+  it.each([
+    {
+      label: "capturedAt",
+      remove(source: ImportedSource): ImportedSource {
+        const metadata = {
+          ...source.shareSnapshot,
+        } as Partial<LegacyChatGPTShareSnapshotMetadata>;
+        delete metadata.capturedAt;
+        return {
+          ...source,
+          shareSnapshot:
+            metadata as LegacyChatGPTShareSnapshotMetadata,
+        };
+      },
+    },
+    {
+      label: "importedAt",
+      remove(source: ImportedSource): ImportedSource {
+        return {
+          ...source,
+          importedAt: undefined,
+        } as unknown as ImportedSource;
+      },
+    },
+    {
+      label: "updatedAt",
+      remove(source: ImportedSource): ImportedSource {
+        return {
+          ...source,
+          updatedAt: undefined,
+        } as unknown as ImportedSource;
+      },
+    },
+  ])("blocks a missing $label timestamp", async ({ label, remove }) => {
+    const fixture = await legacyFixture();
+    const input = withSource(fixture, remove(fixture.source));
+
+    const result = await migrate(input);
+
+    expect(result).toMatchObject({
+      status: "blocked",
+      reason: "invalid-legacy-metadata",
+    });
+    expect(result.status === "blocked" ? result.error : "").toContain(label);
+  });
+
+  it.each(["capturedAt", "importedAt", "updatedAt"] as const)(
+    "blocks a future %s timestamp",
+    async (field) => {
+      const fixture = await legacyFixture();
+      const future = new Date(Date.now() + 60_000).toISOString();
+      const metadata =
+        fixture.source.shareSnapshot as LegacyChatGPTShareSnapshotMetadata;
+      const source =
+        field === "capturedAt"
+          ? {
+              ...fixture.source,
+              shareSnapshot: { ...metadata, capturedAt: future },
+            }
+          : { ...fixture.source, [field]: future };
+
+      const result = await migrate(withSource(fixture, source));
+
+      expect(result).toMatchObject({
+        status: "blocked",
+        reason: "invalid-legacy-metadata",
+      });
+      expect(result.status === "blocked" ? result.error : "").toContain(
+        `${field} cannot be in the future`,
+      );
+    },
+  );
+
+  it.each([
+    {
+      label: "capturedAt later than importedAt",
+      capturedAt: "2026-07-27T02:00:00.000Z",
+      importedAt: "2026-07-27T01:00:00.000Z",
+      updatedAt: "2026-07-27T03:00:00.000Z",
+      expected: "capturedAt cannot be later than importedAt",
+    },
+    {
+      label: "importedAt later than updatedAt",
+      capturedAt: "2026-07-27T01:00:00.000Z",
+      importedAt: "2026-07-27T03:00:00.000Z",
+      updatedAt: "2026-07-27T02:00:00.000Z",
+      expected: "importedAt cannot be later than updatedAt",
+    },
+  ])("blocks timestamp order error: $label", async ({
+    capturedAt,
+    importedAt,
+    updatedAt,
+    expected,
+  }) => {
+    const fixture = await legacyFixture();
+    const metadata =
+      fixture.source.shareSnapshot as LegacyChatGPTShareSnapshotMetadata;
+    const source: ImportedSource = {
+      ...fixture.source,
+      importedAt,
+      updatedAt,
+      shareSnapshot: { ...metadata, capturedAt },
+    };
+
+    const result = await migrate(withSource(fixture, source));
+
+    expect(result).toMatchObject({
+      status: "blocked",
+      reason: "invalid-legacy-metadata",
+    });
+    expect(result.status === "blocked" ? result.error : "").toContain(
+      expected,
+    );
   });
 
   it("blocks invalid URL normalization and shareId mismatch", async () => {
@@ -257,6 +401,45 @@ describe("legacy mutable Share Snapshot migration", () => {
     await expect(migrate(provenanceMismatch)).resolves.toMatchObject({
       status: "blocked",
       reason: "message-provenance-mismatch",
+    });
+  });
+
+  it("blocks non-zero Message order, non-canonical transcript coverage, and incomplete Round membership", async () => {
+    const fixture = await legacyFixture();
+    const nonZeroOrder: LegacyFixture = {
+      ...fixture,
+      messages: fixture.messages.map((message) => ({
+        ...message,
+        order: message.order + 1,
+      })),
+    };
+    const nonCanonicalTranscript: LegacyFixture = {
+      ...fixture,
+      source: {
+        ...fixture.source,
+        content: `${fixture.source.content}\n`,
+      },
+    };
+    nonCanonicalTranscript.sources = [nonCanonicalTranscript.source];
+    const incompleteRoundMembership: LegacyFixture = {
+      ...fixture,
+      rounds: fixture.rounds.map((round) => ({
+        ...round,
+        messageIds: [fixture.messages[0].id],
+      })),
+    };
+
+    await expect(migrate(nonZeroOrder)).resolves.toMatchObject({
+      status: "blocked",
+      reason: "broken-source-ordinal",
+    });
+    await expect(migrate(nonCanonicalTranscript)).resolves.toMatchObject({
+      status: "blocked",
+      reason: "canonical-transcript-mismatch",
+    });
+    await expect(migrate(incompleteRoundMembership)).resolves.toMatchObject({
+      status: "blocked",
+      reason: "canonical-transcript-mismatch",
     });
   });
 

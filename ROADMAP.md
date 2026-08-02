@@ -4,11 +4,22 @@
 
 ## Current release
 
-- Current Version：v1.8 release checkpoint complete（`v1.8.0-rc1`）
-- Phase：Immutable ChatGPT Conversation Snapshot · Phase 2E 与 release hardening 已完成
-- Current Focus：release documentation closure 与最终产品验收
-- Automated Status：Vitest 20 files / 327 tests；Playwright 3/3；lint/build/diff-check passed
-- Next Recommended Phase：确认最终 `v1.8.0` release；已延期 lifecycle、read UX 与 Search hardening 需重新确认范围
+- Current Version：v1.8.1 hardening candidate（working tree；未 commit、未 tag）
+- Phase：v1.8.0 → v1.8.1 reliability and immutable Snapshot hardening
+- Current Focus：最终 release audit 与 clean release commit
+- Automated Status：Vitest 20 files / 374 tests；Playwright 3/3；lint/build/diff-check passed
+- Next Recommended Phase：创建并复核 v1.8.1 release commit/tag；已接受的 cached mutation guard TOCTOU、lifecycle、read UX 与 Search hardening 继续延期
+
+## v1.8.1 — Release hardening（candidate）
+
+- Snapshot canonical writer 的 authoritative read、lineage/provenance validation 与四-store write 已合并到单个 IndexedDB transaction。
+- App Data Restore 增加 Snapshot-aware preflight、reload content/lineage verification，以及 post-commit verification failure 禁止旧 backup 覆盖。
+- schema v1 legacy Snapshot 使用显式 preflight/confirmation/atomic migration/reload workflow；Message order、canonical transcript 与 Round exact-once membership 和后续 Restore/Append 对齐。
+- timestamp 明确为 `capturedAt <= importedAt <= updatedAt`，保留 hash、lineage 与 provenance 校验。
+- Conversation Version Restore 使用三-store单 transaction，保留新 Message IDs 与 Round.messageIds remap 语义。
+- 端到端自动回归覆盖 legacy v1 → migration → export → restore → append → reload。
+- 未修改 Snapshot/IndexedDB schema、Import workflow，没有新增 store、journal 或产品功能。
+- 当前仍是未提交 working tree；跨 tab cached mutation guard 的 authoritative ownership TOCTOU 已接受为未来 hardening，不是 v1.8.1 blocker。
 
 ## v1.8 — Immutable ChatGPT Conversation Snapshot（release checkpoint complete）
 

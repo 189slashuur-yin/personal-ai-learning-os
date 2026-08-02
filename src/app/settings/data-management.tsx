@@ -1,7 +1,9 @@
 "use client";
 
 import { type ChangeEvent, useState } from "react";
-import type { AppDataBundle } from "@/infrastructure/storage/app-data-storage";
+import type {
+  AppDataRestorePreview,
+} from "@/infrastructure/storage/app-data-storage";
 import { AppDataStorage } from "@/infrastructure/storage/app-data-storage";
 import {
   getStorageMode,
@@ -47,16 +49,9 @@ const importGroups = [
   { label: "Assets", keys: ["ai-learning-os.assets"] },
 ] as const;
 
-type Preview = {
-  bundle: AppDataBundle;
-  keys: string[];
-  counts: Record<string, number>;
-  indexedDBCounts: Record<string, number>;
-};
-
 export function DataManagement() {
   const [copyStatus, setCopyStatus] = useState<string | null>(null);
-  const [preview, setPreview] = useState<Preview | null>(null);
+  const [preview, setPreview] = useState<AppDataRestorePreview | null>(null);
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
 
   // ---- Migration state ----
@@ -93,7 +88,7 @@ export function DataManagement() {
     const file = event.target.files?.[0];
     if (!file) return;
     try {
-      const next = new AppDataStorage().preview(await file.text());
+      const next = await new AppDataStorage().previewRestore(await file.text());
       setPreview(next);
       setSelectedKeys(next.keys);
       setCopyStatus(null);
@@ -116,6 +111,12 @@ export function DataManagement() {
 
   async function importBundle() {
     if (!preview) return;
+    if (preview.snapshotPreflight.status === "blocked") {
+      setCopyStatus(
+        `Snapshot restore blocked：${preview.snapshotPreflight.reasons.join(" ")}`,
+      );
+      return;
+    }
     const indexedDBRecordCount = Object.values(preview.indexedDBCounts).reduce(
       (sum, count) => sum + count,
       0,
@@ -136,6 +137,10 @@ export function DataManagement() {
         preview.bundle,
         selectedKeys,
       );
+      if ("status" in result) {
+        setCopyStatus(`Snapshot restore blocked：${result.reasons.join(" ")}`);
+        return;
+      }
       setCurrentMode(getStorageMode());
       setCopyStatus(
         `已导入并验证 ${result.verifiedLocalStorageKeys} 个 LocalStorage keys、${result.importedIndexedDBStores} 个 IndexedDB stores / ${result.verifiedIndexedDBRecords} 条业务记录。恢复前已备份 ${result.backupLocalStorageKeys} 个 LocalStorage keys / ${result.backupIndexedDBRecords} 条 IndexedDB 记录。`,
@@ -433,6 +438,12 @@ export function DataManagement() {
                 ))}
               </dl>
             ) : null}
+            {preview.snapshotPreflight.status === "blocked" ? (
+              <div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-800" role="alert">
+                <p className="font-semibold">Snapshot restore blocked</p>
+                <p className="mt-1">{preview.snapshotPreflight.reasons.join(" ")}</p>
+              </div>
+            ) : null}
             <div className="mt-3 grid gap-2 sm:grid-cols-2">
               {importGroups.map((group) => {
                 const available = group.keys.filter((key) => preview.keys.includes(key));
@@ -456,7 +467,7 @@ export function DataManagement() {
                 ))}
               </div>
             </details>
-            <button className="mt-4 rounded-lg bg-red-700 px-4 py-2 text-sm font-semibold text-white" onClick={importBundle} type="button">确认导入所选类型</button>
+            <button className="mt-4 rounded-lg bg-red-700 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40" disabled={preview.snapshotPreflight.status === "blocked"} onClick={importBundle} type="button">确认导入所选类型</button>
           </div>
         ) : null}
         <div className="mt-5 rounded-lg border border-red-200 bg-red-50 p-4">

@@ -5,7 +5,9 @@ import { normalizeStoredConversationContext } from "@/infrastructure/storage/con
 import { getConversationCache, setConversationCache } from "./preload";
 import { deleteMany, deleteOne, persistInBackground, writeOne } from "./database";
 
-function normalize(conversation: Conversation): Conversation {
+export function normalizeIndexedDBConversation(
+  conversation: Conversation,
+): Conversation {
   return {
     ...conversation,
     workspaceId: conversation.workspaceId ?? DEFAULT_WORKSPACE_ID,
@@ -30,7 +32,7 @@ function normalize(conversation: Conversation): Conversation {
 
 export class IndexedDBConversationStorage implements ConversationStorage {
   save(conversation: Conversation): void {
-    const normalized = normalize(conversation);
+    const normalized = normalizeIndexedDBConversation(conversation);
     const cache = getConversationCache();
     const existingIndex = cache.findIndex((c) => c.id === normalized.id);
     if (existingIndex >= 0) {
@@ -46,7 +48,7 @@ export class IndexedDBConversationStorage implements ConversationStorage {
 
   getAll(): Conversation[] {
     return getConversationCache()
-      .map(normalize)
+      .map(normalizeIndexedDBConversation)
       .sort(
         (left, right) =>
           new Date(right.updatedAt).getTime() -

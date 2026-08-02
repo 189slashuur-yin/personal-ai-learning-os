@@ -11,7 +11,7 @@ import {
   writeOne,
 } from "./database";
 
-function normalizeRound(round: Round): Round {
+export function normalizeIndexedDBRound(round: Round): Round {
   return {
     ...round,
     title: round.title ?? `Round ${round.order}`,
@@ -27,7 +27,7 @@ function normalizeRound(round: Round): Round {
 
 export class IndexedDBRoundStorage implements RoundStorage {
   save(round: Round): void {
-    const norm = normalizeRound(round);
+    const norm = normalizeIndexedDBRound(round);
     const cache = getRoundCache();
     const idx = cache.findIndex((r) => r.id === norm.id);
     if (idx >= 0) cache[idx] = norm;
@@ -38,19 +38,19 @@ export class IndexedDBRoundStorage implements RoundStorage {
   saveMany(rounds: Round[]): void {
     const cache = getRoundCache();
     for (const round of rounds) {
-      const norm = normalizeRound(round);
+      const norm = normalizeIndexedDBRound(round);
       const idx = cache.findIndex((r) => r.id === norm.id);
       if (idx >= 0) cache[idx] = norm;
       else cache.push(norm);
     }
     persistInBackground(
       "save many rounds",
-      writeMany("rounds", rounds.map(normalizeRound)),
+      writeMany("rounds", rounds.map(normalizeIndexedDBRound)),
     );
   }
 
   getAll(): Round[] {
-    return getRoundCache().map(normalizeRound);
+    return getRoundCache().map(normalizeIndexedDBRound);
   }
 
   getById(id: string): Round | null {
@@ -83,7 +83,7 @@ export class IndexedDBRoundStorage implements RoundStorage {
     const other = getRoundCache().filter((r) => r.conversationId !== conversationId);
     const convRounds = rounds
       .filter((r) => r.conversationId === conversationId)
-      .map(normalizeRound);
+      .map(normalizeIndexedDBRound);
     const all = [...other, ...convRounds];
     setRoundCache(all);
     persistInBackground(

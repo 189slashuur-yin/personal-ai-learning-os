@@ -6,6 +6,10 @@ import type { Message } from "@/core/entities/message";
 import type { Proposal } from "@/core/entities/proposal";
 import type { Round } from "@/core/entities/round";
 import {
+  preflightShareSnapshotRestore,
+  type ShareSnapshotRestorePreflight,
+} from "@/core/services/share-snapshot-restore-preflight";
+import {
   drainPendingWrites,
   readAll,
   replaceStores,
@@ -39,6 +43,29 @@ export type AppDataPreview = {
   counts: Record<string, number>;
   indexedDBCounts: Record<string, number>;
 };
+
+export type AppDataRestorePreview = AppDataPreview & {
+  snapshotPreflight: ShareSnapshotRestorePreflight;
+};
+
+export type AppDataRestoreSuccess = {
+  importedLocalStorageKeys: number;
+  importedIndexedDBStores: number;
+  indexedDBRecords: number;
+  verifiedLocalStorageKeys: number;
+  verifiedIndexedDBRecords: number;
+  backupLocalStorageKeys: number;
+  backupIndexedDBRecords: number;
+};
+
+export type AppDataRestoreBlocked = Extract<
+  ShareSnapshotRestorePreflight,
+  { status: "blocked" }
+>;
+
+export type AppDataRestoreResult =
+  | AppDataRestoreSuccess
+  | AppDataRestoreBlocked;
 
 const IDB_BUNDLE_KEYS = [
   "conversations",
@@ -202,6 +229,41 @@ function validateIndexedDBBundle(bundle: AppDataBundle): void {
   }
 }
 
+function snapshotSourceCandidateCount(bundle: AppDataBundle): number {
+  const sources = bundle.indexedDB?.sources;
+  if (!Array.isArray(sources)) return 0;
+  return sources.filter(
+    (source) =>
+      isRecord(source) &&
+      Object.prototype.hasOwnProperty.call(source, "shareSnapshot") &&
+      source.shareSnapshot !== undefined,
+  ).length;
+}
+
+async function preflightSnapshotBundle(
+  bundle: AppDataBundle,
+): Promise<ShareSnapshotRestorePreflight> {
+  const snapshotSourceCount = snapshotSourceCandidateCount(bundle);
+  try {
+    validateIndexedDBBundle(bundle);
+  } catch (error) {
+    if (snapshotSourceCount === 0) throw error;
+    return {
+      status: "blocked",
+      snapshotSourceCount,
+      resourceCount: 0,
+      reasons: [error instanceof Error ? error.message : String(error)],
+    };
+  }
+  const indexedDB = bundle.indexedDB ?? {};
+  return preflightShareSnapshotRestore({
+    conversations: indexedDB.conversations,
+    sources: indexedDB.sources,
+    messages: indexedDB.messages,
+    rounds: indexedDB.rounds,
+  });
+}
+
 function selectedIndexedDBBatch(bundle: AppDataBundle): Partial<Record<StoreName, unknown[]>> {
   const indexedDB = bundle.indexedDB ?? {};
   return Object.fromEntries(
@@ -249,10 +311,89 @@ async function verifyStores(batch: StoreBatch): Promise<number> {
   return verifiedRecords;
 }
 
+function normalizeForVerification(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(normalizeForVerification);
+  }
+  if (!isRecord(value)) return value;
+  return Object.fromEntries(
+    Object.entries(value)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, entry]) => [key, normalizeForVerification(entry)]),
+  );
+}
+
+function recordsMatch(expected: readonly unknown[], actual: readonly unknown[]): boolean {
+  const order = (records: readonly unknown[]) =>
+    [...records].sort((left, right) => {
+      const leftId = isRecord(left) && typeof left.id === "string" ? left.id : "";
+      const rightId =
+        isRecord(right) && typeof right.id === "string" ? right.id : "";
+      return leftId.localeCompare(rightId);
+    });
+  return (
+    JSON.stringify(normalizeForVerification(order(expected))) ===
+    JSON.stringify(normalizeForVerification(order(actual)))
+  );
+}
+
+async function verifySnapshotRestore(bundle: AppDataBundle): Promise<void> {
+  const expected = bundle.indexedDB;
+  if (
+    !expected?.conversations ||
+    !expected.sources ||
+    !expected.messages ||
+    !expected.rounds
+  ) {
+    throw new Error(
+      "Snapshot reload verification requires all canonical Snapshot stores.",
+    );
+  }
+  const [conversations, sources, messages, rounds] = await Promise.all([
+    readAll<Conversation>("conversations"),
+    readAll<ImportedSource>("sources"),
+    readAll<Message>("messages"),
+    readAll<Round>("rounds"),
+  ]);
+  const comparisons: Array<
+    [string, readonly unknown[], readonly unknown[]]
+  > = [
+    ["conversations", expected.conversations, conversations],
+    ["sources", expected.sources, sources],
+    ["messages", expected.messages, messages],
+    ["rounds", expected.rounds, rounds],
+  ];
+  for (const [storeName, expectedRecords, actualRecords] of comparisons) {
+    if (!recordsMatch(expectedRecords, actualRecords)) {
+      throw new Error(
+        `Snapshot reload verification found a ${storeName} content mismatch.`,
+      );
+    }
+  }
+  const verification = await preflightShareSnapshotRestore({
+    conversations,
+    sources,
+    messages,
+    rounds,
+  });
+  if (verification.status !== "valid") {
+    throw new Error(
+      `Snapshot reload verification failed: ${
+        verification.status === "blocked"
+          ? verification.reasons.join(" ")
+          : "Snapshot metadata disappeared after restore."
+      }`,
+    );
+  }
+}
+
 export class AppDataRestoreError extends Error {
   constructor(
     message: string,
     readonly rollbackSucceeded: boolean,
+    readonly failureState:
+      | "writer-failed-current-state-retained"
+      | "committed-unverified",
   ) {
     super(message);
     this.name = "AppDataRestoreError";
@@ -314,17 +455,31 @@ export class AppDataStorage {
     };
   }
 
-  async importData(bundle: AppDataBundle, selectedKeys: string[]): Promise<{
-    importedLocalStorageKeys: number;
-    importedIndexedDBStores: number;
-    indexedDBRecords: number;
-    verifiedLocalStorageKeys: number;
-    verifiedIndexedDBRecords: number;
-    backupLocalStorageKeys: number;
-    backupIndexedDBRecords: number;
-  }> {
+  async previewRestore(text: string): Promise<AppDataRestorePreview> {
+    const legacyPreview = this.legacy.preview(text);
+    const bundle = legacyPreview.bundle as AppDataBundle;
     validateBundleEnvelope(bundle);
-    validateIndexedDBBundle(bundle);
+    const snapshotPreflight = await preflightSnapshotBundle(bundle);
+    const indexedDB = bundle.indexedDB ?? {};
+    return {
+      ...legacyPreview,
+      bundle,
+      snapshotPreflight,
+      indexedDBCounts: Object.fromEntries(
+        IDB_BUNDLE_KEYS.map((key) => [key, countValue(indexedDB[key])]),
+      ),
+    };
+  }
+
+  async importData(
+    bundle: AppDataBundle,
+    selectedKeys: string[],
+  ): Promise<AppDataRestoreResult> {
+    validateBundleEnvelope(bundle);
+    const snapshotPreflight = await preflightSnapshotBundle(bundle);
+    if (snapshotPreflight.status === "blocked") {
+      return snapshotPreflight;
+    }
     const batch = selectedIndexedDBBatch(bundle);
     const stores = Object.keys(batch) as StoreName[];
     const indexedDBRecords = Object.values(batch).reduce(
@@ -338,16 +493,24 @@ export class AppDataStorage {
       (sum, records) => sum + (records?.length ?? 0),
       0,
     );
+    let restoreCommitted = false;
 
     try {
-      const importedLocalStorageKeys = this.legacy.importData(bundle, selectedKeys);
       if (stores.length > 0) {
         await this.restoreWriter(batch);
+        restoreCommitted = true;
         clearCaches();
         await preloadAll();
       }
+      const importedLocalStorageKeys = this.legacy.importData(bundle, selectedKeys);
+      if (stores.length === 0) {
+        restoreCommitted = true;
+      }
       const verifiedLocalStorageKeys = this.legacy.verifyData(bundle, selectedKeys);
       const verifiedIndexedDBRecords = await verifyStores(batch);
+      if (snapshotPreflight.status === "valid") {
+        await verifySnapshotRestore(bundle);
+      }
 
       return {
         importedLocalStorageKeys,
@@ -359,34 +522,18 @@ export class AppDataStorage {
         backupIndexedDBRecords,
       };
     } catch (error) {
-      const rollbackErrors: unknown[] = [];
-      try {
-        if (stores.length > 0) {
-          await replaceStores(indexedDBBackup);
-          clearCaches();
-          await preloadAll();
-          await verifyStores(indexedDBBackup);
-        }
-      } catch (rollbackError) {
-        rollbackErrors.push(rollbackError);
-      }
-      try {
-        this.legacy.restoreBackup(localStorageBackup);
-        this.legacy.verifyBackup(localStorageBackup);
-      } catch (rollbackError) {
-        rollbackErrors.push(rollbackError);
-      }
-
       const causeMessage = error instanceof Error ? error.message : String(error);
-      if (rollbackErrors.length > 0) {
+      if (restoreCommitted) {
         throw new AppDataRestoreError(
-          `Restore failed: ${causeMessage}. Rollback could not be fully verified; current data state is unconfirmed.`,
+          `Restore committed, but verification failed: ${causeMessage}. No rollback was attempted because it could overwrite data written after the restore transaction.`,
           false,
+          "committed-unverified",
         );
       }
       throw new AppDataRestoreError(
-        `Restore failed: ${causeMessage}. Previous data was restored and verified.`,
-        true,
+        `Restore writer failed before commit: ${causeMessage}. The current IndexedDB state was retained and no backup rollback was attempted.`,
+        false,
+        "writer-failed-current-state-retained",
       );
     }
   }

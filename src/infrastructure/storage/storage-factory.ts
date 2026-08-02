@@ -5,6 +5,7 @@ import type { SourceStorage } from "@/core/contracts/source-storage";
 import type { ProposalStorage } from "@/core/contracts/proposal-storage";
 import type { KnowledgeCardStorage } from "@/core/contracts/knowledge-card-storage";
 import type { ConversationVersionStorage } from "@/core/contracts/conversation-version-storage";
+import type { ConversationVersionRestoreWriter } from "@/core/contracts/conversation-version-restore-writer";
 import { BrowserConversationStorage } from "./browser-conversation-storage";
 import { BrowserMessageStorage } from "./browser-message-storage";
 import { BrowserRoundStorage } from "./browser-round-storage";
@@ -20,12 +21,14 @@ import {
   IndexedDBProposalStorage,
   IndexedDBKnowledgeCardStorage,
   IndexedDBConversationVersionStorage,
+  IndexedDBConversationVersionRestoreWriter,
   preloadAll,
   isIndexedDBLoaded,
   getCachedCounts,
   clearCaches,
 } from "./indexeddb";
 import type { PreloadCounts } from "./indexeddb";
+import { StorageBackedConversationVersionRestoreWriter } from "./storage-backed-conversation-version-restore-writer";
 
 export type StorageMode = "localStorage" | "indexedDB";
 
@@ -144,4 +147,15 @@ export function createConversationVersionStorage(): ConversationVersionStorage {
   return getStorageMode() === "indexedDB"
     ? new IndexedDBConversationVersionStorage()
     : new BrowserConversationVersionStorage();
+}
+
+export function createConversationVersionRestoreWriter(): ConversationVersionRestoreWriter {
+  if (getStorageMode() === "indexedDB") {
+    return new IndexedDBConversationVersionRestoreWriter();
+  }
+  return new StorageBackedConversationVersionRestoreWriter({
+    conversations: new BrowserConversationStorage(),
+    messages: new BrowserMessageStorage(),
+    rounds: new BrowserRoundStorage(),
+  });
 }

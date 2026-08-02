@@ -6,7 +6,13 @@ export { bulkDeleteCanonicalConversations, clearCanonicalBusinessData } from "./
 export type { CanonicalBatchDeleteResult, CanonicalOperationObserver, CanonicalOperationPhase, CanonicalVerification } from "./canonical-operations";
 export { executeShareSnapshotCanonicalOperation } from "./share-snapshot-operation";
 export type { ShareSnapshotCanonicalOperationResult, ShareSnapshotCanonicalPlan, ShareSnapshotCanonicalVerification } from "./share-snapshot-operation";
+export { IndexedDBLegacyShareSnapshotMigrationWorkflow } from "./legacy-share-snapshot-migration-workflow";
+export type { LegacyShareSnapshotMigrationConfirmation, LegacyShareSnapshotMigrationConfirmationResult, LegacyShareSnapshotMigrationPreflight, LegacyShareSnapshotMigrationVerification, LegacyShareSnapshotMigrationWorkflowBlockedReason } from "./legacy-share-snapshot-migration-workflow";
 export { IndexedDBShareSnapshotCanonicalWriter } from "./idb-share-snapshot-canonical-writer";
+export {
+  ConversationVersionRestoreReloadVerificationError,
+  IndexedDBConversationVersionRestoreWriter,
+} from "./idb-conversation-version-restore-writer";
 export { IndexedDBConversationStorage } from "./idb-conversation-storage";
 export { IndexedDBMessageStorage } from "./idb-message-storage";
 export { IndexedDBRoundStorage } from "./idb-round-storage";
