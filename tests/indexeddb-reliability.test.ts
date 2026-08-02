@@ -24,6 +24,7 @@ import {
   closePalosDB,
   deleteWhere,
   getPendingWriteCount,
+  putStores,
   readAll,
   replaceStores,
   replaceWhere,
@@ -46,6 +47,7 @@ import { IndexedDBSourceStorage } from "@/infrastructure/storage/indexeddb/idb-s
 import { IndexedDBProposalStorage } from "@/infrastructure/storage/indexeddb/idb-proposal-storage";
 import { IndexedDBKnowledgeCardStorage } from "@/infrastructure/storage/indexeddb/idb-knowledge-card-storage";
 import { IndexedDBConversationVersionStorage } from "@/infrastructure/storage/indexeddb/idb-conversation-version-storage";
+import { IndexedDBConversationVersionRestoreWriter } from "@/infrastructure/storage/indexeddb/idb-conversation-version-restore-writer";
 import { BrowserProposalStorage } from "@/infrastructure/storage/browser-proposal-storage";
 import { BrowserAnalyzerRunStorage } from "@/infrastructure/storage/browser-analyzer-run-storage";
 import { BrowserAssetStorage } from "@/infrastructure/storage/browser-asset-storage";
@@ -100,11 +102,12 @@ class FakeObjectStore {
   ) {}
 
   getAll() {
+    this.transaction.operation();
     const request = new FakeRequest<unknown[]>();
     queueMicrotask(() => {
       request.result = [...this.data.values()];
       request.onsuccess?.();
-      this.transaction.completeSoon();
+      this.transaction.operationDone();
     });
     return request;
   }
@@ -149,11 +152,12 @@ class FakeObjectStore {
   }
 
   count() {
+    this.transaction.operation();
     const request = new FakeRequest<number>();
     queueMicrotask(() => {
       request.result = this.data.size;
       request.onsuccess?.();
-      this.transaction.completeSoon();
+      this.transaction.operationDone();
     });
     return request;
   }
@@ -435,13 +439,14 @@ describe("IndexedDB storage reliability", () => {
     const beforeMessageIds = messages
       .getByConversationId(targetConversationId)
       .map((item) => item.id);
-    const restored = new ConversationVersionService({
+    const restored = await new ConversationVersionService({
       conversations,
       messages,
       versions,
     }).restoreSnapshot(targetConversationId, "restore-version", {
       sources,
       rounds,
+      writer: new IndexedDBConversationVersionRestoreWriter(),
     });
 
     expect(restored).not.toBeNull();
@@ -457,7 +462,6 @@ describe("IndexedDB storage reliability", () => {
       messageIds: restored?.messages.map((item) => item.id),
     });
 
-    await flushCachesToIndexedDB();
     clearCaches();
     await preloadAll();
 
@@ -777,7 +781,7 @@ describe("IndexedDB storage reliability", () => {
     ]);
   });
 
-  it("App Data restore rolls back and verifies its pre-restore backup on failure", async () => {
+  it("keeps IndexedDB and LocalStorage unchanged when the restore transaction aborts", async () => {
     await replaceStores({
       conversations: [conversation("before-c1")],
       messages: [message("before-m1", "before-c1")],
@@ -808,13 +812,19 @@ describe("IndexedDB storage reliability", () => {
       },
     };
     const storage = new AppDataStorage(async (batch) => {
+      fakeIndexedDB.failTransactions = 1;
       await replaceStores(batch);
-      throw new Error("injected restore failure");
     });
 
     const restore = storage.importData(bundle, ["ai-learning-os.tags"]);
     await expect(restore).rejects.toBeInstanceOf(AppDataRestoreError);
-    await expect(restore).rejects.toMatchObject({ rollbackSucceeded: true });
+    await expect(restore).rejects.toMatchObject({
+      rollbackSucceeded: false,
+      failureState: "writer-failed-current-state-retained",
+    });
+    await expect(restore).rejects.toThrow(
+      "The current IndexedDB state was retained and no backup rollback was attempted",
+    );
     expect((await readAll<Conversation>("conversations")).map((item) => item.id)).toEqual([
       "before-c1",
     ]);
@@ -824,6 +834,107 @@ describe("IndexedDB storage reliability", () => {
     expect(JSON.parse(window.localStorage.getItem("ai-learning-os.tags") ?? "null")).toEqual([
       { id: "before-tag", name: "Before" },
     ]);
+  });
+
+  it("does not overwrite a concurrent write after the restore transaction aborts", async () => {
+    await replaceStores({
+      conversations: [conversation("before-c1")],
+      messages: [message("before-m1", "before-c1")],
+      rounds: [],
+      sources: [],
+      proposals: [],
+      "knowledge-cards": [],
+      "conversation-versions": [],
+    });
+    const bundle: AppDataBundle = {
+      schemaVersion: 1,
+      exportedAt: now,
+      data: {},
+      indexedDB: {
+        conversations: [conversation("after-c1")],
+        messages: [message("after-m1", "after-c1")],
+        rounds: [],
+        sources: [],
+        proposals: [],
+        knowledgeCards: [],
+        conversationVersions: [],
+      },
+    };
+    const concurrentConversation = conversation("concurrent-c1");
+    const storage = new AppDataStorage(async (batch) => {
+      fakeIndexedDB.failTransactions = 1;
+      try {
+        await replaceStores(batch);
+      } catch (error) {
+        await putStores({ conversations: [concurrentConversation] });
+        throw error;
+      }
+    });
+
+    const restore = storage.importData(bundle, []);
+
+    await expect(restore).rejects.toMatchObject({
+      rollbackSucceeded: false,
+      failureState: "writer-failed-current-state-retained",
+    });
+    expect(
+      (await readAll<Conversation>("conversations"))
+        .map(({ id }) => id)
+        .sort(),
+    ).toEqual(["before-c1", "concurrent-c1"]);
+    expect((await readAll<Message>("messages")).map(({ id }) => id)).toEqual([
+      "before-m1",
+    ]);
+  });
+
+  it("does not roll back a committed restore after concurrent data makes verification fail", async () => {
+    await replaceStores({
+      conversations: [conversation("before-c1")],
+      messages: [message("before-m1", "before-c1")],
+      rounds: [],
+      sources: [],
+      proposals: [],
+      "knowledge-cards": [],
+      "conversation-versions": [],
+    });
+    const bundle: AppDataBundle = {
+      schemaVersion: 1,
+      exportedAt: now,
+      data: {},
+      indexedDB: {
+        conversations: [conversation("after-c1")],
+        messages: [message("after-m1", "after-c1")],
+        rounds: [],
+        sources: [],
+        proposals: [],
+        knowledgeCards: [],
+        conversationVersions: [],
+      },
+    };
+    const concurrentConversation = conversation("concurrent-c1");
+    const storage = new AppDataStorage(async (batch) => {
+      await replaceStores(batch);
+      await putStores({ conversations: [concurrentConversation] });
+    });
+
+    const restore = storage.importData(bundle, []);
+
+    await expect(restore).rejects.toBeInstanceOf(AppDataRestoreError);
+    await expect(restore).rejects.toMatchObject({
+      rollbackSucceeded: false,
+      failureState: "committed-unverified",
+    });
+    await expect(restore).rejects.toThrow(
+      "Restore committed, but verification failed",
+    );
+    expect(
+      (await readAll<Conversation>("conversations"))
+        .map(({ id }) => id)
+        .sort(),
+    ).toEqual(["after-c1", "concurrent-c1"]);
+    expect(
+      (await readAll<Message>("messages")).map(({ id }) => id),
+    ).toEqual(["after-m1"]);
   });
 
   it("deleteWhere removes matching records without rewriting survivors", async () => {

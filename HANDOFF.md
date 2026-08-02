@@ -1,5 +1,311 @@
 # PALOS v1.8 — ChatGPT Conversation Snapshot Handoff
 
+## 2026-08-03 v1.8.1 final release blocker hardening
+
+本轮只关闭 release audit 剩余的两个 blocker：App Data Restore writer failure 后旧 backup 覆盖并发数据，以及 legacy migration timestamp validation 弱于 Restore。没有修改 Snapshot metadata/schema、IndexedDB schema/store、Import/UI、migration 输出设计或 restore transaction primitive；没有新增 lock、journal、功能或 commit。
+
+### App Restore writer failure safety
+
+- IndexedDB restore writer 现在先于选中的 LocalStorage keys 执行；writer rejection/transaction abort 时，LocalStorage restore 尚未开始。
+- writer failure 后不再调用 `replaceStores(indexedDBBackup)`，也不执行外层旧 backup 补偿。IndexedDB transaction abort 继续作为 restore payload 的原子回滚边界，代码保留 failure 时观察到的当前 IndexedDB 状态。
+- `AppDataRestoreError.failureState` 明确区分 `writer-failed-current-state-retained` 与 `committed-unverified`；两类 failure 均禁止用旧 backup 覆盖其它 tab 数据。
+- 回归覆盖 transaction abort 后 Conversation/Message/LocalStorage 零变化，以及 abort 后另一 transaction 写入新 Conversation 时 failure path 不覆盖该并发数据；既有 post-commit verification failure no-rollback 回归继续通过。
+
+### Shared timestamp semantics
+
+- 新增纯 Core timestamp semantic validator，由 Migration 与 Snapshot-aware Restore 共同调用，不改变任何持久化字段。
+- schema v1/v2 migration preflight 现在与 Restore 一致要求 `capturedAt`、`importedAt`、`updatedAt` 存在、可解析、非未来，并满足 `capturedAt <= importedAt <= updatedAt`。
+- 缺失三类 timestamp、三类 future timestamp、两种 chronology inversion 均 fail closed 为 `invalid-legacy-metadata`；migration 零写入。
+- 合法 schema v1 migration → export → restore → sequence 2 append → cache clear/reload 闭环继续通过。
+
+### Validation
+
+- 定向：`npm test -- --run tests/indexeddb-reliability.test.ts tests/chatgpt-share-snapshot-migration.test.ts tests/share-snapshot-persistence.test.ts` passed（3 files / 157 tests）
+- Full Vitest：`npm test -- --run` passed（20 files / 374 tests）
+- `npm run lint`：passed
+- `npm run build`：passed（19 routes）
+- `npm run test:e2e`：passed（3/3；受限环境首次因 `listen EPERM 127.0.0.1:3100` 无法启动，获准本机监听后通过）
+- `git diff --check`：passed
+
+### Remaining risk
+
+- cached mutation guard 的跨 tab authoritative ownership TOCTOU 已由 release owner 接受为未来 hardening，不是 v1.8.1 blocker。
+- writer commit 后 verification failure 仍返回 committed-but-unverified，要求 reload/review；为保护并发数据，不做自动补偿。
+- 当前 hardening 仍在 `feat/v1.8.1-hardening-work` working tree，未 commit、未 tag。
+
+---
+
+## 2026-07-31 v1.8.1 release blocker closure
+
+本轮只关闭 release audit 指出的两个 blocker：App Data Restore 在 transaction commit 后 verification failure 时可能用旧 backup 覆盖后续写入，以及 legacy migration 产物缺少可证明的 Migration → Export → Restore → Append 闭环。没有修改 Snapshot model/schema、IndexedDB schema/store、Import UI、migration 输出设计或 restore transaction primitive；没有新增 journal、功能或 commit。
+
+### App Restore post-commit safety
+
+- `replaceStores()` 的多-store readwrite transaction 与 restore payload 写入逻辑保持不变。
+- App Data Restore 现在显式记录 restore writer 已成功返回的 commit boundary。commit 后的 cache reload、ID verification、Snapshot content verification 或 lineage verification 失败只返回 committed-but-unverified error。
+- post-commit failure 不再调用 `replaceStores(indexedDBBackup)`，也不恢复旧 LocalStorage backup，避免覆盖其它 tab 在 restore transaction 后提交的数据。
+- restore writer 在 commit boundary 前失败时继续使用既有 backup/verification failure path；默认 IndexedDB `replaceStores()` 自身仍依赖 transaction abort 保证原子性。
+- 新增普通 restore ID mismatch 与 Snapshot content mismatch 两类回归：均在 restore commit 后注入另一写入并触发 verification failure，验证新 Conversation/metadata 写入保留、旧 backup 不回写。
+
+### Migration → Export → Restore → Append closure
+
+- migration 仍执行零写入 preflight → explicit confirmation → 单 transaction Source metadata update → reload verification；Source/Message/Round ID 和 transcript 内容均不修改。
+- legacy preflight 新增三项 fail-closed invariant：Message `order` 必须从 0 连续；Source content 必须覆盖 parser 输出的 canonical rendered transcript；每条 canonical Message 必须由同 Conversation 的一个且仅一个 Round 引用。
+- migration readonly preflight 与最终 readwrite revalidation 均读取 `conversations + sources + messages + rounds`；最终 transaction 仍只 `put()` 同 ID migrated Source。
+- Snapshot-aware Restore 同样要求 Message 的 Round exact-once membership；missing membership、跨 Round duplicate membership 与 dangling reference 都在写入前 blocked。
+- 端到端回归实际执行 schema v1 legacy Snapshot → explicit migration → App Data export → Snapshot-aware restore → sequence 2 canonical append → clear caches / reload，并验证连续 `order/sourceOrdinal`、Source chain 与 Round exact-once membership。
+
+### Validation
+
+- App Restore 定向：`npm test -- --run tests/indexeddb-reliability.test.ts tests/share-snapshot-persistence.test.ts` passed（2 files / 133 tests）
+- Migration/closure 定向：`npm test -- --run tests/chatgpt-share-snapshot-migration.test.ts tests/share-snapshot-persistence.test.ts` passed（2 files / 77 tests）
+- Full Vitest：`npm test -- --run` passed（20 files / 365 tests）
+- `npm run lint`：passed（0 errors / 0 warnings）
+- `npm run build`：passed（19 routes）
+- `npm run test:e2e`：passed（3/3；沙箱内首次因 `listen EPERM 127.0.0.1:3100` 无法启动，授权本机监听后通过）
+- `git diff --check`：passed
+
+### Release state / remaining review
+
+- 当前分支仍为 `feat/v1.8.1-hardening-work`，HEAD 仍指向 `v1.8.0`；全部 v1.8.1 hardening 仍在 working tree，未 commit、未 tag。
+- post-commit verification failure 表示 restore 已提交但本次验证未确认；调用方必须 reload/review，禁止自动补偿覆盖。
+- 缺少 canonical Round exact-once membership 的 legacy Snapshot 会在 migration preflight blocked；本轮不自动生成 Round、不猜测历史。
+- release audit 记录的跨 tab cached mutation guard / authoritative Source ownership TOCTOU 不属于本轮两个 blocker 修复范围，仍需最终 release owner 明确接受或另行关闭。
+
+---
+
+## 2026-07-30 v1.8.1 Conversation Version Restore atomicity
+
+本轮只将 Conversation Version Restore 的默认 IndexedDB 路径改为原子写入。没有修改 Snapshot metadata/schema、IndexedDB schema/store、Import、App Data Restore、migration 或其它业务模块；没有新增 UI 功能。
+
+### Transaction boundary
+
+- Core `ConversationVersionService` 继续负责既有 Restore 语义：从版本内容生成全新 Message IDs，以 snapshot/current Message order 建立引用映射，并保留既有 Round ID、order、title、question、answer、note、summary、context 与 timestamps，仅替换 `messageIds`。
+- Service 不再依次调用 Conversation/Message/Round storage；它生成包含 authoritative before state 与 planned after state 的 writer command。
+- 默认 IndexedDB writer 先 drain 本 tab tracked pending writes，再开启唯一的 `conversations + messages + rounds` readwrite transaction。
+- transaction 内重新读取三个 store，并验证目标 Conversation、全部目标 Messages 与 Rounds 仍与 command baseline 一致；同时验证 Conversation ID、全新且无冲突的 Message IDs/唯一 order、Round set/字段 preservation 和无 dangling Message reference。
+- 验证通过后，同一 transaction 内 put Conversation、删除并替换目标 Conversation 的 Messages、删除并替换目标 Conversation 的 Rounds。无关 Conversation records 不清空、不覆盖。
+- validation failure 或 IndexedDB transaction abort 依赖原子回滚；transaction commit 前不修改三个 in-memory cache。
+
+### Post-commit and UI success
+
+- commit 后使用单个三-store readonly transaction 重载 Conversation/Message/Round authoritative records，再更新对应 cache；不运行会触碰其它 stores 的全库 preload。
+- reload 后逐内容核对 restored aggregate，并再次验证全部 Round.messageIds 均指向 reloaded Messages，且 pending writes 为零。
+- post-commit reload/reference verification 失败抛出带 `committed=true` 的 `ConversationVersionRestoreReloadVerificationError`，不会用 transaction 前数据执行补偿性回滚。
+- Conversation Detail 在发起 Restore 前清除旧 success 状态；只有 writer commit、cache reload 与 reference verification 全部 resolve 后才更新 Detail/RoundWorkspace 并显示 `Restored successfully`。abort/rejection 不更新成功状态。
+- Snapshot-owned Conversation 仍在 writer 执行前由 immutable mutation guard 阻止。
+- LocalStorage debug mode 继续使用既有顺序写语义，并在返回前重读 Conversation/Message/Round、验证引用；IndexedDB 原子性不适用于 LocalStorage。
+
+### Regression coverage
+
+- 验证一次 Restore 只有一个覆盖 `conversations + messages + rounds` 的 readwrite transaction。
+- 强制 transaction abort 后，三个 durable stores 与三个 caches 均保持原值。
+- 连续两次 Restore 每次生成不同 Message IDs，并将当前 Round references 映射到当次 IDs。
+- transaction commit 后 cache 与再次 durable reload 的 Message/Round references 一致，Round 扩展字段保持。
+- Snapshot-owned Conversation 在打开 Restore write transaction 前 blocked。
+
+### Validation
+
+- 定向：`npm test -- --run tests/conversation-version-restore.test.ts tests/share-snapshot-mutation-guard.test.ts tests/share-snapshot-persistence.test.ts tests/indexeddb-reliability.test.ts` passed（4 files / 139 tests）
+- `npm run lint`：passed（0 errors / 0 warnings）
+- `npm run build`：passed（19 routes）
+- Full Vitest：`npm test -- --run` passed（20 files / 357 tests）
+- Playwright：`npm run test:e2e` passed（3/3；沙箱内首次因 `listen EPERM 127.0.0.1:3100` 无法启动，授权本机监听后通过）
+- `git diff --check`：passed
+
+### Remaining risk
+
+- LocalStorage debug mode 没有事务能力，仍可能在浏览器存储异常时出现部分写入；默认 IndexedDB 产品路径已具备三-store 原子性。
+- writer 的 optimistic baseline 只锁定目标 Conversation aggregate；无关 Conversation 可以并发写入。目标 aggregate 的并发变化会 fail closed 并要求用户重试。
+- commit 后其它 tab 立即修改同一 aggregate 会使 reload verification 报 committed-but-unverified；为避免覆盖其它 tab，workflow 不做自动回滚，UI 不显示成功。
+
+---
+
+## 2026-07-30 v1.8.1 Migration / Restore timestamp invariant
+
+本轮只修复合法 legacy migration 结果无法通过 Snapshot-aware App Data Restore 的 timestamp invariant 冲突。没有修改 Snapshot metadata schema、IndexedDB schema/store、Import/UI、migration 写入形状或其它功能。
+
+### Timestamp semantics
+
+- `capturedAt`：Snapshot transcript 内容被捕获/生成的时间。
+- `importedAt`：PALOS 首次导入该 Snapshot record 的时间。
+- `updatedAt`：PALOS 内部 Source record 最近一次元数据变化的时间。
+- 三者不再要求完全相等；每个字段必须存在、可解析且不晚于 restore preflight 执行时间。
+- 单个 Source 必须满足 `capturedAt <= importedAt <= updatedAt`。
+- Snapshot chain 中后继 Source 的 `capturedAt` 不得早于 predecessor，避免 timestamp chronology 与 immutable lineage 相冲突；同一时刻 capture 仍允许。
+
+### Immutable validation preservation
+
+- resourceHash owner、snapshotHash、canonical transcript、snapshotSequence、previousSnapshotSourceId、Message sourceId/sourceOrdinal provenance、Round ownership/dangling references 校验全部保留。
+- 合法 timestamp 差异不会跳过 hash/provenance 校验；回归测试在合法差异存在时继续阻止被篡改的 snapshotHash。
+- timestamp 未来值、`capturedAt > importedAt`、`importedAt > updatedAt` 与 lineage capturedAt 倒退均返回 `blocked`，restore 前零写入。
+
+### Regression coverage
+
+- schema v1 legacy Source 经 explicit workflow migration 成功，保留不同但合法的 captured/imported/updated timestamps。
+- migrated Snapshot 完整 export，Snapshot restore preflight 返回 valid。
+- 清空 canonical stores 后 restore 成功，内部 reload verification 通过；再次 clear cache / preload 后 Source 和 Messages 与导出 bundle 一致。
+- future updatedAt、importedAt 早于 capturedAt、successor capturedAt 早于 predecessor 三类 timestamp 篡改均 blocked。
+
+### Validation
+
+- 定向：`npm test -- --run tests/chatgpt-share-snapshot-migration.test.ts tests/share-snapshot-persistence.test.ts` passed（2 files / 66 tests）
+- `npm run lint`：passed
+- `npm run build`：passed（19 routes）
+- Full Vitest：`npm test -- --run` passed（20 files / 353 tests）
+- Playwright：`npm run test:e2e` passed（3/3）
+- `git diff --check`：passed
+
+### Remaining risk
+
+- 当前 Snapshot hash algorithm 只绑定 role/content，不对 timestamp 做签名；在不修改 schema/hash algorithm 的限制下，validator 可以阻止缺失、未来、逆序和 lineage chronology 破坏，但无法证明一个语义合法的历史 timestamp 从未被人为改写。
+- “未来时间”以当前浏览器系统时钟为准；严重的本机时钟回拨会使原本合法的记录 fail closed，用户需校准时钟后重试。
+
+---
+
+## 2026-07-30 Phase 2D P1-4 Legacy migration workflow
+
+本轮只实现 P1-4，将已有 schema v1 ChatGPT Share Snapshot Source 通过显式、可确认的 IndexedDB workflow 升级为 v1.8 immutable metadata。没有修改 Snapshot schema/metadata 字段定义、Import workflow、App Data Restore、IndexedDB schema/version/store，也没有进入其它新功能。
+
+### Workflow
+
+- 新增 `IndexedDBLegacyShareSnapshotMigrationWorkflow`，固定执行 `preflight → explicit confirmation → atomic migration → reload verification`。
+- `preflight(sourceId)` 只在 `conversations + sources + messages` readonly transaction 中读取 authoritative state，不发起任何写 transaction；结果只会是 `migrated`（可确认）、`noop`（已是合法 immutable metadata）或 `blocked`。
+- 每个可确认 preflight 使用一次性、进程内 preview ID。`confirm()` 必须提供同一个未消费 preview ID 和 `confirmed: true`；拒绝、重复确认、过期或未知 preview 都返回 `confirmation-required`，不会写入。
+- preflight 复用 deterministic legacy migration validator，验证 URL/shareId canonical normalization、唯一 resourceHash owner、支持的 hash algorithm、Source/Conversation ownership、连续 sourceOrdinal/order、Message sourceId provenance、canonical transcript role/content/count 与 snapshotHash。
+- 确认时创建唯一的 `conversations + sources + messages` readwrite transaction，在 transaction 内重新读取全部 authoritative records；只有它们与已验证的 preflight baseline 完全一致且 owner 仍存在，才 `put()` 单个 migrated Source。任何并发变化会 abort 并返回 `authoritative-state-changed`。
+- migration 只替换同 ID Source 的 metadata：保留 Source ID、conversationId、name/content、importedAt/updatedAt；完全不写 Messages，因此 Message ID、sourceId、sourceOrdinal、content/timestamps 保持原样。
+- 新 metadata 只生成 canonical `resourceHash`、`snapshotSequence: 1`，不设置 `previousSnapshotSourceId`；snapshotHash、snapshotMessageCount、capturedAt、parserVersion、inputKind 与受支持的 hashAlgorithm 来自已验证 legacy metadata，不猜测历史或生成伪链。
+- commit 后执行 `clearCaches() → preloadAll()`，再从 IndexedDB reload Source/Messages，逐内容验证 preservation、metadata、idempotent noop 与 pending writes。reload verification 失败返回 `reload-verification-failed`，不做补偿性回滚，因此不会覆盖 commit 后其它 tab 的写入。
+
+### Blocked coverage
+
+- URL normalization/shareId 不一致：`invalid-url-normalization`
+- 不支持的 hash algorithm：`unsupported-hash-algorithm`
+- Source/Message ownership 错误：`missing-source-ownership`
+- Message ordinal/order 错误：`broken-source-ordinal`
+- Message sourceId provenance 错误：`message-provenance-mismatch`
+- transcript role/content/count/snapshotHash 不一致：`canonical-transcript-mismatch`
+- resourceHash 跨 Conversation collision：`resource-hash-collision`
+- 同 Conversation 已存在同 resource history：`resource-history-conflict`
+- preflight 后 canonical state 变化、transaction abort、reload verification failure 分别 fail closed；均不自动修复、不修改 ID、不猜测 lineage。
+
+### Regression coverage
+
+- 合法 legacy Source：preflight 零写、拒绝确认零写、显式确认后单 transaction migration、reload verification 通过；Source/Message identity、provenance、transcript、capturedAt/timestamps 保留。
+- 已迁移 Source：新 preflight 返回 `noop`，无 write transaction。
+- URL、hash algorithm、ownership、ordinal、transcript、Message provenance、resourceHash collision 七类 blocked preflight 均验证 durable records 零变化。
+- preflight 后另一 tab 修改 Source：最终 transaction 内识别 stale baseline 并 abort，竞争写入完整保留。
+- 强制 readwrite transaction abort：schema v1 Source 与 Messages 全量回滚。
+- commit 后模拟另一 tab 修改 Source：reload verification 报 blocked，已提交 schema v2 metadata 与后续 tab 修改都保留，不执行旧数据覆盖。
+
+### Validation
+
+- 定向：`npm test -- --run tests/chatgpt-share-snapshot-migration.test.ts tests/share-snapshot-persistence.test.ts` passed（2 files / 62 tests）
+- `npm run lint`：passed
+- `npm run build`：passed（19 routes）
+- Full Vitest：`npm test -- --run` passed（20 files / 349 tests）
+- Playwright：`npm run test:e2e` passed（3/3；沙箱内首次因 `listen EPERM 127.0.0.1:3100` 无法启动，授权本机监听后通过）
+- `git diff --check`：passed
+
+### Remaining risks / boundary
+
+- preview plan 只保存在当前页面的 JS context；刷新或跨 tab 不能复用确认，这是显式 fail-closed 行为，不是 durable migration queue。
+- transaction 为确保 preflight validation 不受 TOCTOU 影响，会对三个 canonical stores `getAll()` 并锁定其 exact baseline；无关 Source/Message 的并发变化也会要求重新 preflight。按限制没有新增 index/store。
+- commit 后合法并发写入可能使 exact reload verification 返回 blocked；结果表示 migration 已提交但未通过本次 verification，调用方应 reload 后重新 preflight，禁止盲目 rollback。
+- 本轮只提供明确的 workflow API 与公开 IndexedDB export；没有修改 Import UI、Settings App Data Restore UI 或增加自动 migration 入口。
+
+---
+
+## 2026-07-30 Phase 2C P1-2 Snapshot-aware App Data Restore
+
+本轮只实现 P1-2，防止 PALOS App Data Restore 接受会破坏 immutable Snapshot lineage 的 bundle。没有修改 Snapshot metadata schema、ChatGPT Conversation Snapshot Import workflow、Conversation Version Restore、migration、IndexedDB schema/version/store，也没有改变普通 Conversation backup 的 replace/backup/rollback/reload 行为。
+
+### Snapshot-aware preflight
+
+- 新增 Core `preflightShareSnapshotRestore()`，只要 App Data bundle 的 Source 带 `shareSnapshot`，就要求 bundle 同时提供完整 Conversation、Source、Message、Round stores；缺失任何一项都返回 `blocked`，不会从当前数据库猜测或补齐。
+- Source preflight 验证 schema v2、64 位 `resourceHash` / `snapshotHash`、合法 `capturedAt`、Source timestamps、parserVersion、inputKind、hashAlgorithm、snapshotMessageCount、`previousSnapshotSourceId` 与连续 `snapshotSequence`。
+- resourceHash 必须只有一个 Conversation owner；history resolver 必须得到唯一完整 head，无 collision、multiple heads、cycle、missing previous 或 ownership mismatch。单个 Snapshot Conversation 不能拥有多个 resource histories。
+- 每个 immutable Source.content 必须是 canonical rendered transcript；重新 parse 后 Message count 与 SHA-256 snapshotHash 必须匹配，后续 Source transcript 必须完整保留前序 prefix。
+- canonical Messages 必须全部归属 Snapshot Conversation，`sourceOrdinal` 从 0 连续唯一，`order` 与 transcript ordinal 一致，`sourceId` 必须精确指向首次引入该 ordinal 的 Snapshot Source，role/content 必须与 head transcript 一致。
+- Snapshot Rounds 必须归属相同 Conversation；messageIds 不得重复、跨 owner 或 dangling。preflight 不修改 ID、不自动修复、不猜测 lineage，也不调用 migration。
+- App Data preview 和 import 都执行 preflight。invalid Snapshot preview 显示 `Snapshot restore blocked` 并禁用确认；`importData()` 自身仍会重新 preflight，绕过 UI 时也在 backup/write 前返回 `{ status: "blocked" }`。
+
+### Restore and reload verification
+
+- 合法 Snapshot bundle 继续复用现有 App Data backup → `replaceStores()` → `clearCaches()` → `preloadAll()` 流程。
+- 既有逐-store ID verification 后，Snapshot restore 额外逐内容核对 reloaded Conversation/Source/Message/Round 与 bundle，并对 durable reload state 再运行完整 Snapshot preflight。
+- reload/content/lineage verification 失败继续进入现有 App Data Restore rollback + backup verification；没有增加 store、journal 或新恢复机制。
+- 不含 Snapshot Source 的普通 bundle 返回 `not-applicable` preflight，写入结果 shape、selected LocalStorage keys、IndexedDB replace、rollback 与 reload verification 保持原行为。
+
+### Regression coverage
+
+- 合法 sequence 1 → sequence 2 Snapshot chain restore，reload 后 metadata、provenance 与 Round references 保持。
+- 篡改 Source snapshotHash：preview/import 均 blocked，现有 canonical data 零变化。
+- 同 resourceHash 跨 Conversation collision：blocked，零写入。
+- Message sourceId provenance 指向错误 Snapshot Source：blocked，零写入。
+- Round dangling Message reference：blocked，零写入。
+- 普通 Conversation backup：preflight `not-applicable`，restore result 与 durable records 保持既有行为。
+
+### Validation
+
+- 定向：`npm test -- --run tests/share-snapshot-persistence.test.ts tests/indexeddb-reliability.test.ts` passed（2 files / 112 tests）
+- Full Vitest：`npm test -- --run` passed（20 files / 338 tests）
+- `npm run lint`：passed
+- `npm run build`：passed（19 routes）
+- `git diff --check`：passed
+
+### Remaining risks / next boundary
+
+- Snapshot restore 必须是包含四个 canonical stores 的完整 App Data snapshot；本轮不提供 partial Snapshot restore、merge、ID remap 或 lineage repair。
+- transcript hash preflight 使用 Web Crypto，超大本地 bundle 会增加 preview/restore 前的 CPU 时间；没有新增 worker、index 或 store。
+- App Data Restore 继续沿用既有操作内 backup，不是 crash-safe durable journal；页面崩溃后的恢复不在 P1-2。
+- migration 未进入。
+
+---
+
+## 2026-07-30 Phase 2B P1-1 Snapshot transactional consistency
+
+本轮只实现 P1-1，关闭 canonical Snapshot operation 的 authoritative read / validation / `putStores()` 分离造成的跨 tab TOCTOU。没有进入 P1-2；没有修改 Snapshot metadata schema、Import UI、migration、App Data Restore、IndexedDB schema/version/store 或其它业务路径。
+
+### Transaction boundary
+
+- canonical operation 先 drain 当前 tab 的 tracked pending writes，然后创建唯一的 `conversations + sources + messages + rounds` `readwrite` transaction。
+- transaction 内对四个 store 重新 `getAll()`；最后一个 read request 成功后同步执行最终 `validatePlan()`，校验 Conversation/Source/Message/Round authoritative state。
+- 最终校验覆盖 resourceHash 单 owner、Snapshot chain/head uniqueness、`previousSnapshotSourceId`、连续 `snapshotSequence`、Message immutable provenance、连续且唯一的 `sourceOrdinal`、Round membership/reference uniqueness 与 Message/Round ordinal continuity。
+- 只有全部校验通过才在同一 transaction 排队 Conversation、new immutable Source、suffix Messages 与 Round extension/new Rounds 的 `put()`；校验异常显式 abort，request/transaction abort 依赖 IndexedDB 原子回滚。
+- operation 不再执行独立 readonly authoritative read 后再调用 `putStores()`；通用 `putStores()` API 保留给其它既有调用方，未改变 store 或 schema。
+
+### Post-commit verification
+
+- transaction commit 后继续执行 `clearCaches()` → `preloadAll()` → full canonical store/content、metadata、lineage、references、preserved immutable Source/Round fields 与 pending-write verification。
+- reload/preload/verification 失败会抛出 `ShareSnapshotReloadVerificationError`，显式标记 `committed=true`。该错误表示 durable transaction 已完成但 reload verification 未确认。
+- post-commit failure 不执行旧 state 的 compensating rollback；因此不会用本 tab 的 transaction 前快照覆盖其它 tab 在 commit 后写入的 Conversation enrichment 或其它 canonical data。
+
+### Regression coverage
+
+- concurrent append：另一个 writer 在最终 transaction 前提交 sequence 2 后，旧 plan 因 previous Source 已非 head 而 abort，竞争写入完整保留。
+- concurrent new baseline：同 resourceHash 已被另一个 writer建立 sequence 1 后，旧 new plan 因 duplicate head 而 abort。
+- duplicate head：最终 transaction 读到 multiple heads 时 fail closed，零 plan write。
+- transaction abort：final validation 通过并排队四-store writes 后强制 abort，Conversation/Source/Message/Round 全部回滚。
+- reload verification failure：commit 后模拟其它 tab 更新 Conversation；operation 报 committed-but-unverified，Snapshot write 与其它 tab 更新均保留，不回滚覆盖。
+
+### Validation
+
+- 定向：`npm test -- --run tests/share-snapshot-persistence.test.ts tests/chatgpt-share-snapshot-workflow.test.ts` passed（2 files / 50 tests）
+- Full Vitest：`npm test -- --run` passed（20 files / 332 tests）
+- `npm run lint`：passed
+- `npm run build`：passed（19 routes）
+
+### Remaining risks / next boundary
+
+- post-commit verification 可能因合法的 commit 后并发写入而报告 committed-but-unverified；当前没有 durable verification journal，调用方必须重新 reload/preview 确认，不能盲目 retry 或回滚。
+- transaction 对四个 canonical store 使用 `getAll()`，保持现有 validation 语义但会随本地数据规模增长延长写锁时间；按本轮限制没有新增 index/store 或改变 schema。
+- pending-write drain 只跟踪当前 JS context；跨 tab 排他性由重叠 IndexedDB `readwrite` transaction 的序列化和 transaction 内 invariant validation 提供，不是跨 tab lease。
+- P1-2 未开始。
+
+---
+
 ## 2026-07-29 v1.8 release documentation closure
 
 PALOS v1.8 immutable ChatGPT Conversation Snapshot 已达到 **release checkpoint complete**。当前 release candidate 基线为 `d8a8544 release: finalize v1.8 share snapshot checkpoint` / `v1.8.0-rc1`；本节只对齐最终文档状态，没有修改产品代码、Snapshot schema/model、workflow、canonical writer、storage、IndexedDB schema/store 或 import 行为，也没有 commit 或 push。

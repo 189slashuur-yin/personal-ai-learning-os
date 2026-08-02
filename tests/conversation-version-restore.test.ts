@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { ConversationVersionStorage } from "@/core/contracts/conversation-version-storage";
 import type { ConversationVersion } from "@/core/entities/conversation-version";
 import { ConversationVersionService } from "@/core/services/conversation-version-service";
+import { StorageBackedConversationVersionRestoreWriter } from "@/infrastructure/storage/storage-backed-conversation-version-restore-writer";
 import {
   InMemoryConversationStorage,
   InMemoryMessageStorage,
@@ -120,6 +121,11 @@ function createHarness() {
     versions,
     round,
     snapshotMessages,
+    writer: new StorageBackedConversationVersionRestoreWriter({
+      conversations,
+      messages,
+      rounds,
+    }),
     service: new ConversationVersionService({
       conversations,
       messages,
@@ -129,14 +135,15 @@ function createHarness() {
 }
 
 describe("ConversationVersionService restore referential integrity", () => {
-  it("regenerates Message identity and remaps stable Round references", () => {
+  it("regenerates Message identity and remaps stable Round references", async () => {
     const harness = createHarness();
-    const restored = harness.service.restoreSnapshot(
+    const restored = await harness.service.restoreSnapshot(
       conversationId,
       "version",
       {
         sources: harness.sources,
         rounds: harness.rounds,
+        writer: harness.writer,
       },
     );
 
@@ -162,22 +169,24 @@ describe("ConversationVersionService restore referential integrity", () => {
     ).toBe(true);
   });
 
-  it("remaps from already-restored Message IDs on a repeated restore", () => {
+  it("remaps from already-restored Message IDs on a repeated restore", async () => {
     const harness = createHarness();
-    const first = harness.service.restoreSnapshot(
+    const first = await harness.service.restoreSnapshot(
       conversationId,
       "version",
       {
         sources: harness.sources,
         rounds: harness.rounds,
+        writer: harness.writer,
       },
     );
-    const second = harness.service.restoreSnapshot(
+    const second = await harness.service.restoreSnapshot(
       conversationId,
       "version",
       {
         sources: harness.sources,
         rounds: harness.rounds,
+        writer: harness.writer,
       },
     );
 
@@ -201,6 +210,18 @@ describe("ConversationVersionService restore referential integrity", () => {
     expect(detailSource).toContain(
       "setRoundWorkspaceRevision((current) => current + 1)",
     );
+    expect(detailSource).toContain(
+      "const result = await new ConversationVersionService",
+    );
+    const clearStatusIndex = detailSource.indexOf("setRestoreStatus(null);");
+    const awaitRestoreIndex = detailSource.indexOf(
+      "const result = await new ConversationVersionService",
+    );
+    const successStatusIndex = detailSource.indexOf(
+      'setRestoreStatus("Restored successfully");',
+    );
+    expect(clearStatusIndex).toBeLessThan(awaitRestoreIndex);
+    expect(awaitRestoreIndex).toBeLessThan(successStatusIndex);
     expect(
       detailSource.match(
         /key=\{`round-workspace-\$\{roundWorkspaceRevision\}`\}/g,

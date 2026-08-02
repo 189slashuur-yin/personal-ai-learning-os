@@ -5,15 +5,18 @@ import {
   type ImportedSource,
 } from "@/core/entities/imported-source";
 import type { Message } from "@/core/entities/message";
+import type { Round } from "@/core/entities/round";
 import {
   CHATGPT_SHARE_SNAPSHOT_HASH_ALGORITHM,
   hashChatGPTShareSnapshot,
 } from "@/core/services/chatgpt-share-snapshot-comparator";
+import { renderChatGPTShareSnapshotTranscript } from "@/core/services/chatgpt-share-snapshot-import";
 import { parseChatGPTShareSnapshot } from "@/core/services/chatgpt-share-snapshot-parser";
 import {
   identifyChatGPTShareUrl,
   normalizeChatGPTShareUrl,
 } from "@/core/services/chatgpt-share-snapshot-url";
+import { requireShareSnapshotTimestampSemantics } from "@/core/services/share-snapshot-timestamp-semantics";
 
 export const legacyShareSnapshotMigrationBlockedReasons = [
   "invalid-legacy-metadata",
@@ -33,6 +36,7 @@ export type LegacyShareSnapshotMigrationBlockedReason =
 export type LegacyShareSnapshotMigrationInput = Readonly<{
   source: Readonly<ImportedSource>;
   messages: readonly Readonly<Message>[];
+  rounds: readonly Readonly<Round>[];
   sources: readonly Readonly<ImportedSource>[];
 }>;
 
@@ -84,8 +88,6 @@ function validateCommonMetadata(
     !metadata.snapshotHash?.trim() ||
     !Number.isSafeInteger(metadata.snapshotMessageCount) ||
     metadata.snapshotMessageCount < 1 ||
-    !metadata.capturedAt?.trim() ||
-    Number.isNaN(Date.parse(metadata.capturedAt)) ||
     !metadata.parserVersion?.trim() ||
     (metadata.inputKind !== "saved-html" &&
       metadata.inputKind !== "pasted-text")
@@ -93,6 +95,16 @@ function validateCommonMetadata(
     return blocked(
       "invalid-legacy-metadata",
       `Source ${source.id} contains invalid Share Snapshot metadata.`,
+    );
+  }
+  try {
+    requireShareSnapshotTimestampSemantics(source, metadata, Date.now());
+  } catch (error) {
+    return blocked(
+      "invalid-legacy-metadata",
+      error instanceof Error
+        ? error.message
+        : `Source ${source.id} contains invalid Snapshot timestamps.`,
     );
   }
   return null;
@@ -150,6 +162,7 @@ async function validateResourceUniqueness(input: {
 async function validateLegacyCanonicalProjection(input: {
   source: Readonly<ImportedSource>;
   messages: readonly Readonly<Message>[];
+  rounds: readonly Readonly<Round>[];
   metadata: NonNullable<ImportedSource["shareSnapshot"]>;
 }): Promise<LegacyShareSnapshotMigrationResult | null> {
   const conversationId = input.source.conversationId as string;
@@ -176,8 +189,7 @@ async function validateLegacyCanonicalProjection(input: {
     if (
       ids.has(message.id) ||
       message.sourceOrdinal !== index ||
-      (index > 0 &&
-        message.order !== canonicalMessages[index - 1].order + 1)
+      message.order !== index
     ) {
       return blocked(
         "broken-source-ordinal",
@@ -208,6 +220,15 @@ async function validateLegacyCanonicalProjection(input: {
       `Source ${input.source.id} transcript count does not match canonical Messages.`,
     );
   }
+  if (
+    renderChatGPTShareSnapshotTranscript(parsed.messages) !==
+    input.source.content
+  ) {
+    return blocked(
+      "canonical-transcript-mismatch",
+      `Source ${input.source.id} transcript is not in canonical rendered form.`,
+    );
+  }
   for (const [index, parsedMessage] of parsed.messages.entries()) {
     const canonicalMessage = canonicalMessages[index];
     if (
@@ -225,6 +246,57 @@ async function validateLegacyCanonicalProjection(input: {
     return blocked(
       "canonical-transcript-mismatch",
       `Source ${input.source.id} snapshot hash does not match its canonical transcript.`,
+    );
+  }
+
+  const canonicalMessageIds = new Set(
+    canonicalMessages.map(({ id }) => id),
+  );
+  const membership = new Map(
+    canonicalMessages.map(({ id }) => [id, 0]),
+  );
+  for (const round of input.rounds) {
+    if (!Array.isArray(round.messageIds)) {
+      return blocked(
+        "canonical-transcript-mismatch",
+        `Round ${round.id} has invalid Message membership.`,
+      );
+    }
+    if (round.conversationId !== conversationId) {
+      if (
+        round.messageIds.some((messageId) =>
+          canonicalMessageIds.has(messageId),
+        )
+      ) {
+        return blocked(
+          "canonical-transcript-mismatch",
+          `Round ${round.id} references legacy Snapshot Messages across Conversations.`,
+        );
+      }
+      continue;
+    }
+    const seen = new Set<string>();
+    for (const messageId of round.messageIds) {
+      if (
+        seen.has(messageId) ||
+        !canonicalMessageIds.has(messageId)
+      ) {
+        return blocked(
+          "canonical-transcript-mismatch",
+          `Round ${round.id} has invalid legacy Snapshot Message membership.`,
+        );
+      }
+      seen.add(messageId);
+      membership.set(messageId, (membership.get(messageId) ?? 0) + 1);
+    }
+  }
+  const invalidMembership = canonicalMessages.find(
+    ({ id }) => membership.get(id) !== 1,
+  );
+  if (invalidMembership) {
+    return blocked(
+      "canonical-transcript-mismatch",
+      `Message ${invalidMembership.id} must belong to exactly one Round before migration.`,
     );
   }
   return null;
@@ -303,6 +375,7 @@ export async function migrateLegacyMutableShareSnapshotSource(
   const invalidProjection = await validateLegacyCanonicalProjection({
     source,
     messages,
+    rounds: input.rounds,
     metadata,
   });
   if (invalidProjection) return invalidProjection;

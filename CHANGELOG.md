@@ -2,7 +2,21 @@
 
 本文件记录当前仓库已经完成的 Sprint 与关键提交。日期使用仓库 commit date。
 
-当前口径：Runtime Version 为 v1.7 release candidate；Final Release QA 已通过，release commit 尚未创建。
+当前口径：Runtime Version 为 v1.8.1 hardening candidate；完整 hardening 仍在 `feat/v1.8.1-hardening-work` working tree，release commit/tag 尚未创建。
+
+## 2026-07-31 — v1.8.1 Hardening Candidate
+
+- **Snapshot transaction consistency**：canonical writer 在单个 Conversation/Source/Message/Round readwrite transaction 内完成最终 authoritative validation 与 write；abort 原子回滚，post-commit verification failure 不补偿覆盖。
+- **Snapshot-aware App Restore**：restore 前验证 resourceHash owner、完整 lineage、timestamps、canonical transcript、Message provenance 与 Round references；commit 后 reload/content verification failure 不再用旧 backup 覆盖其它 tab 的后续写入。
+- **App Restore writer failure safety**：IndexedDB writer rejection/transaction abort 后保留当前数据库状态，不再用 transaction 前 backup 执行补偿覆盖；LocalStorage restore 延后到 writer commit 之后。
+- **Legacy migration workflow**：schema v1 Snapshot 通过零写 preflight、显式确认、atomic Source metadata migration 与 reload verification升级；不修改 ID、Message provenance 或 transcript。
+- **Migration closure**：Message order 必须从 0 连续，Source transcript 必须为 canonical coverage，每条 Snapshot Message 必须恰好属于一个 Round；完整回归覆盖 migration → export → restore → append → reload。
+- **Timestamp semantics**：`capturedAt` 表示内容捕获时间，`importedAt` 表示 PALOS 首次导入时间，`updatedAt` 表示最近元数据变化时间；允许语义合法的不相等值，不降低 hash/lineage/provenance 校验。
+- **Shared timestamp validation**：Migration 与 Restore 复用同一 semantic validator，统一拒绝缺失、未来与 `capturedAt > importedAt` / `importedAt > updatedAt`。
+- **Conversation Restore atomicity**：普通 Conversation Version Restore 使用 Conversation/Message/Round 单 transaction，保留新 Message IDs、Round ID/order/enrichment 并自动重映射 `messageIds`。
+- **Compatibility**：未修改 Snapshot metadata/schema、IndexedDB schema/store、Import workflow，没有新增 journal 或产品功能。
+- **Tests**：Vitest 20 files / 374 tests；Playwright 3/3；lint/build/diff-check passed。
+- **Release state**：未 commit、未 tag；跨 tab cached mutation guard 的 authoritative Source ownership TOCTOU 已接受为未来 hardening，不作为 v1.8.1 blocker。
 
 ## 2026-07-19 — v1.7 Personal AI Context Management
 

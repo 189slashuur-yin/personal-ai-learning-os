@@ -2,11 +2,21 @@
 
 ## Current release context
 
-- Current Version：v1.8 release checkpoint complete（`v1.8.0-rc1`）
-- Current Focus：immutable Conversation Snapshot architecture 已落地，进入最终 release 验收
-- Next Recommended Phase：确认最终 `v1.8.0` release；已延期 lifecycle、read UX 与 Search hardening 需单独批准
+- Current Version：v1.8.1 hardening candidate（working tree；未 commit、未 tag）
+- Current Focus：hardening final release audit 与 clean release commit
+- Automated Status：Vitest 20 files / 374 tests；Playwright 3/3；lint/build/diff-check passed
+- Next Recommended Phase：创建并复核 v1.8.1 release commit/tag；已接受的 cached mutation guard TOCTOU 与其它延期 hardening 需单独批准
 
 当前架构结论仍受单浏览器、本地优先与浏览器存储边界约束。PALOS 业务数据默认使用 IndexedDB；LocalStorage 保留为轻量配置、UI 偏好、schema/storage metadata 与旧数据迁移来源。v1.0 候选必须先完成范围和验收评审，不能从本文的演进 seam 推定为已批准实现。
+
+## v1.8.1 hardening delta
+
+- Share Snapshot canonical writer 在唯一 `conversations + sources + messages + rounds` readwrite transaction 内完成最终 authoritative validation 与写入；commit 后 verification failure 不执行补偿性 rollback。
+- App Data Restore 在写入前运行 Snapshot-aware lineage/provenance preflight。restore transaction 保持既有 `replaceStores()` 逻辑；writer commit 后的 reload/content/reference verification failure 不再用旧 backup 覆盖其它 tab 的后续写入。
+- legacy Snapshot workflow 保持 `preflight → explicit confirmation → atomic Source metadata migration → reload verification`，并在 preflight/final transaction 中额外锁定 Round baseline。Message order、canonical transcript 与 Round exact-once membership 是 migration/restore/append 的共同 invariant。
+- Conversation Version Restore 默认 IndexedDB writer 使用单个 `conversations + messages + rounds` transaction；新 Message IDs、Round reference remap 与既有 Round enrichment preservation 语义不变。
+- 所有 hardening 均复用现有七个 stores；没有 Snapshot metadata/schema、IndexedDB version/store、Import workflow 或 App Restore journal 变更。
+- transcript mutation guard 仍通过当前 tab 的 Source storage view 判断 ownership；跨 tab authoritative Source check 尚未下沉到每个 mutation transaction，已接受为未来 hardening，不作为 v1.8.1 blocker。
 
 ## v1.8 Conversation Snapshot workflow delta
 

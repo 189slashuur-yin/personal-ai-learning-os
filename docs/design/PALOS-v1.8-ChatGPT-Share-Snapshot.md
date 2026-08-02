@@ -396,7 +396,7 @@ MVP 只允许：
 - 把候选作为新的独立 Conversation 导入；
 - 取消。
 
-“用远端替换 imported projection，同时保留所有本地 enrichment”需要完整重映射、provenance 降级和回滚方案，推迟到 v1.8.1。
+“用远端替换 imported projection，同时保留所有本地 enrichment”需要完整重映射、provenance 降级和回滚方案；它不属于 v1.8.1 reliability hardening，继续推迟到单独批准的后续版本。
 
 ### 7.5 失败与失效
 
@@ -577,7 +577,7 @@ Conversation Detail 显示 immutable ownership 状态，并提供返回 Conversa
 
 ## 12. 后续版本规划
 
-### v1.8.1 — Snapshot History and Conflict Resolution
+### Deferred — Snapshot History and Conflict Resolution（not part of v1.8.1 hardening）
 
 - Snapshot 详情和 bounded diff viewer；
 - 明确的“导入为新 Conversation”与 detached copy；

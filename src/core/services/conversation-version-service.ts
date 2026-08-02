@@ -1,5 +1,6 @@
 import type { ConversationStorage } from "@/core/contracts/conversation-storage";
 import type { ConversationVersionStorage } from "@/core/contracts/conversation-version-storage";
+import type { ConversationVersionRestoreWriter } from "@/core/contracts/conversation-version-restore-writer";
 import type { MessageStorage } from "@/core/contracts/message-storage";
 import type { RoundStorage } from "@/core/contracts/round-storage";
 import type { SourceStorage } from "@/core/contracts/source-storage";
@@ -29,6 +30,7 @@ export type RestoredConversationSnapshot = {
 export type ConversationSnapshotRestoreStorages = {
   sources: SourceStorage;
   rounds: RoundStorage;
+  writer: ConversationVersionRestoreWriter;
 };
 
 export type CreateConversationSnapshotOptions = {
@@ -85,11 +87,11 @@ export class ConversationVersionService {
     return version;
   }
 
-  restoreSnapshot(
+  async restoreSnapshot(
     conversationId: string,
     versionId: string,
     restoreStorages: ConversationSnapshotRestoreStorages,
-  ): RestoredConversationSnapshot | null {
+  ): Promise<RestoredConversationSnapshot | null> {
     const currentConversation =
       this.storages.conversations.getById(conversationId);
     const version = this.storages.versions
@@ -150,20 +152,23 @@ export class ConversationVersionService {
       }),
     }));
 
-    this.storages.conversations.save(restoredConversation);
-    this.storages.messages.replaceByConversationId(
-      currentConversation.id,
-      restoredMessages,
-    );
-    restoreStorages.rounds.replaceByConversationId(
-      currentConversation.id,
-      restoredRounds,
-    );
+    const restored = await restoreStorages.writer.execute({
+      before: {
+        conversation: currentConversation,
+        messages: currentMessages,
+        rounds: currentRounds,
+      },
+      after: {
+        conversation: restoredConversation,
+        messages: restoredMessages,
+        rounds: restoredRounds,
+      },
+    });
 
     return {
-      conversation: restoredConversation,
-      messages: restoredMessages,
-      rounds: restoredRounds,
+      conversation: restored.conversation,
+      messages: restored.messages,
+      rounds: restored.rounds,
       version,
     };
   }

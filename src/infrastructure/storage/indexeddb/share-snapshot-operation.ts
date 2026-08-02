@@ -13,8 +13,6 @@ import {
   drainPendingWritesOrThrow,
   getPendingWriteCount,
   openPalosDB,
-  putStores,
-  type StoreBatch,
 } from "./database";
 import {
   clearCaches,
@@ -54,6 +52,19 @@ export type ShareSnapshotCanonicalOperationResult = {
   preloadCounts: PreloadCounts;
   verification: ShareSnapshotCanonicalVerification;
 };
+
+export class ShareSnapshotReloadVerificationError extends Error {
+  readonly committed = true;
+  readonly cause: unknown;
+
+  constructor(cause: unknown) {
+    super(
+      "Share Snapshot transaction committed, but reload verification failed; no rollback was attempted.",
+    );
+    this.name = "ShareSnapshotReloadVerificationError";
+    this.cause = cause;
+  }
+}
 
 type CanonicalState = {
   conversations: Conversation[];
@@ -1050,13 +1061,17 @@ function verifyReloadedState(
   };
 }
 
-async function readCanonicalState(): Promise<CanonicalState> {
+async function validateAndWriteCanonicalState(
+  plan: ShareSnapshotCanonicalPlan,
+): Promise<PlanValidation> {
   const database = await openPalosDB();
-  return new Promise<CanonicalState>((resolve, reject) => {
+  return new Promise<PlanValidation>((resolve, reject) => {
     const transaction = database.transaction(
       ["conversations", "sources", "messages", "rounds"],
-      "readonly",
+      "readwrite",
     );
+    let validation: PlanValidation | null = null;
+    let validationError: unknown;
     const conversations = transaction
       .objectStore("conversations")
       .getAll() as IDBRequest<Conversation[]>;
@@ -1069,24 +1084,62 @@ async function readCanonicalState(): Promise<CanonicalState> {
     const rounds = transaction
       .objectStore("rounds")
       .getAll() as IDBRequest<Round[]>;
+
+    let completedReads = 0;
+    const handleReadSuccess = () => {
+      completedReads += 1;
+      if (completedReads < 4) return;
+      try {
+        validation = validatePlan(plan, {
+          conversations: conversations.result,
+          sources: sources.result,
+          messages: messages.result,
+          rounds: rounds.result,
+        });
+        transaction
+          .objectStore("conversations")
+          .put(validation.conversationWrite);
+        transaction.objectStore("sources").put(plan.source);
+        const messageStore = transaction.objectStore("messages");
+        for (const message of plan.messages) {
+          messageStore.put(message);
+        }
+        const roundStore = transaction.objectStore("rounds");
+        for (const round of plan.rounds) {
+          roundStore.put(round);
+        }
+      } catch (error) {
+        validationError = error;
+        transaction.abort();
+      }
+    };
+    conversations.onsuccess = handleReadSuccess;
+    sources.onsuccess = handleReadSuccess;
+    messages.onsuccess = handleReadSuccess;
+    rounds.onsuccess = handleReadSuccess;
     transaction.oncomplete = () => {
-      resolve({
-        conversations: conversations.result,
-        sources: sources.result,
-        messages: messages.result,
-        rounds: rounds.result,
-      });
+      if (!validation) {
+        reject(
+          new Error(
+            "Share Snapshot canonical transaction completed without validation.",
+          ),
+        );
+        return;
+      }
+      resolve(validation);
     };
     transaction.onerror = () => {
       reject(
+        validationError ??
         transaction.error ??
-          new Error("Share Snapshot canonical validation read failed."),
+          new Error("Share Snapshot canonical transaction failed."),
       );
     };
     transaction.onabort = () => {
       reject(
+        validationError ??
         transaction.error ??
-          new Error("Share Snapshot canonical validation read aborted."),
+          new Error("Share Snapshot canonical transaction aborted."),
       );
     };
   });
@@ -1100,33 +1153,30 @@ export async function executeShareSnapshotCanonicalOperation(
     throw new Error("Share Snapshot write barrier did not drain pending writes.");
   }
 
-  const current = await readCanonicalState();
   const {
     expected,
-    conversationWrite,
     sourceMessageCount,
     referencedMessageCount,
     preservedSources,
     roundExtensions,
-  } = validatePlan(plan, current);
-  const batch: StoreBatch = {
-    conversations: [conversationWrite],
-    sources: [plan.source],
-    messages: [...plan.messages],
-    rounds: [...plan.rounds],
-  };
+  } = await validateAndWriteCanonicalState(plan);
 
-  await putStores(batch);
-  clearCaches();
-  const preloadCounts = await preloadAll();
-  const verification = verifyReloadedState(
-    plan,
-    expected,
-    sourceMessageCount,
-    referencedMessageCount,
-    preservedSources,
-    roundExtensions,
-  );
+  let preloadCounts: PreloadCounts;
+  let verification: ShareSnapshotCanonicalVerification;
+  try {
+    clearCaches();
+    preloadCounts = await preloadAll();
+    verification = verifyReloadedState(
+      plan,
+      expected,
+      sourceMessageCount,
+      referencedMessageCount,
+      preservedSources,
+      roundExtensions,
+    );
+  } catch (error) {
+    throw new ShareSnapshotReloadVerificationError(error);
+  }
 
   return {
     written: {

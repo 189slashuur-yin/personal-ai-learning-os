@@ -51,6 +51,7 @@ import { BrowserWorkspaceStorage } from "@/infrastructure/storage/browser-worksp
 import { BrowserAppEventLogStorage } from "@/infrastructure/storage/browser-feedback-storage";
 import {
   createConversationStorage,
+  createConversationVersionRestoreWriter,
   createConversationVersionStorage,
   createKnowledgeCardStorage,
   createMessageStorage,
@@ -1040,7 +1041,7 @@ export function ConversationDetail({
     setSnapshotDescription("");
   }
 
-  function restoreSnapshot(version: ConversationVersion) {
+  async function restoreSnapshot(version: ConversationVersion) {
     if (state.status !== "ready" || state.shareSnapshotOwned) {
       return;
     }
@@ -1053,39 +1054,46 @@ export function ConversationDetail({
       return;
     }
 
-    const result = new ConversationVersionService({
-      conversations: createConversationStorage(),
-      messages: createMessageStorage(),
-      versions: createConversationVersionStorage(),
-    }).restoreSnapshot(
-      state.conversation.id,
-      version.id,
-      {
-        sources: createSourceStorage(),
-        rounds: createRoundStorage(),
-      },
-    );
+    setRestoreStatus(null);
+    try {
+      const result = await new ConversationVersionService({
+        conversations: createConversationStorage(),
+        messages: createMessageStorage(),
+        versions: createConversationVersionStorage(),
+      }).restoreSnapshot(
+        state.conversation.id,
+        version.id,
+        {
+          sources: createSourceStorage(),
+          rounds: createRoundStorage(),
+          writer: createConversationVersionRestoreWriter(),
+        },
+      );
 
-    if (!result) {
-      return;
+      if (!result) {
+        return;
+      }
+
+      setState({
+        ...state,
+        conversation: result.conversation,
+        messages: result.messages,
+      });
+      setTitleDraft(result.conversation.title);
+      setSelectedMessageIds(new Set());
+      setEditingMessageId(null);
+      setMessageDraft("");
+      setSavedMessageId(null);
+      setCollapsedMessageIds(new Set());
+      setMessageSearchQuery("");
+      setActiveSearchIndex(0);
+      setMessageTimelineMode("collapsed");
+      setRoundWorkspaceRevision((current) => current + 1);
+      setRestoreStatus("Restored successfully");
+    } catch (error) {
+      console.error("Conversation Version Restore failed:", error);
+      setRestoreStatus(null);
     }
-
-    setState({
-      ...state,
-      conversation: result.conversation,
-      messages: result.messages,
-    });
-    setTitleDraft(result.conversation.title);
-    setSelectedMessageIds(new Set());
-    setEditingMessageId(null);
-    setMessageDraft("");
-    setSavedMessageId(null);
-    setCollapsedMessageIds(new Set());
-    setMessageSearchQuery("");
-    setActiveSearchIndex(0);
-    setMessageTimelineMode("collapsed");
-    setRoundWorkspaceRevision((current) => current + 1);
-    setRestoreStatus("Restored successfully");
   }
 
   function saveTitle() {

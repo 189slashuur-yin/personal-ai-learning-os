@@ -10,6 +10,7 @@ import { duplicateConversationWorkspace } from "@/core/services/conversation-wor
 import { ImportParserPipeline } from "@/core/services/import-parser-pipeline";
 import { ImportService } from "@/core/services/import-service";
 import { editMessage } from "@/core/services/message-editing";
+import { StorageBackedConversationVersionRestoreWriter } from "@/infrastructure/storage/storage-backed-conversation-version-restore-writer";
 import {
   isShareSnapshotOwnedConversation,
   ShareSnapshotMutationBlockedError,
@@ -275,10 +276,11 @@ describe("v1.8 immutable share Snapshot mutation guard", () => {
     }).toEqual(before);
   });
 
-  it("blocks version restore and Conversation duplication before replacement", () => {
+  it("blocks version restore and Conversation duplication before replacement", async () => {
     const conversations = new InMemoryConversationStorage();
     const sources = new InMemorySourceStorage();
     const messages = new InMemoryMessageStorage();
+    const rounds = new InMemoryRoundStorage();
     const versions = new InMemoryConversationVersionStorage();
     seedConversation(conversations);
     seedMessage(messages);
@@ -305,16 +307,21 @@ describe("v1.8 immutable share Snapshot mutation guard", () => {
       },
     });
 
-    expect(() =>
+    await expect(
       new ConversationVersionService({
         conversations,
         messages,
         versions,
       }).restoreSnapshot(conversationId, "version", {
         sources,
-        rounds: new InMemoryRoundStorage(),
+        rounds,
+        writer: new StorageBackedConversationVersionRestoreWriter({
+          conversations,
+          messages,
+          rounds,
+        }),
       }),
-    ).toThrow(ShareSnapshotMutationBlockedError);
+    ).rejects.toThrow(ShareSnapshotMutationBlockedError);
     expect(() =>
       duplicateConversationWorkspace(conversationId, {
         conversations,
