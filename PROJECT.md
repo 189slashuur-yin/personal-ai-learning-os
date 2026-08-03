@@ -15,12 +15,13 @@ PALOS 面向需要与 AI 长期协作的个人用户。产品要解决的不是�
 
 ## 当前阶段
 
-截至 2026-08-03，v1.8.1 已发布；当前进入 post-release hardening，并在 working tree 完成 P2-1 authoritative mutation guard。Source autosave、Message edit/regenerate、普通 import/export append、Merge、Duplicate 与 Conversation Version Restore 现在都在实际 IndexedDB write transaction 内读取 authoritative Snapshot ownership 后才写入。该路径不修改 Snapshot/IndexedDB schema，不新增 canonical store、journal、UI 或产品功能。
+截至 2026-08-03，v1.8.2 authoritative mutation hardening maintenance release 已完成。Source autosave、Message edit/regenerate、普通 import/export append、Merge、Duplicate 与 Conversation Version Restore 现在都在实际 IndexedDB write transaction 内读取 authoritative Snapshot ownership 后才写入。该路径不修改 Snapshot/IndexedDB schema，不新增 canonical store、journal、UI 或产品功能。
 
-- Current Version：v1.8.1 released；P2-1 post-release hardening（working tree；未 commit）
-- Current Focus：authoritative mutation guard consistency
-- Automated Status：Vitest 20 files / 376 tests；lint/build/diff-check passed
-- Next Recommended Phase：独立复核 P2-1 working tree；Snapshot lifecycle、read UX 与 Search hardening 仍需另行批准
+- Current Version：v1.8.2 authoritative mutation hardening maintenance release
+- Release Metadata：release commit `ced161a`；tag `v1.8.2`
+- Current Focus：maintenance release closed；P0/P1/P2 complete
+- Automated Status：Vitest 377/377；Playwright 3/3；lint/build passed
+- Next Recommended Phase：已接受风险维持现状；Snapshot lifecycle、read UX、Search hardening 与其它 backlog 仍需另行批准
 
 v1.7 继续把 Conversation 作为 Aggregate Root、Round 作为最小整理单元、Task 作为独立行动实体、Knowledge 作为长期稳定信息。Context 是当前有效状态，不等于所有聊天，也不自动升级为 Knowledge。
 

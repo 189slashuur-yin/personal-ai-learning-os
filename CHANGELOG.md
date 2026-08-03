@@ -2,9 +2,17 @@
 
 本文件记录当前仓库已经完成的 Sprint 与关键提交。日期使用仓库 commit date。
 
-当前口径：Runtime Version 为 v1.8.1 hardening candidate；完整 hardening 仍在 `feat/v1.8.1-hardening-work` working tree，release commit/tag 尚未创建。
+当前口径：Runtime Version 为 v1.8.2 authoritative mutation hardening maintenance release；release commit `ced161a`，tag `v1.8.2`。
 
-## 2026-07-31 — v1.8.1 Hardening Candidate
+## 2026-08-03 — v1.8.2 Authoritative Mutation Hardening Maintenance Release
+
+- **Authoritative mutation guard**：Source autosave、Message edit/regenerate、普通 import/export append、Merge、Duplicate 与 Conversation Version Restore 在实际 IndexedDB write transaction 内读取 authoritative Snapshot ownership 后才写入。
+- **Cross-tab consistency**：双向 stale-cache regression 覆盖 Tab B 建立 Snapshot ownership 与移除/改变 ownership；非 owner mutation fail closed，且不覆盖 competing durable state。
+- **Compatibility**：未修改 Snapshot metadata/schema、IndexedDB schema/version/store、canonical Snapshot writer、UI 或产品功能。
+- **Tests**：Vitest 377/377；Playwright 3/3；lint/build passed。
+- **Release metadata**：release commit `ced161a`；tag `v1.8.2`。
+
+## 2026-07-31 — v1.8.1 Hardening Release
 
 - **Snapshot transaction consistency**：canonical writer 在单个 Conversation/Source/Message/Round readwrite transaction 内完成最终 authoritative validation 与 write；abort 原子回滚，post-commit verification failure 不补偿覆盖。
 - **Snapshot-aware App Restore**：restore 前验证 resourceHash owner、完整 lineage、timestamps、canonical transcript、Message provenance 与 Round references；commit 后 reload/content verification failure 不再用旧 backup 覆盖其它 tab 的后续写入。
@@ -16,7 +24,7 @@
 - **Conversation Restore atomicity**：普通 Conversation Version Restore 使用 Conversation/Message/Round 单 transaction，保留新 Message IDs、Round ID/order/enrichment 并自动重映射 `messageIds`。
 - **Compatibility**：未修改 Snapshot metadata/schema、IndexedDB schema/store、Import workflow，没有新增 journal 或产品功能。
 - **Tests**：Vitest 20 files / 374 tests；Playwright 3/3；lint/build/diff-check passed。
-- **Release state**：未 commit、未 tag；跨 tab cached mutation guard 的 authoritative Source ownership TOCTOU 已接受为未来 hardening，不作为 v1.8.1 blocker。
+- **Release state**：v1.8.1 已发布；当时接受的跨 tab cached mutation guard TOCTOU 已由 v1.8.2 authoritative mutation hardening maintenance release 关闭。
 
 ## 2026-07-19 — v1.7 Personal AI Context Management
 

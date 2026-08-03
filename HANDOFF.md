@@ -1,8 +1,14 @@
 # PALOS v1.8 — ChatGPT Conversation Snapshot Handoff
 
-## 2026-08-03 v1.8.1 post-release P2-1 authoritative mutation guard
+## 2026-08-03 v1.8.2 authoritative mutation hardening maintenance release
 
-本轮只关闭 Snapshot-owned Conversation 非 canonical mutation 的跨 tab cached ownership TOCTOU。没有修改 Snapshot metadata/schema、IndexedDB schema/version/store、canonical Snapshot writer、App Restore、legacy migration 或 UI；没有新增产品功能，也没有 commit。
+本次 maintenance release 只关闭 Snapshot-owned Conversation 非 canonical mutation 的跨 tab cached ownership TOCTOU。没有修改 Snapshot metadata/schema、IndexedDB schema/version/store、canonical Snapshot writer、App Restore、legacy migration 或 UI；没有新增产品功能。
+
+### Release metadata
+
+- Release commit：`ced161a`
+- Tag：`v1.8.2`
+- Release gate：Vitest 377/377；Playwright 3/3；lint/build passed
 
 ### Audit result
 
@@ -21,13 +27,15 @@
 ### Regression coverage
 
 - Tab A preload/cache 看到 ordinary mutable Conversation 后，测试直接向 durable IndexedDB 写入 Tab B Snapshot owner；Tab A Message edit 在 `conversations + sources + messages` transaction 内 blocked，Message durable state 与 competing owner 保留。
+- Tab A cache 仍显示 Snapshot-owned、Tab B 已移除或改变 durable ownership 时，Tab A mutation 在打开 readwrite transaction 前继续 fail closed，且不覆盖 Tab B 状态。
 - 同一 stale-cache 场景下，Conversation Version Restore 在四-store transaction 内 blocked，Conversation/Message/Round durable state 全部保持。
 - 既有 cache guard、ordinary mutation、append durability、Merge/Duplicate compile path、atomic Restore abort/reload 与 canonical Snapshot persistence 回归继续通过。
 
 ### Validation
 
-- 定向：`npm test -- --run tests/share-snapshot-mutation-guard.test.ts tests/share-snapshot-persistence.test.ts` passed（2 files / 74 tests）
-- Full Vitest：`npm test -- --run` passed（20 files / 376 tests）
+- 定向：`npm test -- --run tests/share-snapshot-mutation-guard.test.ts tests/share-snapshot-persistence.test.ts` passed（2 files / 75 tests）
+- Full Vitest：`npm test -- --run` passed（20 files / 377 tests）
+- `npm run test:e2e`：passed（Playwright 3/3）
 - `npm run lint`：passed
 - `npm run build`：passed（19 routes）
 - `git diff --check`：passed
@@ -37,7 +45,6 @@
 - LocalStorage legacy/debug mode 没有 IndexedDB transaction 能力，继续依赖同步 cache guard 与顺序写；默认 IndexedDB 产品路径已关闭本轮 TOCTOU。
 - authoritative writer 当前读取整个 Sources store；replace path 还读取目标 Message/Round store。数据规模显著增长时会延长写锁时间；本轮按限制未新增 index/store。
 - transaction commit 后的 cache reload 可能观察到其它 tab 的更晚提交；reload failure 作为 committed-but-unverified error 返回且不回滚，调用方需 reload/review。
-- 当前 working tree 未 commit；Playwright 未在本轮重跑，v1.8.1 release baseline 为 3/3。
 
 ---
 
