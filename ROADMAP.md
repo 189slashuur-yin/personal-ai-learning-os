@@ -4,12 +4,20 @@
 
 ## Current release
 
-- Current Version：v1.8.2 authoritative mutation hardening maintenance release
-- Phase：v1.8.2 maintenance release closed
-- Current Focus：authoritative mutation hardening released；P0/P1/P2 complete
-- Release Metadata：release commit `ced161a`；tag `v1.8.2`
-- Automated Status：Vitest 377/377；Playwright 3/3；lint/build passed
-- Next Recommended Phase：已接受风险维持现状；lifecycle、read UX、Search hardening 与其它 backlog 继续延期
+- Current Version：v1.8.3 data-integrity hotfix release
+- Phase：three rollout-blocking P0 fixes released
+- Current Focus：ordinary scoped writes/delete authority、Round patch writer 与 Merge fail-closed baseline closed
+- Release Metadata：annotated tag `v1.8.3`；release baseline `v1.8.2` / `70c3138`
+- Automated Status：Vitest 393/393；Playwright 3/3；lint/build passed
+- Next Recommended Phase：P1/P2 backlog 不并入本 release，需另行批准
+
+## v1.8.3 — Data integrity hotfix release
+
+- P0-1：普通产品路径不再执行 whole-cache flush；Conversation delete 在单个七-store transaction 内读取 authoritative state 并只删除目标 dependency closure。App Restore、Clear all 与显式 LocalStorage→IndexedDB full migration 保留 replacement 语义。
+- P0-2：Round record/context 使用 patch-only writer，只允许 `note/summary/context` 且逐修改字段验证 expected baseline；transaction 从 authoritative Round merge patch。Message→Round migration 增加 authoritative ownership/baseline boundary。
+- P0-3：Merge preview 固化 source/target Conversation、Message、Round 与 Version baseline；confirm 在同一 transaction 内复核，成功只追加新 Message/Round 并保存 automatic Version，不替换 target aggregate。
+- 未修改 Round/Snapshot model、Snapshot metadata、IndexedDB schema/version/store、canonical Snapshot writer 或产品功能。
+- 本 release 仅关闭上述三个 P0；Deferred P1/P2 与 accepted constraints 保持未解决状态。
 
 ## v1.8.2 — Authoritative mutation hardening maintenance release
 

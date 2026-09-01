@@ -1,8 +1,11 @@
 import type { ConversationStorage } from "@/core/contracts/conversation-storage";
 import type { MessageStorage } from "@/core/contracts/message-storage";
 import type { RoundStorage } from "@/core/contracts/round-storage";
+import type { SourceStorage } from "@/core/contracts/source-storage";
+import type { Conversation } from "@/core/entities/conversation";
 import type { Message } from "@/core/entities/message";
 import type { Round } from "@/core/entities/round";
+import { executeShareSnapshotTranscriptMutation } from "@/core/services/share-snapshot-mutation-guard";
 
 export type RoundMigrationStatus = "ready" | "noop" | "blocked";
 
@@ -22,6 +25,11 @@ export type RoundMigrationPreview = {
   migrationVersion: "message-to-round-v1";
   plannedRounds: Round[];
   roundsToCreate: Round[];
+  baseline: {
+    conversations: Conversation[];
+    messages: Message[];
+    rounds: Round[];
+  };
   summary: RoundMigrationSummary;
 };
 
@@ -132,12 +140,16 @@ export class MessageToRoundMigrationService {
     private readonly conversations: ConversationStorage,
     private readonly messages: MessageStorage,
     private readonly rounds: RoundStorage,
+    private readonly sources?: SourceStorage,
   ) {}
 
   preview(): RoundMigrationPreview {
     const conversations = this.conversations.getAll();
     const allMessages = this.messages.getAll();
     const existingRounds = this.rounds.getAll();
+    const conversationIds = new Set(
+      conversations.map((conversation) => conversation.id),
+    );
     const existingById = new Map(existingRounds.map((round) => [round.id, round]));
     const warnings: string[] = [];
     const errors: string[] = [];
@@ -147,7 +159,6 @@ export class MessageToRoundMigrationService {
       ).map((draft, index) => createRound(conversation.id, draft, index + 1)),
     );
 
-    const conversationIds = new Set(conversations.map((conversation) => conversation.id));
     const orphanMessages = allMessages.filter(
       (message) => !conversationIds.has(message.conversationId),
     );
@@ -179,6 +190,15 @@ export class MessageToRoundMigrationService {
       migrationVersion: "message-to-round-v1",
       plannedRounds,
       roundsToCreate,
+      baseline: {
+        conversations,
+        messages: allMessages.filter((message) =>
+          conversationIds.has(message.conversationId),
+        ),
+        rounds: existingRounds.filter((round) =>
+          conversationIds.has(round.conversationId),
+        ),
+      },
       summary: {
         status,
         conversationCount: conversations.length,
@@ -216,6 +236,11 @@ export class MessageToRoundMigrationService {
       migrationVersion: "message-to-round-v1",
       plannedRounds,
       roundsToCreate,
+      baseline: {
+        conversations: conversation ? [conversation] : [],
+        messages,
+        rounds: existingRounds,
+      },
       summary: {
         status: errors.length ? "blocked" : roundsToCreate.length ? "ready" : "noop",
         conversationCount: conversation ? 1 : 0,
@@ -231,7 +256,7 @@ export class MessageToRoundMigrationService {
   }
 
   applyConversation(preview: RoundMigrationPreview) {
-    const conversationId = preview.plannedRounds[0]?.conversationId;
+    const conversationId = preview.baseline.conversations[0]?.id;
     if (!conversationId || preview.summary.status === "blocked") {
       throw new Error("Conversation migration preview cannot be applied.");
     }
@@ -243,8 +268,22 @@ export class MessageToRoundMigrationService {
     ) {
       throw new Error("Conversation migration input changed; preview again.");
     }
-    this.rounds.saveMany(current.roundsToCreate);
-    return current.summary;
+    const complete = () => current.summary;
+    if (!this.sources) {
+      this.rounds.saveMany(current.roundsToCreate);
+      return complete();
+    }
+    const mutation = executeShareSnapshotTranscriptMutation(
+      this.sources,
+      {
+        conversationIds: [conversationId],
+        operation: "migrate Messages to Rounds",
+        expected: preview.baseline,
+        put: { rounds: preview.roundsToCreate },
+      },
+      () => this.rounds.saveMany(current.roundsToCreate),
+    );
+    return mutation instanceof Promise ? mutation.then(complete) : complete();
   }
 
   apply(preview: RoundMigrationPreview) {
@@ -264,14 +303,30 @@ export class MessageToRoundMigrationService {
       throw new Error("Migration input changed after preview; run preview again.");
     }
 
-    this.rounds.saveMany(currentPreview.roundsToCreate);
-    return {
+    const complete = () => ({
       ...currentPreview.summary,
       status: "noop" as const,
       existingRoundCount:
         currentPreview.summary.existingRoundCount +
         currentPreview.summary.roundsToCreateCount,
       roundsToCreateCount: 0,
-    };
+    });
+    if (!this.sources) {
+      this.rounds.saveMany(currentPreview.roundsToCreate);
+      return complete();
+    }
+    const mutation = executeShareSnapshotTranscriptMutation(
+      this.sources,
+      {
+        conversationIds: preview.baseline.conversations.map(
+          (conversation) => conversation.id,
+        ),
+        operation: "migrate Messages to Rounds",
+        expected: preview.baseline,
+        put: { rounds: preview.roundsToCreate },
+      },
+      () => this.rounds.saveMany(currentPreview.roundsToCreate),
+    );
+    return mutation instanceof Promise ? mutation.then(complete) : complete();
   }
 }

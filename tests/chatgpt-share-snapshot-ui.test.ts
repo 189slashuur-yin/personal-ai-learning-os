@@ -315,6 +315,13 @@ describe("v1.8 immutable Snapshot UI mutation boundaries", () => {
       new URL("../src/app/import/import-workbench.tsx", import.meta.url),
       "utf8",
     );
+    const mergeServiceSource = readFileSync(
+      new URL(
+        "../src/core/services/conversation-merge-service.ts",
+        import.meta.url,
+      ),
+      "utf8",
+    );
 
     expect(detailSource).toContain("shareSnapshotOwned:");
     expect(detailSource).toContain(
@@ -322,7 +329,11 @@ describe("v1.8 immutable Snapshot UI mutation boundaries", () => {
     );
     expect(detailSource).toContain("sources: createSourceStorage()");
     expect(detailSource).toContain("state.shareSnapshotOwned ||");
-    expect(workbenchSource.match(/assertShareSnapshotTranscriptMutable\(/g))
+    expect(workbenchSource).toContain("new ConversationMergeService");
+    expect(mergeServiceSource.match(/assertShareSnapshotTranscriptMutable\(/g))
       .toHaveLength(2);
+    expect(mergeServiceSource).toContain(
+      "executeShareSnapshotTranscriptMutation",
+    );
   });
 });

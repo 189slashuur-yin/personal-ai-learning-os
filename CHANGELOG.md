@@ -2,7 +2,16 @@
 
 本文件记录当前仓库已经完成的 Sprint 与关键提交。日期使用仓库 commit date。
 
-当前口径：Runtime Version 为 v1.8.2 authoritative mutation hardening maintenance release；release commit `ced161a`，tag `v1.8.2`。
+当前口径：Runtime Version 为 v1.8.3 data-integrity hotfix release；annotated tag `v1.8.3` 指向本次实现与文档收口提交。
+
+## 2026-09-01 — v1.8.3 Data Integrity Hotfix Release
+
+- **Ordinary scoped authority**：普通生产路径移除 whole-cache flush；Conversation delete 改为七-store authoritative scoped delete transaction。
+- **Round enrichment writer**：note/summary/context 使用 patch-only expected baseline，从 authoritative Round merge，Message→Round migration 增加 final ownership/baseline guard。
+- **Merge baseline**：preview 保存 source/target aggregate baseline，confirm 任一变化 fail closed；成功只追加 Message/Round 并原子保存 automatic Version，不替换 target Messages。
+- **Compatibility**：未修改 Round/Snapshot model、Snapshot metadata、IndexedDB schema/version/store 或产品功能。
+- **Tests**：Vitest 393/393；Playwright 3/3；lint/build/diff-check passed。
+- **Release metadata**：单提交 `fix: harden cross-tab data integrity`；annotated tag `v1.8.3`。
 
 ## 2026-08-03 — v1.8.2 Authoritative Mutation Hardening Maintenance Release
 

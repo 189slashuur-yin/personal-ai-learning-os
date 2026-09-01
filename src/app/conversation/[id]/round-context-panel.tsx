@@ -11,6 +11,7 @@ import { conversationContextLabels } from "@/core/services/conversation-context-
 import { RoundContextInheritanceService } from "@/core/services/round-context-inheritance";
 import {
   createConversationStorage,
+  createRoundMutationWriter,
   createRoundStorage,
 } from "@/infrastructure/storage/storage-factory";
 
@@ -61,33 +62,53 @@ export function RoundContextPanel({
             ? "已固定参考：原 Round（来源不可用）"
           : "暂无历史参考";
 
-  function applyReference(value: string) {
+  async function applyReference(value: string) {
     const service = createService();
-    const updated =
+    const baseline = createRoundStorage().getById(round.id) ?? round;
+    const context =
       value === "auto"
-        ? service.useAutomaticReference(round.id)
-        : value === "none"
-          ? service.cancelInheritance(round.id, overrides)
-          : service.confirm(round.id, {
-              inheritanceMode: "inherit",
-              sourceRoundId: value.startsWith("round:")
-                ? value.slice("round:".length)
-                : undefined,
-              excludedFields: [...excludedFields],
-              overrides,
-            });
+        ? null
+        : service.buildConfirmedContext(
+            round.id,
+            value === "none"
+              ? { inheritanceMode: "exclude", overrides }
+              : {
+                  inheritanceMode: "inherit",
+                  sourceRoundId: value.startsWith("round:")
+                    ? value.slice("round:".length)
+                    : undefined,
+                  excludedFields: [...excludedFields],
+                  overrides,
+                },
+          );
 
-    if (!updated) {
+    if (value !== "auto" && !context) {
       setNotice("参考来源保存失败，请重试。");
       return;
     }
 
-    setNotice("参考来源已保存；当前 Round 的记录没有改变。");
-    onConfirmed(updated);
+    try {
+      const updated = await createRoundMutationWriter().execute({
+        roundId: baseline.id,
+        conversationId: baseline.conversationId,
+        operation: "save Round context reference",
+        patch: { context },
+        expected: { context: baseline.context ?? null },
+      });
+      setNotice("参考来源已保存；当前 Round 的记录没有改变。");
+      onConfirmed(updated);
+    } catch (error) {
+      setNotice(
+        error instanceof Error
+          ? `参考来源保存失败：${error.message}`
+          : "参考来源保存失败，请重试。",
+      );
+    }
   }
 
-  function saveAdvancedAdjustments() {
-    const updated = createService().confirm(round.id, {
+  async function saveAdvancedAdjustments() {
+    const baseline = createRoundStorage().getById(round.id) ?? round;
+    const context = createService().buildConfirmedContext(round.id, {
       inheritanceMode:
         round.context?.inheritanceMode === "exclude" ? "exclude" : "inherit",
       sourceRoundId: round.context?.sourceRoundId,
@@ -95,13 +116,28 @@ export function RoundContextPanel({
       overrides,
     });
 
-    if (!updated) {
+    if (!context) {
       setNotice("高级参考设置保存失败，请重试。");
       return;
     }
 
-    setNotice("高级参考设置已保存。");
-    onConfirmed(updated);
+    try {
+      const updated = await createRoundMutationWriter().execute({
+        roundId: baseline.id,
+        conversationId: baseline.conversationId,
+        operation: "save advanced Round context",
+        patch: { context },
+        expected: { context: baseline.context ?? null },
+      });
+      setNotice("高级参考设置已保存。");
+      onConfirmed(updated);
+    } catch (error) {
+      setNotice(
+        error instanceof Error
+          ? `高级参考设置保存失败：${error.message}`
+          : "高级参考设置保存失败，请重试。",
+      );
+    }
   }
 
   return (

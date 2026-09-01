@@ -8,6 +8,7 @@ import {
   createConversationStorage,
   createMessageStorage,
   createRoundStorage,
+  createSourceStorage,
 } from "@/infrastructure/storage/storage-factory";
 import { RoundContextPanel } from "./round-context-panel";
 import { RoundRecordPanel } from "./round-record-panel";
@@ -88,11 +89,12 @@ export function RoundWorkspace({
     }
   }
 
-  function generateFromLegacyMessages() {
+  async function generateFromLegacyMessages() {
     const migration = new MessageToRoundMigrationService(
       createConversationStorage(),
       createMessageStorage(),
       createRoundStorage(),
+      createSourceStorage(),
     );
     const preview = migration.previewConversation(conversationId);
     if (preview.summary.status === "blocked") {
@@ -110,11 +112,19 @@ export function RoundWorkspace({
     ) {
       return;
     }
-    migration.applyConversation(preview);
-    setMigrationNotice(
-      `已生成 ${preview.summary.roundsToCreateCount} 个 Rounds；旧 Messages 保持不变。`,
-    );
-    setRounds(loadRounds(conversationId));
+    try {
+      await migration.applyConversation(preview);
+      setMigrationNotice(
+        `已生成 ${preview.summary.roundsToCreateCount} 个 Rounds；旧 Messages 保持不变。`,
+      );
+      setRounds(loadRounds(conversationId));
+    } catch (error) {
+      setMigrationNotice(
+        error instanceof Error
+          ? `Round 生成失败：${error.message}`
+          : "Round 生成失败，请重新预览后重试。",
+      );
+    }
   }
 
   return (

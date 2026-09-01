@@ -1,8 +1,11 @@
 import type {
   ConversationTranscriptMutationBatch,
+  ConversationTranscriptMutationBaseline,
   ConversationTranscriptMutationCommand,
   ConversationTranscriptMutationWriter,
 } from "@/core/contracts/conversation-transcript-mutation-writer";
+import type { Conversation } from "@/core/entities/conversation";
+import type { ConversationVersion } from "@/core/entities/conversation-version";
 import type { ImportedSource } from "@/core/entities/imported-source";
 import type { Message } from "@/core/entities/message";
 import type { Round } from "@/core/entities/round";
@@ -16,6 +19,9 @@ import {
   type StoreName,
 } from "./database";
 import { clearCaches, preloadAll } from "./preload";
+import { normalizeIndexedDBConversation } from "./idb-conversation-storage";
+import { normalizeIndexedDBMessage } from "./idb-message-storage";
+import { normalizeIndexedDBRound } from "./idb-round-storage";
 
 const STORE_ORDER: readonly StoreName[] = [
   "conversations",
@@ -61,7 +67,137 @@ function requestedStoreNames(
   }
   if ((command.replaceMessages?.length ?? 0) > 0) requested.add("messages");
   if ((command.replaceRounds?.length ?? 0) > 0) requested.add("rounds");
+  if (command.expected?.conversations) requested.add("conversations");
+  if (command.expected?.messages) requested.add("messages");
+  if (command.expected?.rounds) requested.add("rounds");
+  if (command.expected?.conversationVersions) {
+    requested.add("conversation-versions");
+  }
   return STORE_ORDER.filter((storeName) => requested.has(storeName));
+}
+
+function stableValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stableValue);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, item]) => [key, stableValue(item)]),
+    );
+  }
+  return value;
+}
+
+function recordsMatch<T extends { id: string }>(
+  authoritative: readonly T[],
+  expected: readonly Readonly<T>[],
+): boolean {
+  if (authoritative.length !== expected.length) return false;
+  const authoritativeById = new Map(
+    authoritative.map((record) => [record.id, record]),
+  );
+  return expected.every((record) => {
+    const current = authoritativeById.get(record.id);
+    return (
+      current !== undefined &&
+      JSON.stringify(stableValue(current)) === JSON.stringify(stableValue(record))
+    );
+  });
+}
+
+function assertExpectedOwnership(
+  command: ConversationTranscriptMutationCommand,
+): void {
+  const conversationIds = new Set(command.conversationIds);
+  if (
+    command.expected?.conversations?.some(
+      (conversation) => !conversationIds.has(conversation.id),
+    ) ||
+    command.expected?.messages?.some(
+      (message) => !conversationIds.has(message.conversationId),
+    ) ||
+    command.expected?.rounds?.some(
+      (round) => !conversationIds.has(round.conversationId),
+    ) ||
+    command.expected?.conversationVersions?.some(
+      (version) => !conversationIds.has(version.conversationId),
+    )
+  ) {
+    throw new Error(
+      "Conversation transcript mutation baseline must belong to guarded Conversations.",
+    );
+  }
+}
+
+function assertBaseline(
+  command: ConversationTranscriptMutationCommand,
+  baseline: ConversationTranscriptMutationBaseline,
+  authoritative: {
+    conversations: readonly Conversation[];
+    messages: readonly Message[];
+    rounds: readonly Round[];
+    conversationVersions: readonly ConversationVersion[];
+  },
+): void {
+  const conversationIds = new Set(command.conversationIds);
+  if (
+    baseline.conversations &&
+    !recordsMatch(
+      authoritative.conversations.filter((record) =>
+        conversationIds.has(record.id),
+      ).map(normalizeIndexedDBConversation),
+      baseline.conversations.map((record) =>
+        normalizeIndexedDBConversation(record as Conversation),
+      ),
+    )
+  ) {
+    throw new Error(
+      "Conversation transcript mutation baseline conflict: Conversation changed; preview again.",
+    );
+  }
+  if (
+    baseline.conversationVersions &&
+    !recordsMatch(
+      authoritative.conversationVersions.filter((record) =>
+        conversationIds.has(record.conversationId),
+      ),
+      baseline.conversationVersions,
+    )
+  ) {
+    throw new Error(
+      "Conversation transcript mutation baseline conflict: Versions changed; preview again.",
+    );
+  }
+  if (
+    baseline.messages &&
+    !recordsMatch(
+      authoritative.messages.filter((record) =>
+        conversationIds.has(record.conversationId),
+      ).map(normalizeIndexedDBMessage),
+      baseline.messages.map((record) =>
+        normalizeIndexedDBMessage(record as Message),
+      ),
+    )
+  ) {
+    throw new Error(
+      "Conversation transcript mutation baseline conflict: Messages changed; preview again.",
+    );
+  }
+  if (
+    baseline.rounds &&
+    !recordsMatch(
+      authoritative.rounds.filter((record) =>
+        conversationIds.has(record.conversationId),
+      ).map(normalizeIndexedDBRound),
+      baseline.rounds.map((record) =>
+        normalizeIndexedDBRound(record as Round),
+      ),
+    )
+  ) {
+    throw new Error(
+      "Conversation transcript mutation baseline conflict: Rounds changed; preview again.",
+    );
+  }
 }
 
 function assertCommand(command: ConversationTranscriptMutationCommand): void {
@@ -105,6 +241,7 @@ function assertCommand(command: ConversationTranscriptMutationCommand): void {
       "Immutable Snapshot Sources may only be written by the canonical Snapshot writer.",
     );
   }
+  assertExpectedOwnership(command);
 }
 
 function putBatch(
@@ -132,15 +269,28 @@ async function validateAndWrite(
     const sourcesRequest = transaction
       .objectStore("sources")
       .getAll() as IDBRequest<ImportedSource[]>;
-    const messagesRequest = command.replaceMessages?.length
+    const conversationsRequest = command.expected?.conversations
+      ? (transaction
+          .objectStore("conversations")
+          .getAll() as IDBRequest<Conversation[]>)
+      : null;
+    const messagesRequest =
+      command.replaceMessages?.length || command.expected?.messages
       ? (transaction.objectStore("messages").getAll() as IDBRequest<Message[]>)
       : null;
-    const roundsRequest = command.replaceRounds?.length
+    const roundsRequest = command.replaceRounds?.length || command.expected?.rounds
       ? (transaction.objectStore("rounds").getAll() as IDBRequest<Round[]>)
       : null;
+    const versionsRequest = command.expected?.conversationVersions
+      ? (transaction
+          .objectStore("conversation-versions")
+          .getAll() as IDBRequest<ConversationVersion[]>)
+      : null;
     const requests: IDBRequest[] = [sourcesRequest];
+    if (conversationsRequest) requests.push(conversationsRequest);
     if (messagesRequest) requests.push(messagesRequest);
     if (roundsRequest) requests.push(roundsRequest);
+    if (versionsRequest) requests.push(versionsRequest);
     let completedReads = 0;
     let validationError: unknown;
     let writesQueued = false;
@@ -155,6 +305,15 @@ async function validateAndWrite(
             conversationId,
             command.operation,
           );
+        }
+
+        if (command.expected) {
+          assertBaseline(command, command.expected, {
+            conversations: conversationsRequest?.result ?? [],
+            messages: messagesRequest?.result ?? [],
+            rounds: roundsRequest?.result ?? [],
+            conversationVersions: versionsRequest?.result ?? [],
+          });
         }
 
         const messageStore = messagesRequest

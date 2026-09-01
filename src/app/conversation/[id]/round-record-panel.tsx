@@ -12,14 +12,12 @@ import {
   serializeRoundRecord,
   type RoundRecordDraft,
 } from "@/core/services/round-record";
-import { RoundService } from "@/core/services/round-service";
 import {
   createKnowledgeCardStorage,
   createProposalStorage,
+  createRoundMutationWriter,
   createRoundStorage,
-  getStorageMode,
 } from "@/infrastructure/storage/storage-factory";
-import { drainPendingWritesOrThrow } from "@/infrastructure/storage/indexeddb/database";
 
 const primaryFields: Array<{
   field: "notes" | "conclusion" | "nextActions";
@@ -94,18 +92,29 @@ export function RoundRecordPanel({
     const autosave = new DebouncedAutosave<RoundRecordDraft>(
       async (value) => {
         const serialized = serializeRoundRecord(value);
-        const updated = new RoundService(createRoundStorage()).updateRound(
-          round.id,
-          serialized,
-        );
+        const baseline = latestRoundRef.current;
+        const patch: { note?: string | null; summary?: string | null } = {};
+        const expected: { note?: string | null; summary?: string | null } = {};
+        const nextNote = serialized.note.trim() || null;
+        const nextSummary = serialized.summary.trim() || null;
 
-        if (!updated) {
-          throw new Error("Round no longer exists");
+        if (nextNote !== (baseline.note ?? null)) {
+          patch.note = nextNote;
+          expected.note = baseline.note ?? null;
+        }
+        if (nextSummary !== (baseline.summary ?? null)) {
+          patch.summary = nextSummary;
+          expected.summary = baseline.summary ?? null;
         }
 
-        if (getStorageMode() === "indexedDB") {
-          await drainPendingWritesOrThrow();
-        }
+        if (Object.keys(patch).length === 0) return;
+        const updated = await createRoundMutationWriter().execute({
+          roundId: baseline.id,
+          conversationId: baseline.conversationId,
+          operation: "save Round record",
+          patch,
+          expected,
+        });
 
         latestRoundRef.current = updated;
         if (active) onSavedRef.current(updated);

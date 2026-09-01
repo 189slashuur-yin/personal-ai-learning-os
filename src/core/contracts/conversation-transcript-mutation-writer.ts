@@ -26,9 +26,17 @@ export type ConversationTranscriptRoundReplacement = Readonly<{
   rounds: readonly Readonly<Round>[];
 }>;
 
+export type ConversationTranscriptMutationBaseline = Readonly<{
+  conversations?: readonly Readonly<Conversation>[];
+  messages?: readonly Readonly<Message>[];
+  rounds?: readonly Readonly<Round>[];
+  conversationVersions?: readonly Readonly<ConversationVersion>[];
+}>;
+
 export type ConversationTranscriptMutationCommand = Readonly<{
   conversationIds: readonly string[];
   operation: string;
+  expected?: ConversationTranscriptMutationBaseline;
   put?: ConversationTranscriptMutationBatch;
   replaceMessages?: readonly ConversationTranscriptMessageReplacement[];
   replaceRounds?: readonly ConversationTranscriptRoundReplacement[];

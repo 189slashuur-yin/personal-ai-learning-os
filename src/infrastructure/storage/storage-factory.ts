@@ -6,6 +6,7 @@ import type { ProposalStorage } from "@/core/contracts/proposal-storage";
 import type { KnowledgeCardStorage } from "@/core/contracts/knowledge-card-storage";
 import type { ConversationVersionStorage } from "@/core/contracts/conversation-version-storage";
 import type { ConversationVersionRestoreWriter } from "@/core/contracts/conversation-version-restore-writer";
+import type { RoundMutationWriter } from "@/core/contracts/round-mutation-writer";
 import { BrowserConversationStorage } from "./browser-conversation-storage";
 import { BrowserMessageStorage } from "./browser-message-storage";
 import { BrowserRoundStorage } from "./browser-round-storage";
@@ -27,8 +28,10 @@ import {
   getCachedCounts,
   clearCaches,
 } from "./indexeddb";
+import { IndexedDBRoundMutationWriter } from "./indexeddb/idb-round-mutation-writer";
 import type { PreloadCounts } from "./indexeddb";
 import { StorageBackedConversationVersionRestoreWriter } from "./storage-backed-conversation-version-restore-writer";
+import { StorageBackedRoundMutationWriter } from "./storage-backed-round-mutation-writer";
 
 export type StorageMode = "localStorage" | "indexedDB";
 
@@ -158,4 +161,11 @@ export function createConversationVersionRestoreWriter(): ConversationVersionRes
     messages: new BrowserMessageStorage(),
     rounds: new BrowserRoundStorage(),
   });
+}
+
+export function createRoundMutationWriter(): RoundMutationWriter {
+  if (getStorageMode() === "indexedDB") {
+    return new IndexedDBRoundMutationWriter();
+  }
+  return new StorageBackedRoundMutationWriter(new BrowserRoundStorage());
 }

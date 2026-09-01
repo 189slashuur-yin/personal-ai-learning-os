@@ -225,32 +225,42 @@ export class RoundContextInheritanceService {
     };
   }
 
+  buildConfirmedContext(
+    roundId: string,
+    input: RoundContextInheritanceInput,
+  ): Round["context"] | null {
+    const resolved = this.resolve(roundId, input);
+    if (!resolved) return null;
+
+    const excludedFields = uniqueContextFields(input.excludedFields);
+    const overrides = normalizeConversationContext(input.overrides);
+    return {
+      inheritanceMode: input.inheritanceMode,
+      sourceRoundId:
+        input.inheritanceMode === "inherit"
+          ? resolved.sourceRoundId
+          : undefined,
+      excludedFields: excludedFields.length ? excludedFields : undefined,
+      overrides: hasConversationContext(overrides) ? overrides : undefined,
+      snapshot: hasConversationContext(resolved.snapshot)
+        ? resolved.snapshot
+        : undefined,
+      confirmedAt: new Date().toISOString(),
+    };
+  }
+
   confirm(roundId: string, input: RoundContextInheritanceInput): Round | null {
     const round = this.rounds.getById(roundId);
-    const resolved = this.resolve(roundId, input);
+    const context = this.buildConfirmedContext(roundId, input);
 
-    if (!round || !resolved) {
+    if (!round || !context) {
       return null;
     }
 
     const timestamp = new Date().toISOString();
-    const excludedFields = uniqueContextFields(input.excludedFields);
-    const overrides = normalizeConversationContext(input.overrides);
     const updatedRound: Round = {
       ...round,
-      context: {
-        inheritanceMode: input.inheritanceMode,
-        sourceRoundId:
-          input.inheritanceMode === "inherit"
-            ? resolved.sourceRoundId
-            : undefined,
-        excludedFields: excludedFields.length ? excludedFields : undefined,
-        overrides: hasConversationContext(overrides) ? overrides : undefined,
-        snapshot: hasConversationContext(resolved.snapshot)
-          ? resolved.snapshot
-          : undefined,
-        confirmedAt: timestamp,
-      },
+      context,
       updatedAt: timestamp,
     };
 

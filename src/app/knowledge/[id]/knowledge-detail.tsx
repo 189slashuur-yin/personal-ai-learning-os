@@ -26,7 +26,7 @@ import {
   ensureIndexedDBLoaded,
   getStorageMode,
 } from "@/infrastructure/storage/storage-factory";
-import { flushCachesToIndexedDB } from "@/infrastructure/storage/indexeddb/preload";
+import { drainPendingWritesOrThrow } from "@/infrastructure/storage/indexeddb/database";
 
 type Draft = Pick<
   KnowledgeCard,
@@ -148,7 +148,7 @@ export function KnowledgeDetail({ cardId }: { cardId: string }) {
 
   async function persistCanonicalKnowledgeState() {
     if (getStorageMode() === "indexedDB") {
-      await flushCachesToIndexedDB();
+      await drainPendingWritesOrThrow();
     }
   }
 

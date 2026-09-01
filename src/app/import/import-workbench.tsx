@@ -27,11 +27,10 @@ import {
 import { WorkspaceService } from "@/core/services/workspace-service";
 import { BrowserWorkspaceStorage } from "@/infrastructure/storage/browser-workspace-storage";
 import { BrowserAppEventLogStorage } from "@/infrastructure/storage/browser-feedback-storage";
-import { ConversationVersionService } from "@/core/services/conversation-version-service";
 import {
-  assertShareSnapshotTranscriptMutable,
-  executeShareSnapshotTranscriptMutation,
-} from "@/core/services/share-snapshot-mutation-guard";
+  ConversationMergeService,
+  type ConversationMergePreview,
+} from "@/core/services/conversation-merge-service";
 import {
   ChatGPTExportImport,
   type ChatGPTExportImportSharedState,
@@ -51,9 +50,9 @@ import {
 } from "@/infrastructure/storage/storage-factory";
 import {
   clearCaches,
-  flushCachesToIndexedDB,
   preloadAll,
 } from "@/infrastructure/storage/indexeddb/preload";
+import { drainPendingWritesOrThrow } from "@/infrastructure/storage/indexeddb/database";
 
 const pipeline = new ImportParserPipeline();
 const parserLabels: Record<ConversationParserId, string> = {
@@ -174,7 +173,8 @@ export function ImportWorkbench() {
   // R10: Conversation Merge
   const [mergeSourceId, setMergeSourceId] = useState("");
   const [mergeTargetId, setMergeTargetId] = useState("");
-  const [mergePreview, setMergePreview] = useState<{ sourceTitle: string; sourceMessages: number; sourceRounds: number; targetTitle: string; targetMessages: number; targetRounds: number } | null>(null);
+  const [mergePreview, setMergePreview] =
+    useState<ConversationMergePreview | null>(null);
   const [mergeReport, setMergeReport] = useState<string | null>(null);
 
   const preview = useMemo(
@@ -287,134 +287,38 @@ export function ImportWorkbench() {
       setError("请选择不同的源和目标 Conversation。");
       return;
     }
-    const convStorage = createConversationStorage();
-    const msgStorage = createMessageStorage();
-    const roundStorage = createRoundStorage();
-    const source = convStorage.getById(mergeSourceId);
-    const target = convStorage.getById(mergeTargetId);
-    if (!source || !target) { setError("Conversation 不存在。"); return; }
-    const sourceMessages = msgStorage.getByConversationId(mergeSourceId);
-    const sourceRounds = roundStorage.getByConversationId(mergeSourceId);
-    const targetMessages = msgStorage.getByConversationId(mergeTargetId);
-    const targetRounds = roundStorage.getByConversationId(mergeTargetId);
-    setMergePreview({
-      sourceTitle: source.title,
-      sourceMessages: sourceMessages.length,
-      sourceRounds: sourceRounds.length,
-      targetTitle: target.title,
-      targetMessages: targetMessages.length,
-      targetRounds: targetRounds.length,
-    });
-    setError(null);
+    try {
+      setMergePreview(
+        new ConversationMergeService({
+          conversations: createConversationStorage(),
+          messages: createMessageStorage(),
+          rounds: createRoundStorage(),
+          sources: createSourceStorage(),
+          versions: createConversationVersionStorage(),
+        }).preview(mergeSourceId, mergeTargetId),
+      );
+      setError(null);
+    } catch (error) {
+      setMergePreview(null);
+      setError(
+        error instanceof Error ? error.message : "Merge 预览失败。",
+      );
+    }
   }
 
   async function confirmMerge() {
-    if (!mergePreview || !mergeSourceId || !mergeTargetId) return;
-    if (!window.confirm(`将「${mergePreview.sourceTitle}」的全部内容合并到「${mergePreview.targetTitle}」？\n\n源：${mergePreview.sourceMessages} Messages · ${mergePreview.sourceRounds} Rounds\n目标：${mergePreview.targetMessages} Messages · ${mergePreview.targetRounds} Rounds\n\n合并后目标将包含两边的全部内容。源 Conversation 保持不变。`)) return;
+    if (!mergePreview) return;
+    if (!window.confirm(`将「${mergePreview.sourceConversation.title}」的全部内容合并到「${mergePreview.targetConversation.title}」？\n\n源：${mergePreview.sourceMessages.length} Messages · ${mergePreview.sourceRounds.length} Rounds\n目标：${mergePreview.targetMessages.length} Messages · ${mergePreview.targetRounds.length} Rounds\n\n合并后目标将包含两边的全部内容。源 Conversation 保持不变。`)) return;
     try {
-      const convStorage = createConversationStorage();
-      const msgStorage = createMessageStorage();
-      const roundStorage = createRoundStorage();
-      const sourceStorage = createSourceStorage();
-      const versionStorage = createConversationVersionStorage();
-      const target = convStorage.getById(mergeTargetId);
-      if (!target) { setError("目标 Conversation 不存在。"); return; }
+      const result = await new ConversationMergeService({
+        conversations: createConversationStorage(),
+        messages: createMessageStorage(),
+        rounds: createRoundStorage(),
+        sources: createSourceStorage(),
+        versions: createConversationVersionStorage(),
+      }).confirm(mergePreview);
 
-      assertShareSnapshotTranscriptMutable(
-        sourceStorage,
-        mergeSourceId,
-        "merge from Conversation transcript",
-      );
-      assertShareSnapshotTranscriptMutable(
-        sourceStorage,
-        mergeTargetId,
-        "merge into Conversation transcript",
-      );
-
-      const versionService = new ConversationVersionService({
-        conversations: convStorage,
-        messages: msgStorage,
-        versions: versionStorage,
-      });
-      const automaticVersion = versionService.buildSnapshot(
-        mergeTargetId,
-        `自动恢复点 — Merge「${mergePreview.sourceTitle}」`,
-        `合并来自「${mergePreview.sourceTitle}」的内容前自动创建`,
-        { kind: "automatic" },
-      );
-
-      const sourceMessages = msgStorage.getByConversationId(mergeSourceId);
-      const targetMessages = msgStorage.getByConversationId(mergeTargetId);
-      const sourceRounds = roundStorage.getByConversationId(mergeSourceId);
-      if (!automaticVersion) {
-        throw new Error("无法创建 Merge 自动恢复点。");
-      }
-
-      // Append source messages to target
-      const timestamp = new Date().toISOString();
-      const maxOrder = targetMessages.reduce((max, m) => Math.max(max, m.order), -1);
-      const appendedMessages = sourceMessages.map((msg, i) => ({
-        ...msg,
-        id: crypto.randomUUID(),
-        conversationId: mergeTargetId,
-        order: maxOrder + 1 + i,
-        createdAt: timestamp,
-        updatedAt: timestamp,
-      }));
-      const newMessageIds = appendedMessages.map((m) => m.id);
-
-      // Append source rounds to target
-      const startRoundOrder = roundStorage.getByConversationId(mergeTargetId).length + 1;
-      const appendedRounds = sourceRounds.map((round, index) => {
-        const mappedMessageIds = round.messageIds.map((mid) => {
-          const idx = sourceMessages.findIndex((m) => m.id === mid);
-          return idx >= 0 ? newMessageIds[idx] : undefined;
-        }).filter(Boolean) as string[];
-        const order = startRoundOrder + index;
-        return {
-          id: crypto.randomUUID(),
-          conversationId: mergeTargetId,
-          order,
-          title: round.title.trim() || `Round ${order}`,
-          question: round.question.trim(),
-          answer: round.answer.trim(),
-          messageIds: [...new Set(mappedMessageIds)],
-          note: round.note?.trim() || undefined,
-          summary: round.summary?.trim() || undefined,
-          createdAt: timestamp,
-          updatedAt: timestamp,
-        };
-      });
-
-      // Update target conversation timestamp
-      const updatedTarget = { ...target, updatedAt: timestamp };
-      await executeShareSnapshotTranscriptMutation(
-        sourceStorage,
-        {
-          conversationIds: [mergeSourceId, mergeTargetId],
-          operation: "merge Conversation transcript",
-          put: {
-            conversations: [updatedTarget],
-            rounds: appendedRounds,
-            conversationVersions: [automaticVersion],
-          },
-          replaceMessages: [{
-            conversationId: mergeTargetId,
-            messages: [...targetMessages, ...appendedMessages],
-          }],
-        },
-        () => {
-          versionStorage.save(automaticVersion);
-          msgStorage.replaceByConversationId(mergeTargetId, [
-            ...targetMessages,
-            ...appendedMessages,
-          ]);
-          roundStorage.saveMany(appendedRounds);
-          convStorage.save(updatedTarget);
-        },
-      );
-
-      setMergeReport(`✅ 已合并：${appendedMessages.length} Messages · ${sourceRounds.length} Rounds →「${mergePreview.targetTitle}」`);
+      setMergeReport(`✅ 已合并：${result.appendedMessages.length} Messages · ${result.appendedRounds.length} Rounds →「${mergePreview.targetConversation.title}」`);
       setMergePreview(null);
       setMergeSourceId("");
       setMergeTargetId("");
@@ -562,7 +466,7 @@ export function ImportWorkbench() {
         setImportProgress((current) =>
           updateImportOperationProgress(current, { phase: "flushing" }),
         );
-        await flushCachesToIndexedDB();
+        await drainPendingWritesOrThrow();
         setImportProgress((current) =>
           updateImportOperationProgress(current, { phase: "verifying" }),
         );
@@ -991,15 +895,15 @@ export function ImportWorkbench() {
                 <p className="text-sm font-semibold text-purple-950">Merge Preview</p>
                 <div className="mt-3 grid grid-cols-2 gap-4 text-sm">
                   <div className="rounded-lg bg-zinc-50 p-3">
-                    <p className="font-semibold text-zinc-700">源：{mergePreview.sourceTitle}</p>
-                    <p className="mt-1 text-xs text-zinc-500">{mergePreview.sourceMessages} Messages · {mergePreview.sourceRounds} Rounds</p>
+                    <p className="font-semibold text-zinc-700">源：{mergePreview.sourceConversation.title}</p>
+                    <p className="mt-1 text-xs text-zinc-500">{mergePreview.sourceMessages.length} Messages · {mergePreview.sourceRounds.length} Rounds</p>
                   </div>
                   <div className="rounded-lg bg-zinc-50 p-3">
-                    <p className="font-semibold text-zinc-700">目标：{mergePreview.targetTitle}</p>
-                    <p className="mt-1 text-xs text-zinc-500">{mergePreview.targetMessages} Messages · {mergePreview.targetRounds} Rounds（合并前）</p>
+                    <p className="font-semibold text-zinc-700">目标：{mergePreview.targetConversation.title}</p>
+                    <p className="mt-1 text-xs text-zinc-500">{mergePreview.targetMessages.length} Messages · {mergePreview.targetRounds.length} Rounds（合并前）</p>
                   </div>
                 </div>
-                <p className="mt-3 text-xs text-zinc-500">合并后目标将包含 {mergePreview.targetMessages + mergePreview.sourceMessages} Messages · {mergePreview.targetRounds + mergePreview.sourceRounds} Rounds。</p>
+                <p className="mt-3 text-xs text-zinc-500">合并后目标将包含 {mergePreview.targetMessages.length + mergePreview.sourceMessages.length} Messages · {mergePreview.targetRounds.length + mergePreview.sourceRounds.length} Rounds。</p>
                 <div className="mt-3 flex gap-2">
                   <button className="rounded-lg bg-purple-700 px-4 py-2 text-xs font-semibold text-white hover:bg-purple-800 disabled:bg-zinc-300" disabled={!idbReady} onClick={confirmMerge} type="button">Confirm Merge</button>
                   <button className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-xs font-semibold text-zinc-600" onClick={() => setMergePreview(null)} type="button">Cancel</button>

@@ -9,7 +9,7 @@ import { findInvalidProposalIds } from "@/core/services/conversation-referential
 import { clearStaleCurrentProposalPointer } from "@/infrastructure/storage/flow-pointers";
 import {
   deleteMany,
-  drainPendingWrites,
+  drainPendingWritesOrThrow,
   readAll,
   replaceStores,
   type StoreBatch,
@@ -196,16 +196,22 @@ export function buildCacheBatch(): StoreBatch {
 
 export async function flushCachesToIndexedDB(): Promise<void> {
   try {
-    // Drain all pending background writes (persistInBackground) before the
-    // authoritative replaceStores.  This prevents a late-arriving writeOne
-    // (e.g. from a previous import save()) from re-adding data that
-    // replaceStores has just cleared from IndexedDB stores.
-    await drainPendingWrites();
+    // Explicit full-overwrite migration helper only. Ordinary product paths
+    // must await their scoped writes and reload instead of treating one tab's
+    // cache as whole-database authority.
+    await drainPendingWritesOrThrow();
     await replaceStores(buildCacheBatch());
   } catch (err) {
     console.error("flushCachesToIndexedDB failed:", err);
     throw err;
   }
+}
+
+/** Await scoped adapter writes, then refresh every cache from durable state. */
+export async function reloadAfterScopedWrites(): Promise<PreloadCounts> {
+  await drainPendingWritesOrThrow();
+  clearCaches();
+  return preloadAll();
 }
 
 /** Clear all in-memory caches (does NOT touch IndexedDB). */

@@ -1,5 +1,60 @@
 # PALOS v1.8 — ChatGPT Conversation Snapshot Handoff
 
+## 2026-09-01 v1.8.3 data-integrity hotfix release
+
+本轮以 clean `main` / `origin/main` / `v1.8.2^{}` = `70c31387c9f6ed12b1d60e96f06eb8046a874bc2` 为硬基线，实施并发布审计确认的三个 rollout-blocking P0。版本按标准 SemVer 收口为 `v1.8.3`；annotated tag `v1.8.3` 指向本次实现与 release metadata 的单一提交。
+
+### Release metadata
+
+- Version / tag：`v1.8.3`（annotated）
+- Commit strategy：单提交 `fix: harden cross-tab data integrity`
+- Scope：P0-1/P0-2/P0-3、必要回归测试与五份 release 文档
+- Release baseline：`v1.8.2^{}` / `70c31387c9f6ed12b1d60e96f06eb8046a874bc2`
+
+### P0-1 ordinary whole-cache authority
+
+- create Conversation、普通 New import、Workspace move、ChatGPT Export batch New import、Proposal review/apply、Knowledge save/delete/duplicate 等普通路径不再调用 `flushCachesToIndexedDB()`；它们只等待 scoped adapter writes，验证路径再从 durable IndexedDB reload。
+- single/batch Conversation delete 不再从当前 Tab cache 构造全库 replacement。唯一七-store readwrite transaction 读取 authoritative records，解析目标 Conversation dependency closure，只 delete 目标 Conversation、Message、Round、Source、Proposal 与 ConversationVersion ID；无关记录不重写，Knowledge 独立 aggregate 保留。
+- `replaceStores()` 生产入口收敛为 App Data Restore、Clear all 与当前显式 LocalStorage→IndexedDB full-overwrite migration；未改变 migration UX。
+- stale-tab regression 对另一 Tab 在七个 canonical stores 写入的具体 ID 逐一断言保留；原先只断言 survivor Round count `>= 1` 的弱测试改为精确断言 `r-surv` 与 `r-concurrent`。
+
+### P0-2 Round enrichment mutation
+
+- 新增 patch-only `RoundMutationWriter` contract、默认 IndexedDB implementation 与 LocalStorage fallback。command 只允许 `note/summary/context`，每个修改字段必须携带 expected baseline。
+- IndexedDB writer 在 `sources + rounds` transaction 内读取 authoritative Round 和 Source ownership，从 authoritative Round merge enrichment patch；`conversationId/order/title/question/answer/messageIds/createdAt` 等 canonical transcript fields 不接受 command 覆盖。
+- 同一 enrichment 字段 baseline 冲突 fail closed；transaction abort 前不更新 cache，UI 只在 writer resolve 后显示 saved/notice。
+- Round record autosave 与 Round context reference/override 改走该 writer。Snapshot canonical tail 被另一 Tab extend 后，note/summary/context patch 保留 authoritative answer/messageIds。
+- Message→Round migration command 保存 Conversation/Message/Round preview baseline，final transaction 复核 baseline 与 authoritative Snapshot ownership；Snapshot-owned、stale baseline 或 abort 均零 Round write。
+
+### P0-3 Merge fail-closed baseline
+
+- 新增 `ConversationMergeService`。preview 保存 source/target Conversation、Messages、Rounds 与相关 ConversationVersions 完整 baseline；UI 只持有并确认该 preview。
+- final transaction 同时读取 authoritative Sources 和所有 baseline stores。任一 source/target Conversation、Message、Round 或 Version 变化均 abort 并要求重新 preview；Snapshot ownership 继续 transaction 内 fail closed。
+- 成功路径只 put appended target Messages/Rounds、updated target Conversation 与 automatic Version；不再 delete+replace target 全部 Messages。Message/Round order 与 Version snapshot/sourceVersion 都建立在已验证 baseline 上。
+- source Conversation/Message/Round 完全不写。强制 abort 时 target Conversation/Message/Round/Version 与 caches 均不前进。
+
+### Validation
+
+- P0-1 定向：`tests/indexeddb-reliability.test.ts` passed（74/74）
+- P0-2 定向：`tests/indexeddb-reliability.test.ts` passed（79/79）
+- P0-3/path ownership 定向：3 files / 110 tests passed
+- Full Vitest：20 files / 393 tests passed
+- Playwright：3/3 passed；受限沙箱首次无法写 `test-results/.last-run.json`，获准在仓库写入/启动本地 server 后通过
+- `npm run lint`：passed
+- `npm run build`：passed（19 routes）
+- `git diff --check`：passed
+
+### Deferred P1/P2 and accepted constraints
+
+- P1：普通 Message/Source/edit/regenerate/append 的 authoritative writer 仍未比较同 aggregate expected baseline；同 aggregate 并发仍可能 last-writer-wins、产生重复 order，显式 replace 仍可能删除并发新增。本轮只为 migration/Merge 增加 baseline。
+- P1：LocalStorage→IndexedDB migration 仍执行 full replacement；UI 继续使用“复制”语言，未明确强调清空替换现有 IndexedDB。本轮按限制未改 migration UX。
+- P2：无当前生产 caller 的 Round create/delete/merge/split/reorder/rebind 仍使用无 guard cache storage；未重构 dormant Round CRUD。
+- P2/accepted：authoritative transaction 继续用 full-store `getAll()`，大数据量下可能延长写锁；未新增 index/store/schema。
+- Accepted：LocalStorage legacy/debug mode 没有 IndexedDB transaction 同等级一致性；commit 后 reload 可因合法后续并发返回 committed-but-unverified，禁止旧数据补偿回滚。
+- Snapshot lifecycle/read UX/Search、大 Snapshot 压测和双 Tab browser E2E 仍属独立 backlog，不并入本 hotfix。
+
+---
+
 ## 2026-08-03 v1.8.2 authoritative mutation hardening maintenance release
 
 本次 maintenance release 只关闭 Snapshot-owned Conversation 非 canonical mutation 的跨 tab cached ownership TOCTOU。没有修改 Snapshot metadata/schema、IndexedDB schema/version/store、canonical Snapshot writer、App Restore、legacy migration 或 UI；没有新增产品功能。

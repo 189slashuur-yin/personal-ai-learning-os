@@ -11,7 +11,7 @@ import {
   ensureIndexedDBLoaded,
   getStorageMode,
 } from "@/infrastructure/storage/storage-factory";
-import { flushCachesToIndexedDB } from "@/infrastructure/storage/indexeddb/preload";
+import { drainPendingWritesOrThrow } from "@/infrastructure/storage/indexeddb/database";
 
 type CreateConversationDialogProps = {
   onClose: () => void;
@@ -50,7 +50,7 @@ export function CreateConversationDialog({
       lastOpenedAt: timestamp,
     });
     if (getStorageMode() === "indexedDB") {
-      await flushCachesToIndexedDB();
+      await drainPendingWritesOrThrow();
     }
 
     router.push(`/conversation/${id}`);

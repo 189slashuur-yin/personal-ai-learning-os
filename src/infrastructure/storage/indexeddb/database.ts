@@ -90,11 +90,8 @@ export function reportAsyncWriteFailure(
 }
 
 // ---- Pending write tracker ----
-// persistInBackground writes are fire-and-forget.  When flushCachesToIndexedDB
-// is about to run replaceStores (the authoritative persistence point), we must
-// drain all pending background writes first so that a late-arriving writeOne
-// (e.g. from a previous import save()) does not re-add data that
-// replaceStores just cleared.
+// persistInBackground writes are fire-and-forget. Scoped product operations
+// drain them before reporting success or starting an authoritative transaction.
 const _pendingBgWrites = new Set<Promise<void>>();
 
 /** Diagnostic-only visibility into tracked fire-and-forget writes. */

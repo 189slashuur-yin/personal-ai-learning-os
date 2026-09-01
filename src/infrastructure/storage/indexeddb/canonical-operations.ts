@@ -20,8 +20,9 @@ import {
 } from "@/infrastructure/storage/flow-pointers";
 import {
   countStore,
-  drainPendingWrites,
+  drainPendingWritesOrThrow,
   getPendingWriteCount,
+  openPalosDB,
   replaceStores,
   type StoreBatch,
 } from "./database";
@@ -142,7 +143,7 @@ async function enterCanonicalWriteBarrier(
   observer?: CanonicalOperationObserver,
   ensureLoaded = false,
 ): Promise<void> {
-  await drainPendingWrites();
+  await drainPendingWritesOrThrow();
   const pendingWriteCount = getPendingWriteCount();
   if (pendingWriteCount !== 0) {
     throw new Error(
@@ -155,12 +156,13 @@ async function enterCanonicalWriteBarrier(
   emit(observer, "after-write-barrier", { pendingWriteCount });
 }
 
-function buildBatchDeleteSnapshot(conversationIds: string[]): {
-  batch: StoreBatch;
+function buildBatchDeletePlan(
+  conversationIds: string[],
+  current: StoreBatch,
+): {
   deletion: BatchDeleteResult;
   deletedDependencyIds: ConversationDependencyIds;
 } {
-  const current = buildCacheBatch();
   const conversations = (current.conversations ?? []) as Conversation[];
   const messages = (current.messages ?? []) as Message[];
   const rounds = (current.rounds ?? []) as Round[];
@@ -184,39 +186,118 @@ function buildBatchDeleteSnapshot(conversationIds: string[]): {
     .filter((card) => deleted.proposalIds.has(card.proposalId))
     .map((card) => card.id);
 
-  const nextBatch: StoreBatch = {
-    conversations: conversations.filter(
-      (conversation) => !deleted.conversationIds.has(conversation.id),
-    ),
-    messages: messages.filter((message) => !deleted.messageIds.has(message.id)),
-    rounds: rounds.filter((round) => !deleted.roundIds.has(round.id)),
-    sources: sources.filter((source) => !deleted.sourceIds.has(source.id)),
-    proposals: proposals.filter(
-      (proposal) => !deleted.proposalIds.has(proposal.id),
-    ),
-    // Accepted/manual Knowledge is an independent aggregate. Historical
-    // provenance IDs remain as snapshots; live links are resolved separately.
-    "knowledge-cards": [...knowledgeCards],
-    "conversation-versions": versions.filter(
-      (version) => !deleted.conversationVersionIds.has(version.id),
-    ),
-  };
-
   return {
-    batch: nextBatch,
     deletion: {
-      deletedConversations:
-        conversations.length - (nextBatch.conversations?.length ?? 0),
-      deletedMessages: messages.length - (nextBatch.messages?.length ?? 0),
-      deletedRounds: rounds.length - (nextBatch.rounds?.length ?? 0),
-      deletedSources: sources.length - (nextBatch.sources?.length ?? 0),
-      deletedProposals: proposals.length - (nextBatch.proposals?.length ?? 0),
+      deletedConversations: deleted.conversationIds.size,
+      deletedMessages: deleted.messageIds.size,
+      deletedRounds: deleted.roundIds.size,
+      deletedSources: deleted.sourceIds.size,
+      deletedProposals: deleted.proposalIds.size,
       orphanedKnowledgeCount: orphanedKnowledgeIds.length,
       orphanedKnowledgeIds,
       sidecarCleanupFailures: [],
     },
     deletedDependencyIds,
   };
+}
+
+const CANONICAL_STORE_NAMES = [
+  "conversations",
+  "messages",
+  "rounds",
+  "sources",
+  "proposals",
+  "knowledge-cards",
+  "conversation-versions",
+] as const;
+
+async function deleteCanonicalConversationClosure(
+  conversationIds: string[],
+): Promise<{
+  deletion: BatchDeleteResult;
+  deletedDependencyIds: ConversationDependencyIds;
+}> {
+  const database = await openPalosDB();
+
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction(
+      [...CANONICAL_STORE_NAMES],
+      "readwrite",
+    );
+    const requests = Object.fromEntries(
+      CANONICAL_STORE_NAMES.map((storeName) => [
+        storeName,
+        transaction.objectStore(storeName).getAll(),
+      ]),
+    ) as Record<(typeof CANONICAL_STORE_NAMES)[number], IDBRequest<unknown[]>>;
+    let completedReads = 0;
+    let result:
+      | {
+          deletion: BatchDeleteResult;
+          deletedDependencyIds: ConversationDependencyIds;
+        }
+      | undefined;
+    let operationError: unknown;
+
+    const handleReadSuccess = () => {
+      completedReads += 1;
+      if (completedReads !== CANONICAL_STORE_NAMES.length) return;
+
+      try {
+        const current: StoreBatch = {
+          conversations: requests.conversations.result,
+          messages: requests.messages.result,
+          rounds: requests.rounds.result,
+          sources: requests.sources.result,
+          proposals: requests.proposals.result,
+          "knowledge-cards": requests["knowledge-cards"].result,
+          "conversation-versions": requests["conversation-versions"].result,
+        };
+        result = buildBatchDeletePlan(conversationIds, current);
+        const deleted = toConversationDependencySets(
+          result.deletedDependencyIds,
+        );
+        const idsByStore = {
+          conversations: deleted.conversationIds,
+          messages: deleted.messageIds,
+          rounds: deleted.roundIds,
+          sources: deleted.sourceIds,
+          proposals: deleted.proposalIds,
+          "conversation-versions": deleted.conversationVersionIds,
+        } as const;
+
+        for (const [storeName, ids] of Object.entries(idsByStore)) {
+          const store = transaction.objectStore(storeName);
+          for (const id of ids) store.delete(id);
+        }
+      } catch (error) {
+        operationError = error;
+        transaction.abort();
+      }
+    };
+
+    for (const request of Object.values(requests)) {
+      request.onsuccess = handleReadSuccess;
+    }
+    transaction.oncomplete = () => {
+      if (result) resolve(result);
+      else reject(new Error("Canonical scoped delete completed without a plan."));
+    };
+    transaction.onerror = () => {
+      reject(
+        operationError ??
+          transaction.error ??
+          new Error("Canonical scoped delete transaction failed."),
+      );
+    };
+    transaction.onabort = () => {
+      reject(
+        operationError ??
+          transaction.error ??
+          new Error("Canonical scoped delete transaction aborted."),
+      );
+    };
+  });
 }
 
 async function verifyCanonicalState(
@@ -386,19 +467,18 @@ export async function bulkDeleteCanonicalConversations(
   observer?: CanonicalOperationObserver,
 ): Promise<CanonicalBatchDeleteResult> {
   await enterCanonicalWriteBarrier(observer, true);
-  const { batch, deletion, deletedDependencyIds } =
-    buildBatchDeleteSnapshot(conversationIds);
+  const { deletion, deletedDependencyIds } =
+    await deleteCanonicalConversationClosure(conversationIds);
   emit(observer, "after-in-memory-snapshot", {
-    resultingCounts: normalizeBatchCounts(batch),
     deletion,
+    strategy: "authoritative scoped transaction",
   });
   emit(observer, "before-replace", {
-    resultingCounts: normalizeBatchCounts(batch),
+    strategy: "authoritative scoped transaction",
     pendingWriteCount: getPendingWriteCount(),
   });
-  await replaceStores(batch);
   emit(observer, "after-replace", {
-    resultingCounts: normalizeBatchCounts(batch),
+    strategy: "authoritative scoped transaction committed",
     pendingWriteCount: getPendingWriteCount(),
   });
   const flowPointerCleanup = clearDeletedFlowPointers(deletedDependencyIds);

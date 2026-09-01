@@ -6,6 +6,8 @@ import { ChatGPTExportImportService } from "@/core/services/chatgpt-export-impor
 import { ImportParserPipeline } from "@/core/services/import-parser-pipeline";
 import { ImportService } from "@/core/services/import-service";
 import { ConversationVersionService } from "@/core/services/conversation-version-service";
+import { ConversationMergeService } from "@/core/services/conversation-merge-service";
+import { MessageToRoundMigrationService } from "@/core/services/message-to-round-migration";
 import {
   batchDeleteConversationWorkspace,
   deleteConversationSidecarMetadata,
@@ -28,6 +30,7 @@ import {
   readAll,
   replaceStores,
   replaceWhere,
+  writeOne,
   type StoreBatch,
 } from "@/infrastructure/storage/indexeddb/database";
 import {
@@ -35,6 +38,7 @@ import {
   flushCachesToIndexedDB,
   getCachedCounts,
   preloadAll,
+  reloadAfterScopedWrites,
 } from "@/infrastructure/storage/indexeddb/preload";
 import {
   bulkDeleteCanonicalConversations,
@@ -48,6 +52,10 @@ import { IndexedDBProposalStorage } from "@/infrastructure/storage/indexeddb/idb
 import { IndexedDBKnowledgeCardStorage } from "@/infrastructure/storage/indexeddb/idb-knowledge-card-storage";
 import { IndexedDBConversationVersionStorage } from "@/infrastructure/storage/indexeddb/idb-conversation-version-storage";
 import { IndexedDBConversationVersionRestoreWriter } from "@/infrastructure/storage/indexeddb/idb-conversation-version-restore-writer";
+import {
+  IndexedDBRoundMutationWriter,
+  RoundMutationConflictError,
+} from "@/infrastructure/storage/indexeddb/idb-round-mutation-writer";
 import { BrowserProposalStorage } from "@/infrastructure/storage/browser-proposal-storage";
 import { BrowserAnalyzerRunStorage } from "@/infrastructure/storage/browser-analyzer-run-storage";
 import { BrowserAssetStorage } from "@/infrastructure/storage/browser-asset-storage";
@@ -187,6 +195,7 @@ class FakeTransaction {
   onabort: (() => void) | null = null;
   private pending = 0;
   private completed = false;
+  private aborted = false;
 
   constructor(
     private readonly stores: Map<string, StoreData>,
@@ -205,7 +214,12 @@ class FakeTransaction {
   }
 
   willAbort() {
-    return this.fail;
+    return this.fail || this.aborted;
+  }
+
+  abort() {
+    this.aborted = true;
+    this.completeSoon();
   }
 
   operation() {
@@ -221,7 +235,7 @@ class FakeTransaction {
     queueMicrotask(() => {
       if (this.completed || this.pending > 0) return;
       this.completed = true;
-      if (this.fail) {
+      if (this.willAbort()) {
         this.error = new DOMException("forced failure", "AbortError");
         this.onabort?.();
         return;
@@ -1167,19 +1181,15 @@ describe("IndexedDB storage reliability", () => {
 
     // Step B: immediately run another persistInBackground write on a
     // different store (simulates a concurrent operation from another component)
-    const { persistInBackground, writeOne } =
+    const { persistInBackground } =
       await import("@/infrastructure/storage/indexeddb/database");
     persistInBackground(
       "concurrent round save",
       writeOne("rounds", round("r-concurrent", "survivor", 99)),
     );
 
-    // Step C: flush — this must produce a deterministic, correct final state
-    await flushCachesToIndexedDB();
-
-    // Step D: simulate page refresh
-    clearCaches();
-    await preloadAll();
+    // Step C: wait for scoped writes, then reload durable state.
+    await reloadAfterScopedWrites();
 
     // Victim must be fully gone
     expect(new IndexedDBConversationStorage().getById("victim")).toBeNull();
@@ -1191,7 +1201,10 @@ describe("IndexedDB storage reliability", () => {
     expect(new IndexedDBMessageStorage().getByConversationId("survivor")).toHaveLength(1);
     // The concurrent round save should not be lost
     const survivorRounds = new IndexedDBRoundStorage().getByConversationId("survivor");
-    expect(survivorRounds.length).toBeGreaterThanOrEqual(1);
+    expect(survivorRounds.map((item) => item.id)).toEqual([
+      "r-surv",
+      "r-concurrent",
+    ]);
   });
 });
 
@@ -3274,6 +3287,23 @@ function versionRecord(id: string, conversationId: string) {
   };
 }
 
+function snapshotSourceRecord(id: string, conversationId: string) {
+  return {
+    ...sourceRecord(id, conversationId),
+    shareSnapshot: {
+      schemaVersion: 2 as const,
+      resourceHash: "a".repeat(64),
+      snapshotHash: "b".repeat(64),
+      snapshotMessageCount: 1,
+      capturedAt: now,
+      parserVersion: "test",
+      inputKind: "pasted-text" as const,
+      hashAlgorithm: "sha256-json-role-content-v1" as const,
+      snapshotSequence: 1,
+    },
+  };
+}
+
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(
@@ -3324,13 +3354,116 @@ async function importSmallChatGPTConversation() {
     }),
     { forceNew: true },
   );
-  await flushCachesToIndexedDB();
-  clearCaches();
-  await preloadAll();
+  await reloadAfterScopedWrites();
   return result;
 }
 
 describe("PALOS v1.6.1 — atomic batch delete and Clear write barrier", () => {
+  it("ordinary scoped writes preserve records committed by another stale tab in all seven stores", async () => {
+    await replaceStores({
+      conversations: [conversation("tab-a")],
+      messages: [],
+      rounds: [],
+      sources: [],
+      proposals: [],
+      "knowledge-cards": [],
+      "conversation-versions": [],
+    });
+    clearCaches();
+    await preloadAll();
+
+    await putStores({
+      conversations: [conversation("tab-b")],
+      messages: [message("tab-b-message", "tab-b")],
+      rounds: [round("tab-b-round", "tab-b")],
+      sources: [sourceRecord("tab-b-source", "tab-b")],
+      proposals: [
+        proposalRecord("tab-b-proposal", "tab-b", "tab-b-source"),
+      ],
+      "knowledge-cards": [
+        knowledgeRecord("tab-b-knowledge", "tab-b-proposal"),
+      ],
+      "conversation-versions": [versionRecord("tab-b-version", "tab-b")],
+    });
+
+    new IndexedDBConversationStorage().save({
+      ...conversation("tab-a"),
+      title: "Tab A scoped edit",
+    });
+    await reloadAfterScopedWrites();
+
+    expect((await readAll<Conversation>("conversations")).map(({ id }) => id)).toContain("tab-b");
+    expect((await readAll<Message>("messages")).map(({ id }) => id)).toContain("tab-b-message");
+    expect((await readAll<Round>("rounds")).map(({ id }) => id)).toContain("tab-b-round");
+    expect((await readAll<{ id: string }>("sources")).map(({ id }) => id)).toContain("tab-b-source");
+    expect((await readAll<{ id: string }>("proposals")).map(({ id }) => id)).toContain("tab-b-proposal");
+    expect((await readAll<{ id: string }>("knowledge-cards")).map(({ id }) => id)).toContain("tab-b-knowledge");
+    expect((await readAll<{ id: string }>("conversation-versions")).map(({ id }) => id)).toContain("tab-b-version");
+  });
+
+  it("stale canonical delete removes only its authoritative aggregate closure", async () => {
+    await replaceStores({
+      conversations: [conversation("delete-tab-a")],
+      messages: [message("delete-tab-a-message", "delete-tab-a")],
+      rounds: [round("delete-tab-a-round", "delete-tab-a")],
+      sources: [sourceRecord("delete-tab-a-source", "delete-tab-a")],
+      proposals: [
+        proposalRecord(
+          "delete-tab-a-proposal",
+          "delete-tab-a",
+          "delete-tab-a-source",
+        ),
+      ],
+      "knowledge-cards": [
+        knowledgeRecord("delete-tab-a-knowledge", "delete-tab-a-proposal"),
+      ],
+      "conversation-versions": [
+        versionRecord("delete-tab-a-version", "delete-tab-a"),
+      ],
+    });
+    clearCaches();
+    await preloadAll();
+
+    await putStores({
+      conversations: [conversation("delete-tab-b")],
+      messages: [message("delete-tab-b-message", "delete-tab-b")],
+      rounds: [round("delete-tab-b-round", "delete-tab-b")],
+      sources: [sourceRecord("delete-tab-b-source", "delete-tab-b")],
+      proposals: [
+        proposalRecord(
+          "delete-tab-b-proposal",
+          "delete-tab-b",
+          "delete-tab-b-source",
+        ),
+      ],
+      "knowledge-cards": [
+        knowledgeRecord("delete-tab-b-knowledge", "delete-tab-b-proposal"),
+      ],
+      "conversation-versions": [
+        versionRecord("delete-tab-b-version", "delete-tab-b"),
+      ],
+    });
+
+    await bulkDeleteCanonicalConversations(["delete-tab-a"]);
+
+    const expectedByStore = {
+      conversations: "delete-tab-b",
+      messages: "delete-tab-b-message",
+      rounds: "delete-tab-b-round",
+      sources: "delete-tab-b-source",
+      proposals: "delete-tab-b-proposal",
+      "knowledge-cards": "delete-tab-b-knowledge",
+      "conversation-versions": "delete-tab-b-version",
+    } as const;
+    for (const [storeName, id] of Object.entries(expectedByStore)) {
+      expect(
+        (await readAll<{ id: string }>(storeName as keyof typeof expectedByStore)).map(
+          (record) => record.id,
+        ),
+      ).toContain(id);
+    }
+  });
+
   it("deletes 100 conversations and thousands of dependents through one canonical transaction", async () => {
     const ids = Array.from({ length: 100 }, (_, index) => `stress-${index}`);
     const batch: StoreBatch = {
@@ -3492,6 +3625,475 @@ describe("PALOS v1.6.1 — atomic batch delete and Clear write barrier", () => {
     const imported = await importSmallChatGPTConversation();
     expect(new IndexedDBConversationStorage().getById(imported.conversationId)).not.toBeNull();
     expect(getPendingWriteCount()).toBe(0);
+  });
+});
+
+describe("v1.8.2 post-release Round mutation authority", () => {
+  it("merges note, summary, and context patches onto an authoritative Snapshot tail", async () => {
+    const conversationId = "round-patch-snapshot";
+    const baseRound = {
+      ...round("round-patch", conversationId),
+      answer: "cached answer",
+      messageIds: ["round-patch-message-1"],
+    };
+    await replaceStores({
+      conversations: [conversation(conversationId)],
+      sources: [snapshotSourceRecord("round-patch-source", conversationId)],
+      messages: [message("round-patch-message-1", conversationId)],
+      rounds: [baseRound],
+    });
+    clearCaches();
+    await preloadAll();
+
+    await writeOne("rounds", {
+      ...baseRound,
+      answer: "authoritative extended answer",
+      messageIds: ["round-patch-message-1", "round-patch-message-2"],
+    });
+
+    const writer = new IndexedDBRoundMutationWriter();
+    const noted = await writer.execute({
+      roundId: baseRound.id,
+      conversationId,
+      operation: "test note patch",
+      patch: { note: "Tab A note" },
+      expected: { note: null },
+    });
+    expect(noted.answer).toBe("authoritative extended answer");
+    expect(noted.messageIds).toEqual([
+      "round-patch-message-1",
+      "round-patch-message-2",
+    ]);
+
+    const summarized = await writer.execute({
+      roundId: baseRound.id,
+      conversationId,
+      operation: "test summary patch",
+      patch: { summary: "Tab A summary" },
+      expected: { summary: null },
+    });
+    const contextualized = await writer.execute({
+      roundId: baseRound.id,
+      conversationId,
+      operation: "test context patch",
+      patch: {
+        context: {
+          inheritanceMode: "inherit",
+          snapshot: { currentState: "fixed context" },
+          confirmedAt: now,
+        },
+      },
+      expected: { context: null },
+    });
+
+    expect(summarized.summary).toBe("Tab A summary");
+    expect(contextualized).toMatchObject({
+      answer: "authoritative extended answer",
+      messageIds: ["round-patch-message-1", "round-patch-message-2"],
+      note: "Tab A note",
+      summary: "Tab A summary",
+      context: { snapshot: { currentState: "fixed context" } },
+    });
+  });
+
+  it("fails closed when the same enrichment field changed concurrently", async () => {
+    const conversationId = "round-patch-conflict";
+    const baseRound = round("round-conflict", conversationId);
+    await replaceStores({
+      conversations: [conversation(conversationId)],
+      sources: [],
+      rounds: [baseRound],
+    });
+    clearCaches();
+    await preloadAll();
+    await writeOne("rounds", { ...baseRound, note: "Tab B note" });
+
+    await expect(
+      new IndexedDBRoundMutationWriter().execute({
+        roundId: baseRound.id,
+        conversationId,
+        operation: "conflicting note patch",
+        patch: { note: "Tab A note" },
+        expected: { note: null },
+      }),
+    ).rejects.toBeInstanceOf(RoundMutationConflictError);
+
+    expect(
+      (await readAll<Round>("rounds")).find((item) => item.id === baseRound.id)
+        ?.note,
+    ).toBe("Tab B note");
+  });
+
+  it("applies an ordinary Round patch and leaves durable/cache state unchanged on forced abort", async () => {
+    const conversationId = "round-patch-ordinary";
+    const baseRound = round("round-ordinary", conversationId);
+    await replaceStores({
+      conversations: [conversation(conversationId)],
+      sources: [],
+      rounds: [baseRound],
+    });
+    clearCaches();
+    await preloadAll();
+
+    const writer = new IndexedDBRoundMutationWriter();
+    const updated = await writer.execute({
+      roundId: baseRound.id,
+      conversationId,
+      operation: "ordinary summary patch",
+      patch: { summary: "saved summary" },
+      expected: { summary: null },
+    });
+    expect(updated.summary).toBe("saved summary");
+
+    fakeIndexedDB.failTransactions = 1;
+    await expect(
+      writer.execute({
+        roundId: baseRound.id,
+        conversationId,
+        operation: "forced abort note patch",
+        patch: { note: "must not commit" },
+        expected: { note: null },
+      }),
+    ).rejects.toThrow("forced failure");
+    expect(
+      (await readAll<Round>("rounds")).find((item) => item.id === baseRound.id),
+    ).toMatchObject({ summary: "saved summary" });
+    expect(
+      (await readAll<Round>("rounds")).find((item) => item.id === baseRound.id)
+        ?.note,
+    ).toBeUndefined();
+    expect(new IndexedDBRoundStorage().getById(baseRound.id)).toMatchObject({
+      summary: "saved summary",
+      note: undefined,
+    });
+  });
+
+  it("blocks Snapshot-owned Message-to-Round migration in the final transaction with zero writes", async () => {
+    const conversationId = "snapshot-migration-blocked";
+    await replaceStores({
+      conversations: [conversation(conversationId)],
+      sources: [],
+      messages: [message("snapshot-migration-message", conversationId)],
+      rounds: [],
+    });
+    clearCaches();
+    await preloadAll();
+    const storages = createStorageInstances("indexedDB");
+    const migration = new MessageToRoundMigrationService(
+      storages.conversations,
+      storages.messages,
+      storages.rounds,
+      storages.sources,
+    );
+    const preview = migration.previewConversation(conversationId);
+
+    await writeOne(
+      "sources",
+      snapshotSourceRecord("snapshot-migration-source", conversationId),
+    );
+
+    await expect(migration.applyConversation(preview)).rejects.toThrow(
+      "immutable share Snapshot",
+    );
+    expect(await readAll<Round>("rounds")).toEqual([]);
+    expect(
+      (await readAll<{ id: string }>("sources")).map((source) => source.id),
+    ).toContain("snapshot-migration-source");
+  });
+
+  it("aborts Message-to-Round migration when its authoritative Message baseline changes", async () => {
+    const conversationId = "migration-baseline-conflict";
+    await replaceStores({
+      conversations: [conversation(conversationId)],
+      sources: [],
+      messages: [message("migration-message-1", conversationId)],
+      rounds: [],
+    });
+    clearCaches();
+    await preloadAll();
+    const storages = createStorageInstances("indexedDB");
+    const migration = new MessageToRoundMigrationService(
+      storages.conversations,
+      storages.messages,
+      storages.rounds,
+      storages.sources,
+    );
+    const preview = migration.previewConversation(conversationId);
+    await writeOne(
+      "messages",
+      message("migration-message-2", conversationId, 1),
+    );
+
+    await expect(migration.applyConversation(preview)).rejects.toThrow(
+      "Messages changed",
+    );
+    expect(await readAll<Round>("rounds")).toEqual([]);
+    expect((await readAll<Message>("messages")).map((item) => item.id)).toEqual([
+      "migration-message-1",
+      "migration-message-2",
+    ]);
+  });
+});
+
+describe("v1.8.2 post-release Merge baseline authority", () => {
+  async function seedMergeFixture() {
+    const sourceConversation = conversation("merge-source");
+    const targetConversation = conversation("merge-target");
+    const sourceMessages = [
+      { ...message("merge-source-user", sourceConversation.id, 0), content: "source question" },
+      {
+        ...message("merge-source-assistant", sourceConversation.id, 1),
+        role: "assistant" as const,
+        content: "source answer",
+      },
+    ];
+    const targetMessages = [
+      { ...message("merge-target-user", targetConversation.id, 0), content: "target question" },
+      {
+        ...message("merge-target-assistant", targetConversation.id, 2),
+        role: "assistant" as const,
+        content: "target answer",
+      },
+    ];
+    const sourceRounds = [
+      {
+        ...round("merge-source-round", sourceConversation.id, 1),
+        question: "source question",
+        answer: "source answer",
+        messageIds: sourceMessages.map((item) => item.id),
+      },
+    ];
+    const targetRounds = [
+      {
+        ...round("merge-target-round", targetConversation.id, 3),
+        messageIds: targetMessages.map((item) => item.id),
+      },
+    ];
+    await replaceStores({
+      conversations: [sourceConversation, targetConversation],
+      sources: [],
+      messages: [...sourceMessages, ...targetMessages],
+      rounds: [...sourceRounds, ...targetRounds],
+      "conversation-versions": [],
+    });
+    clearCaches();
+    await preloadAll();
+    const storages = createStorageInstances("indexedDB");
+    const service = new ConversationMergeService({
+      conversations: storages.conversations,
+      messages: storages.messages,
+      rounds: storages.rounds,
+      sources: storages.sources,
+      versions: storages.conversationVersions,
+    });
+    const preview = service.preview(sourceConversation.id, targetConversation.id);
+    return {
+      service,
+      preview,
+      sourceConversation,
+      targetConversation,
+      sourceMessages,
+      targetMessages,
+      sourceRounds,
+      targetRounds,
+    };
+  }
+
+  const concurrentChanges = [
+    {
+      name: "target Message append",
+      mutate: () =>
+        writeOne("messages", message("merge-concurrent-target-message", "merge-target", 3)),
+      preservedStore: "messages" as const,
+      preservedId: "merge-concurrent-target-message",
+    },
+    {
+      name: "source Message append",
+      mutate: () =>
+        writeOne("messages", message("merge-concurrent-source-message", "merge-source", 2)),
+      preservedStore: "messages" as const,
+      preservedId: "merge-concurrent-source-message",
+    },
+    {
+      name: "source Round change",
+      mutate: () =>
+        writeOne("rounds", {
+          ...round("merge-source-round", "merge-source", 1),
+          summary: "Tab B source Round update",
+          messageIds: ["merge-source-user", "merge-source-assistant"],
+        }),
+      preservedStore: "rounds" as const,
+      preservedId: "merge-source-round",
+    },
+    {
+      name: "target Conversation change",
+      mutate: () =>
+        writeOne("conversations", {
+          ...conversation("merge-target"),
+          title: "Tab B target title",
+        }),
+      preservedStore: "conversations" as const,
+      preservedId: "merge-target",
+    },
+    {
+      name: "target Round change",
+      mutate: () =>
+        writeOne("rounds", {
+          ...round("merge-target-round", "merge-target", 3),
+          note: "Tab B target Round update",
+          messageIds: ["merge-target-user", "merge-target-assistant"],
+        }),
+      preservedStore: "rounds" as const,
+      preservedId: "merge-target-round",
+    },
+  ];
+
+  it.each(concurrentChanges)(
+    "aborts after preview on $name and preserves the concurrent record",
+    async ({ mutate, preservedStore, preservedId }) => {
+      const fixture = await seedMergeFixture();
+      await mutate();
+
+      await expect(fixture.service.confirm(fixture.preview)).rejects.toThrow(
+        "preview again",
+      );
+
+      expect(
+        (await readAll<{ id: string }>(preservedStore)).map((item) => item.id),
+      ).toContain(preservedId);
+      expect(
+        (await readAll<Message>("messages")).filter(
+          (item) => item.conversationId === "merge-target",
+        ).length,
+      ).toBe(
+        2 + (preservedId === "merge-concurrent-target-message" ? 1 : 0),
+      );
+      expect(
+        (await readAll<Round>("rounds")).filter(
+          (item) => item.conversationId === "merge-target",
+        ),
+      ).toHaveLength(1);
+      expect(await readAll("conversation-versions")).toEqual([]);
+    },
+  );
+
+  it("appends only new target records with continuous order, an automatic Version, and an unchanged source", async () => {
+    const fixture = await seedMergeFixture();
+    await writeOne(
+      "conversation-versions",
+      { ...versionRecord("merge-target-version-2", "merge-target"), sourceVersion: 2 },
+    );
+    clearCaches();
+    await preloadAll();
+    const storages = createStorageInstances("indexedDB");
+    const service = new ConversationMergeService({
+      conversations: storages.conversations,
+      messages: storages.messages,
+      rounds: storages.rounds,
+      sources: storages.sources,
+      versions: storages.conversationVersions,
+    });
+    const preview = service.preview("merge-source", "merge-target");
+    const result = await service.confirm(preview);
+
+    const durableMessages = await readAll<Message>("messages");
+    const durableRounds = await readAll<Round>("rounds");
+    const durableVersions = await readAll<{
+      id: string;
+      conversationId: string;
+      sourceVersion: number;
+      messageCount: number;
+      snapshotData: { messages: Message[] };
+    }>("conversation-versions");
+    expect(
+      (await readAll<Conversation>("conversations")).find(
+        (item) => item.id === "merge-source",
+      ),
+    ).toEqual(fixture.sourceConversation);
+    expect(
+      durableMessages
+        .filter((item) => item.conversationId === "merge-source"),
+    ).toEqual(fixture.sourceMessages);
+    expect(
+      durableRounds
+        .filter((item) => item.conversationId === "merge-source"),
+    ).toEqual(fixture.sourceRounds);
+    expect(
+      durableMessages
+        .filter((item) => item.conversationId === "merge-target")
+        .sort((left, right) => left.order - right.order)
+        .map((item) => ({ id: item.id, order: item.order })),
+    ).toEqual([
+      { id: "merge-target-user", order: 0 },
+      { id: "merge-target-assistant", order: 2 },
+      ...result.appendedMessages.map((item, index) => ({
+        id: item.id,
+        order: index + 3,
+      })),
+    ]);
+    expect(result.appendedRounds.map((item) => item.order)).toEqual([4]);
+    expect(result.appendedRounds[0].messageIds).toEqual(
+      result.appendedMessages.map((item) => item.id),
+    );
+    const automaticVersion = durableVersions.find(
+      (item) => item.id === result.automaticVersion.id,
+    );
+    expect(automaticVersion).toMatchObject({
+      conversationId: "merge-target",
+      sourceVersion: 3,
+      messageCount: 2,
+    });
+    expect(automaticVersion?.snapshotData.messages.map((item) => item.id)).toEqual(
+      fixture.targetMessages.map((item) => item.id),
+    );
+  });
+
+  it("rechecks Snapshot ownership in the final Merge transaction", async () => {
+    const fixture = await seedMergeFixture();
+    await writeOne(
+      "sources",
+      snapshotSourceRecord("merge-target-snapshot", "merge-target"),
+    );
+
+    await expect(fixture.service.confirm(fixture.preview)).rejects.toThrow(
+      "immutable share Snapshot",
+    );
+    expect(
+      (await readAll<Message>("messages")).filter(
+        (item) => item.conversationId === "merge-target",
+      ),
+    ).toEqual(fixture.targetMessages);
+    expect(
+      (await readAll<Round>("rounds")).filter(
+        (item) => item.conversationId === "merge-target",
+      ),
+    ).toEqual(fixture.targetRounds);
+    expect(await readAll("conversation-versions")).toEqual([]);
+  });
+
+  it("rolls back target Conversation, Message, Round, and Version writes on forced abort", async () => {
+    const fixture = await seedMergeFixture();
+    const before = {
+      conversations: await readAll("conversations"),
+      messages: await readAll("messages"),
+      rounds: await readAll("rounds"),
+      versions: await readAll("conversation-versions"),
+    };
+    fakeIndexedDB.failTransactions = 1;
+
+    await expect(fixture.service.confirm(fixture.preview)).rejects.toThrow(
+      "forced failure",
+    );
+    expect(await readAll("conversations")).toEqual(before.conversations);
+    expect(await readAll("messages")).toEqual(before.messages);
+    expect(await readAll("rounds")).toEqual(before.rounds);
+    expect(await readAll("conversation-versions")).toEqual(before.versions);
+    expect(getCachedCounts()).toMatchObject({
+      conversations: 2,
+      messages: 4,
+      rounds: 2,
+      conversationVersions: 0,
+    });
   });
 });
 

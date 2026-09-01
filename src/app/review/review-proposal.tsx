@@ -21,7 +21,7 @@ import {
   ensureIndexedDBLoaded,
   getStorageMode,
 } from "@/infrastructure/storage/storage-factory";
-import { flushCachesToIndexedDB } from "@/infrastructure/storage/indexeddb/preload";
+import { drainPendingWritesOrThrow } from "@/infrastructure/storage/indexeddb/database";
 import { CapabilityBadges } from "@/app/capability-badges";
 
 type ReviewState =
@@ -115,7 +115,7 @@ export function ReviewProposal({ proposalId }: { proposalId?: string }) {
 
   async function persistCanonicalReviewState() {
     if (getStorageMode() === "indexedDB") {
-      await flushCachesToIndexedDB();
+      await drainPendingWritesOrThrow();
     }
   }
 

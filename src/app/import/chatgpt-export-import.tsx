@@ -18,10 +18,10 @@ import {
 } from "@/infrastructure/storage/storage-factory";
 import {
   clearCaches,
-  flushCachesToIndexedDB,
   getCachedCounts,
   preloadAll,
 } from "@/infrastructure/storage/indexeddb/preload";
+import { drainPendingWritesOrThrow } from "@/infrastructure/storage/indexeddb/database";
 import { BulkDiagnosticsCopyButton } from "@/app/bulk-diagnostics-copy-button";
 import {
   createImportOperationProgress,
@@ -97,7 +97,7 @@ function service() {
 
 async function persistIndexedDBImportIfNeeded(): Promise<void> {
   if (getStorageMode() !== "indexedDB") return;
-  await flushCachesToIndexedDB();
+  await drainPendingWritesOrThrow();
 }
 
 async function restoreIndexedDBCachesAfterFailure(): Promise<void> {

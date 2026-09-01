@@ -181,6 +181,27 @@ afterEach(() => {
 });
 
 describe("PALOS v1.7 final Round usability", () => {
+  it("reports Round record, context, and migration success only after authoritative writers resolve", () => {
+    const recordCommit = roundRecordPanelSource.indexOf(
+      "const updated = await createRoundMutationWriter().execute",
+    );
+    expect(recordCommit).toBeGreaterThan(-1);
+    expect(roundRecordPanelSource.indexOf("onSavedRef.current(updated)")).toBeGreaterThan(
+      recordCommit,
+    );
+
+    const contextCommit = roundContextPanelSource.indexOf(
+      "const updated = await createRoundMutationWriter().execute",
+    );
+    expect(contextCommit).toBeGreaterThan(-1);
+    expect(
+      roundContextPanelSource.indexOf("参考来源已保存", contextCommit),
+    ).toBeGreaterThan(contextCommit);
+    expect(roundWorkspaceSource).toContain(
+      "await migration.applyConversation(preview)",
+    );
+  });
+
   it("shows the three primary fields inline without a record-entry button", () => {
     const detailsIndex = roundRecordPanelSource.indexOf("<details");
     const primaryMarkup = roundRecordPanelSource.slice(0, detailsIndex);

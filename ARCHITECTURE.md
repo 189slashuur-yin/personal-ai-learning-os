@@ -2,12 +2,28 @@
 
 ## Current release context
 
-- Current Version：v1.8.1 released；P2-1 post-release hardening（working tree；未 commit）
-- Current Focus：authoritative mutation guard consistency
-- Automated Status：Vitest 20 files / 376 tests；lint/build/diff-check passed
-- Next Recommended Phase：独立复核 P2-1 working tree；Snapshot lifecycle、read UX 与 Search hardening 仍需单独批准
+- Current Version：v1.8.3 data-integrity hotfix release
+- Current Focus：P0 ordinary scoped authority、Round enrichment patch authority 与 Merge fail-closed baseline 已关闭
+- Automated Status：Vitest 20 files / 393 tests；Playwright 3/3；lint/build/diff-check passed
+- Next Recommended Phase：P1/P2 consistency backlog 与产品 backlog 仍需单独批准
 
 当前架构结论仍受单浏览器、本地优先与浏览器存储边界约束。PALOS 业务数据默认使用 IndexedDB；LocalStorage 保留为轻量配置、UI 偏好、schema/storage metadata 与旧数据迁移来源。v1.0 候选必须先完成范围和验收评审，不能从本文的演进 seam 推定为已批准实现。
+
+## v1.8.3 data-integrity hotfix release delta
+
+- 普通 IndexedDB 产品操作只等待 scoped adapter write，必要时从 durable state reload；不再把当前 Tab 的七-store cache 当成 whole-database authority。`replaceStores()` 仅保留给 App Restore、Clear all 和现有显式 full-overwrite migration。
+- Conversation single/batch delete 使用唯一七-store readwrite transaction；transaction 内读取 authoritative records、解析目标 dependency closure 并只按 ID delete，Knowledge 独立 aggregate 继续保留。
+- 新增最小 Round mutation contract/writer。command 仅允许 `note/summary/context` patch，并为每个修改字段携带 expected baseline；`sources + rounds` transaction 从 authoritative Round merge patch，canonical transcript fields 始终取 durable record。
+- Message→Round migration 复用 authoritative transcript mutation boundary，final transaction 同时检查 Snapshot ownership 与 Conversation/Message/Round exact baseline；Snapshot-owned 或 stale preview 均零写入。
+- Merge 移入 Core service。preview 保存 source/target Conversation、Message、Round 与相关 Version baseline；final transaction 复核全部 baseline 与 Snapshot ownership后，只 put appended Messages/Rounds、updated target Conversation 和 automatic Version。source aggregate 不写，target Messages 不再 delete+replace。
+- 未修改 Round model、Snapshot metadata/schema、IndexedDB version/store、canonical Snapshot writer、App Restore UX 或产品能力。
+
+### Deferred consistency boundary
+
+- P1：普通 Message/Source/edit/regenerate/append 仍只做 authoritative Snapshot ownership guard，没有同 aggregate expected baseline；并发同 aggregate mutation 仍可能 last-writer-wins、产生重复 order，显式 replace path 仍可能删除并发新增。
+- P1：LocalStorage→IndexedDB migration 仍是显式 full replacement primitive，但当前 UI 使用“复制”语言，尚未强化覆盖说明。
+- P2：当前无生产 caller 的 Round create/delete/merge/split/reorder/rebind 仍走既有无 guard cache storage；本 hotfix 未重构 dormant CRUD。
+- Accepted：LocalStorage debug mode 无跨 store transaction；authoritative writer 的 full-store `getAll()` 会随本地数据规模增加写锁时间；commit 后 cache reload 仍可能因合法后续并发返回 committed-but-unverified，禁止补偿性回滚。
 
 ## v1.8.1 post-release P2-1 delta
 

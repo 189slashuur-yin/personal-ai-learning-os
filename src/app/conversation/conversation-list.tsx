@@ -23,9 +23,9 @@ import {
 } from "@/infrastructure/storage/storage-factory";
 import {
   clearCaches,
-  flushCachesToIndexedDB,
   getCachedCounts,
 } from "@/infrastructure/storage/indexeddb/preload";
+import { drainPendingWritesOrThrow } from "@/infrastructure/storage/indexeddb/database";
 import { bulkDeleteCanonicalConversations } from "@/infrastructure/storage/indexeddb/canonical-operations";
 import {
   completeDestructiveDiagnosticOperation,
@@ -208,7 +208,7 @@ export function ConversationList() {
   async function persistAndReload(authoritativeMutationCommitted = false) {
     if (getStorageMode() === "indexedDB") {
       if (!authoritativeMutationCommitted) {
-        await flushCachesToIndexedDB();
+        await drainPendingWritesOrThrow();
       }
       clearCaches();
       await ensureIndexedDBLoaded();
