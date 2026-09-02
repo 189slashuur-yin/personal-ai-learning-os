@@ -24,6 +24,10 @@ import { shouldShowAnalyzerFailureInjection } from "@/core/services/analyzer-dia
 import { ImportProfileService } from "@/core/services/import-profile-service";
 import { ConversationVersionService } from "@/core/services/conversation-version-service";
 import { ContextExportService } from "@/core/services/context-export-service";
+import {
+  inspectChatGPTShareSnapshotHistory,
+  type ChatGPTShareSnapshotHistoryView,
+} from "@/core/services/chatgpt-share-snapshot-history-view";
 import { editMessage } from "@/core/services/message-editing";
 import { parseMessagesFromRawText } from "@/core/services/message-parser";
 import { PromptTemplateService } from "@/core/services/prompt-template-service";
@@ -70,6 +74,7 @@ import { ConversationAssets } from "./conversation-assets";
 import { RoundWorkspace } from "./round-workspace";
 import { ConversationWorkspaceMode } from "./conversation-workspace-mode";
 import { ConversationContextPanel } from "./conversation-context-panel";
+import { ConversationSnapshotHistory } from "./conversation-snapshot-history";
 import { RoundNavigator } from "./round-navigator";
 import { CapabilityBadges } from "@/app/capability-badges";
 
@@ -88,6 +93,7 @@ type DetailState =
       source: ImportedSource | null;
       sourceCount: number;
       shareSnapshotOwned: boolean;
+      snapshotHistory: ChatGPTShareSnapshotHistoryView;
       messages: Message[];
       proposals: Proposal[];
       knowledgeCard: KnowledgeCard | null;
@@ -354,9 +360,18 @@ export function ConversationDetail({
       );
 
       const sourceStorage = createSourceStorage();
-      const source = sourceStorage.getByConversationId(conversationId);
-      const conversationSources = sourceStorage
-        .getAll()
+      const allSources = sourceStorage.getAll();
+      const snapshotHistory = inspectChatGPTShareSnapshotHistory({
+        conversationId,
+        sources: allSources,
+      });
+      const source =
+        snapshotHistory.status === "valid"
+          ? snapshotHistory.head
+          : snapshotHistory.status === "blocked"
+            ? null
+            : sourceStorage.getByConversationId(conversationId);
+      const conversationSources = allSources
         .filter((candidate) => candidate.conversationId === conversationId);
       const sourceCount = conversationSources.length;
       const proposalStorage = createProposalStorage();
@@ -414,6 +429,7 @@ export function ConversationDetail({
           sourceStorage,
           conversationId,
         ),
+        snapshotHistory,
         messages,
         proposals,
         knowledgeCard,
@@ -1693,12 +1709,24 @@ export function ConversationDetail({
       <section className="detail-section" id="section-history">
         <div className="detail-section-heading">
           <p className="detail-kicker">History / 版本历史</p>
-          <h2 className="detail-title">版本历史</h2>
+          <h2 className="detail-title">历史与恢复</h2>
           <p className="detail-description">
-            Auto Snapshot · Manual Snapshot · Import · Split · Merge · Delete · Duplicate · Move · Restore。所有整理操作自动创建快照；也可手动创建。仅保存 Conversation 与 Messages，不包含 Proposal、Knowledge、AnalyzerRun、Tag 或 Provider。
+            Conversation Snapshot 保留外部对话的 immutable capture history；PALOS 版本记录保存本地恢复点。两者语义独立，不会互相覆盖。
           </p>
         </div>
         <div>
+          <ConversationSnapshotHistory
+            conversationId={conversation.id}
+            history={state.snapshotHistory}
+            messages={state.messages}
+          />
+          <div className="mt-6 border-t border-zinc-200 pt-6">
+            <h3 className="text-base font-semibold text-zinc-950">
+              PALOS 版本记录与 Restore
+            </h3>
+            <p className="mt-2 text-sm leading-6 text-zinc-600">
+              Auto Snapshot · Manual Snapshot · Import · Split · Merge · Delete · Duplicate · Move · Restore。仅保存 Conversation 与 Messages，不包含 Proposal、Knowledge、AnalyzerRun、Tag 或 Provider。
+            </p>
           {restoreStatus ? (
             <p
               className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-800"
@@ -1792,6 +1820,7 @@ export function ConversationDetail({
               尚无版本记录。执行整理操作时将自动创建快照，也可手动创建。
             </p>
           )}
+          </div>
         </div>
       </section>
 
@@ -1809,8 +1838,9 @@ export function ConversationDetail({
               className="mb-4 rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-800"
               role="status"
             >
-              此 Conversation 由 immutable share Snapshot 管理。Source 与
-              Messages 只能通过 Conversation Snapshot import 更新。
+              {state.snapshotHistory.status === "blocked"
+                ? "此 Conversation 的 Snapshot history 无法验证，PALOS 不会按时间戳猜测当前 head。Source 与 Messages 仍保持只读。"
+                : "此 Conversation 由 immutable Snapshot 管理。当前 Source 使用 lineage resolver 确认的 head；Source 与 Messages 只能通过 Conversation Snapshot import 更新。"}
             </p>
           ) : null}
           <textarea

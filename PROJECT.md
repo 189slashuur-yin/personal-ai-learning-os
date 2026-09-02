@@ -15,13 +15,15 @@ PALOS 面向需要与 AI 长期协作的个人用户。产品要解决的不是�
 
 ## 当前阶段
 
-截至 2026-09-01，`v1.8.3` data-integrity hotfix release 已关闭 ordinary whole-cache authority、Round enrichment stale full-record write 与 Merge stale aggregate replacement 三类 rollout blocker；不修改 Snapshot metadata、Round model、IndexedDB schema/version/store，也不新增产品功能。
+截至 2026-09-02，PALOS `v1.9.0` 已完成 Snapshot History UX release closure。该 release 只增加用户可见的 immutable Snapshot 时间线、history selection/comparison、assistant-first Message-level append diff 与 resolver-confirmed current head，不继续清理 v1.8.3 的 P1/P2 backlog。
 
-- Current Version：v1.8.3 data-integrity hotfix release
-- Release Metadata：annotated tag `v1.8.3` 指向本次实现与文档收口提交；release baseline 为 `v1.8.2` / `70c3138`
-- Current Focus：P0-1/P0-2/P0-3 released；P1/P2 继续独立排期
-- Automated Status：Vitest 393/393；Playwright 3/3；lint/build passed
-- Deferred：普通 transcript mutation 同 aggregate baseline 与 migration UX 为 P1；dormant Round CRUD guard 为 P2
+- Current Version：PALOS v1.9.0 Snapshot History UX release
+- Release Metadata：annotated tag `v1.9.0`；release baseline 为 `v1.8.3` / `63c97f0`
+- Current Focus：immutable Snapshot history timeline、resolver-confirmed current head、history selection/comparison 与 assistant-first append diff
+- Automated Status：Vitest 401/401；Playwright 3/3；lint/build/diff-check passed
+- Deferred：Search Raw Message 精确锚点与 Knowledge 复用增强继续独立评审；v1.8.3 P1/P2 不并入本 release
+
+v1.9.0 在现有 History / 版本历史语境中明确区分两套历史：Conversation Snapshot 是外部对话的 immutable Source chain；PALOS ConversationVersion 是本地可 Restore 的恢复点。Snapshot timeline 默认比较最新两次 capture，突出新增 Assistant 内容，也支持首个 Snapshot、同一 Snapshot、任意较早基线、长 history 滚动与完整前后 canonical transcript 查看。读取 current head 使用既有 lineage resolver，不再由 Conversation Detail 按 `updatedAt` 推断；lineage blocked、历史编辑、缩短或 divergence 均 fail closed。
 
 v1.7 继续把 Conversation 作为 Aggregate Root、Round 作为最小整理单元、Task 作为独立行动实体、Knowledge 作为长期稳定信息。Context 是当前有效状态，不等于所有聊天，也不自动升级为 Knowledge。
 

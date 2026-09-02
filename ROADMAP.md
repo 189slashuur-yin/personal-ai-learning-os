@@ -4,12 +4,23 @@
 
 ## Current release
 
-- Current Version：v1.8.3 data-integrity hotfix release
-- Phase：three rollout-blocking P0 fixes released
-- Current Focus：ordinary scoped writes/delete authority、Round patch writer 与 Merge fail-closed baseline closed
-- Release Metadata：annotated tag `v1.8.3`；release baseline `v1.8.2` / `70c3138`
-- Automated Status：Vitest 393/393；Playwright 3/3；lint/build passed
-- Next Recommended Phase：P1/P2 backlog 不并入本 release，需另行批准
+- Current Version：PALOS v1.9.0 Snapshot History UX release
+- Phase：v1.9.0 release closure complete
+- Current Focus：Conversation Detail Snapshot timeline、history selection、readable Message diff 与 resolver-confirmed head
+- Release Metadata：annotated tag `v1.9.0`；release baseline `v1.8.3` / `63c97f0`
+- Automated Status：Vitest 401/401；Playwright 3/3；lint/build/diff-check passed
+- Scope Guard：不把 v1.8.3 P1/P2 backlog、URL fetching、CRDT、background sync 或 schema change 并入 v1.9
+
+## v1.9.0 — Snapshot History UX release
+
+- Product discovery 确认 Conversation Detail 只有 ConversationVersion/Restore UI，没有 immutable Snapshot timeline、current head、captured sequence 或“本次新增内容”视图；仓库不存在等价能力。
+- 新增 Snapshot timeline 与 bounded long-history list；默认选中 current head，并把前一 Snapshot 设为 comparison baseline。
+- 支持从空白查看首个 Snapshot、选择同一 Snapshot 得到零 delta、选择任意不晚于目标的历史 Snapshot，以及展开完整前后 canonical transcript。
+- 默认显示 Message-level 变化摘要并突出新增 Assistant 内容；同时新增的 User 内容置于次级折叠区。
+- 复用既有 history resolver 与 comparator。Conversation Detail 对 v2 Snapshot Source 使用 lineage-confirmed head；resolver/sequence blocked 时不按 `updatedAt` 猜测。
+- assistant-tail delta projector 继续负责 import-time Round extension；它没有持久化历史 diff artifact，因此 read UX 复用 comparator suffix，而不把 write projection 冒充 history result。
+- 没有修改 Snapshot metadata/model、Round、IndexedDB version/store/schema、canonical writer、restore、immutable/canonical semantics 或依赖。
+- 新增 unit/UI integration coverage，并把既有 Snapshot Playwright 路径扩展到 Detail timeline/diff；release gates 为 Vitest 21 files / 401 tests、Playwright 3/3、lint/build/diff-check passed。
 
 ## v1.8.3 — Data integrity hotfix release
 

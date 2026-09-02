@@ -2,7 +2,20 @@
 
 本文件记录当前仓库已经完成的 Sprint 与关键提交。日期使用仓库 commit date。
 
-当前口径：Runtime Version 为 v1.8.3 data-integrity hotfix release；annotated tag `v1.8.3` 指向本次实现与文档收口提交。
+当前口径：Runtime Version 为 PALOS v1.9.0 Snapshot History UX release；annotated tag `v1.9.0` 指向本次实现与文档收口提交。
+
+## 2026-09-02 — PALOS v1.9.0 Snapshot History UX Release
+
+- **Product-first scope**：只解决用户无法理解“这次 Snapshot 比上次新增了什么”的断点；不继续清理 v1.8.3 P1/P2 backlog。
+- **Snapshot timeline**：Conversation Detail 展示 immutable Source chain、current head、sequence、captured time、Message count、parser 与 input kind；长 history 使用 bounded scroll。
+- **History selection / diff**：默认比较最新两次 Snapshot；支持首个 Snapshot、同一 Snapshot、任意较早 baseline，以及完整前后 canonical transcript 查看。
+- **Assistant-first delta**：变化摘要按 Message 计数，优先展开新增 Assistant 内容；User additions 放入次级折叠区。
+- **Resolver-confirmed current head**：合法 v2 Snapshot Conversation 的 Source read path 使用既有 lineage resolver；ambiguous/blocked lineage 与 sequence gap fail closed，不再按 `updatedAt` 猜测 head。
+- **Fail-closed diff**：exact Message-level append diff 拒绝历史编辑、缩短、divergence 与 canonical projection mismatch，不展示推测性 suffix。
+- **History boundary**：immutable Snapshot history 表示外部对话 capture chain；PALOS Conversation Version / Restore history 表示本地恢复点，标题、说明与操作保持明确区分。
+- **Reuse boundary**：history diff 复用现有 comparator prefix/suffix；assistant-tail projector 保持 import-time Round projection 职责，不伪造历史 Round diff。
+- **Compatibility**：没有修改 Snapshot/IndexedDB schema/version/store、Entity、canonical/restore semantics、依赖或 URL/network boundary。
+- **Tests**：Vitest 21 files / 401 tests；Playwright 3/3；lint/build/diff-check passed。
 
 ## 2026-09-01 — v1.8.3 Data Integrity Hotfix Release
 

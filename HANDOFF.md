@@ -1,4 +1,67 @@
-# PALOS v1.8 — ChatGPT Conversation Snapshot Handoff
+# PALOS v1.9.0 — Snapshot History UX Release Handoff
+
+## 2026-09-02 PALOS v1.9.0 Snapshot History UX release
+
+本轮从 clean `main` / `origin/main` / `v1.8.3^{}` = `63c97f025d805ebd9a3da308a6f428f519e5491b` 开始，先完成只读 product discovery，再实施并收口严格限定范围的 PALOS v1.9.0 release。release 使用 annotated tag `v1.9.0`。
+
+### Product discovery audit
+
+- 用户主流程已形成 Import → Conversation Detail/Round → Proposal → Review → Knowledge，并另有 ConversationVersion/Restore、Conversation 内 Message/Q&A/Round 搜索和 Global Search。
+- ChatGPT Conversation Snapshot Import 已有 local saved HTML/rendered transcript、preview/confirm、immutable Source chain、comparator、assistant-only delta projector 与 canonical writer。
+- Conversation Detail 的旧 History section 只展示 `ConversationVersion` 创建/Restore；没有 immutable Snapshot timeline、head、captured sequence、history selection 或 stored Snapshot diff。用户只能看到 Source 总数，无法回答“这次比上次新增了什么”。
+- Conversation 内搜索并非未实现：Full Message Timeline 有 Message search/previous/next/highlight，Q&A Pair 与 Round 各有搜索；Global Search 默认覆盖 Conversation/Knowledge/Round/Proposal/Asset/Task，Raw Message 为 advanced mode。当前剩余 gap 是入口分散与 Raw Message 无精确 anchor，不是搜索主流程缺失。
+- Source head resolver 已实现且按 `previousSnapshotSourceId` lineage 选 head，不依赖 `updatedAt`。但 Detail 旧代码调用 `SourceStorage.getByConversationId()`；Browser/IndexedDB adapter 都按 `updatedAt` 排序取第一条，确有 resolver bypass 的 read-path 证据。
+- `projectChatGPTShareSnapshotDelta()` 已可复用 import-time assistant-tail Round extension，但结果不持久化，且需要当时的 canonical Round baseline；它不是任意历史 pair 的 diff artifact。Stored history diff 可以直接复用 comparator 的 exact prefix/suffix output。
+
+### Candidate comparison（release discovery record）
+
+| Candidate | 用户价值 | 实现复杂度 | 数据风险 | v1.8 复用度 | 结论 |
+| --- | --- | --- | --- | --- | --- |
+| Snapshot History timeline + diff | 高 | 中 | 低，只读 | 高 | 选择 |
+| Global Raw Message 精确锚点 / 统一页内搜索 | 中高 | 中 | 低 | 中 | 后续独立候选 |
+| Knowledge 复用/复习增强 | 中 | 中高 | 中 | 中 | 需更多产品发现 |
+
+Snapshot History UX 是唯一同时直接填补明显断点、复用既有 immutable architecture、且无需 schema/write semantics 变化的最小闭环。
+
+### Implemented user flow
+
+1. 用户在 Conversation Detail 打开 History / 版本历史。
+2. 顶部 Snapshot History 显示 immutable timeline、current head、sequence、capturedAt、Message count、parser/input kind；下方继续保留 PALOS ConversationVersion/Restore。
+3. 默认选择 current head，并自动用前一 Snapshot 作为 baseline；变化摘要显示新增 Message / Assistant / User 数量，Assistant additions 默认展开。
+4. 用户可点击 timeline 或下拉选择任意目标 Snapshot；baseline 只允许空白或不晚于目标的 Snapshot。首个 Snapshot、同一 Snapshot、跨多个历史节点都能使用。
+5. User additions 与完整前后 canonical transcript 可按需展开；长 timeline 和 transcript 使用 bounded scroll。
+6. “更新 Conversation Snapshot”回到既有 Existing + Snapshot Import，不增加新 navigation 或 URL fetching。
+
+### Architecture and correctness
+
+- 新 pure read model 复用 history resolver，拒绝 multiple resource history、resolver blocked 和 sequence gap；legacy v1 显式显示无法形成可信 timeline，不自动迁移。
+- Detail 对 valid v2 history 使用 resolver-confirmed head；blocked history 不回退到 timestamp heuristic，也不展示可能误导的 Source head。
+- Stored pair diff 用 canonical Message prefix 调用既有 comparator；same/append/projection-diverged semantics 不复制实现。
+- UI 和 Core diff 都是只读；immutable Source、Message provenance、Round enrichment、ConversationVersion Restore、canonical writer 均未修改。
+- IndexedDB 仍为 version 1 / 七个 canonical stores；Snapshot metadata/model、Round model、依赖无变化。
+
+### Release validation
+
+- 新增 read model / UI integration：empty + legacy、resolver head independent of updatedAt、multi-resource/sequence fail-closed、single Snapshot、same Snapshot、adjacent/non-adjacent diff、canonical projection divergence、long timeline/source contract 与 Assistant-first rendering。
+- Snapshot Playwright 路径扩展为 New → append → Conversation Detail timeline → assistant delta → same Snapshot zero delta。
+- Targeted audit：4 files / 30 tests passed。
+- Full Vitest：21 files / 401 tests passed。
+- Playwright：3/3 passed。
+- `npm run lint`：passed。
+- `npm run build`：passed，19 routes；受限环境首次无法写 `.next/trace-build`，允许仓库构建缓存写入后同命令通过。
+- `git diff --check`：passed。
+- Final pre-release diff audit：10 files，`+1198/-22`；7 modified + 3 new。全部变更只属于 immutable Snapshot history、selection/comparison、assistant-first append diff、resolver-confirmed current head、必要 UI wiring、tests 与 release docs。
+- Scope audit：无 dependency、Entity/model、Snapshot schema、IndexedDB version/store、LocalStorage key 或 writer semantics 变化；无调试日志、临时代码、orphan implementation、重复 comparator/diff algorithm、无关格式化或意外 P1/P2 hardening。
+
+### Known limitations
+
+- Diff 是 exact Message-level append diff，不是字符/单词级 redline；历史中间编辑、缩短或 canonical projection divergence 会 fail closed。
+- v2 immutable history 才能形成可信 timeline；legacy v1 只显示迁移提示，不在 Detail 自动执行 migration。
+- Full transcript 仍是 canonical normalized text，不是原始 saved HTML；HTML 本就不持久化。
+- timeline 读取当前本地 cache；本 release 不增加 cross-tab live subscription、background sync、CRDT 或 durable diff cache。
+- Search precise Message anchor、统一 Conversation find 与 Knowledge productivity 均未并入本 release。
+
+---
 
 ## 2026-09-01 v1.8.3 data-integrity hotfix release
 

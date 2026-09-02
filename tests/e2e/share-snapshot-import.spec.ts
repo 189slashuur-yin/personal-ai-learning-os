@@ -185,4 +185,25 @@ test("local ChatGPT HTML creates and appends immutable canonical snapshots witho
   ).toMatch(/^[a-f0-9]{64}$/);
   expect(JSON.stringify(appendedState.sources)).not.toContain("<article");
   expect(chatGptRequests).toEqual([]);
+
+  await page.goto(`/conversation/${conversationId}`);
+  const snapshotHistory = page.getByTestId("share-snapshot-history");
+  await expect(snapshotHistory).toContainText(
+    "2 个 Snapshot · 当前 head #2",
+  );
+  await expect(snapshotHistory).toContainText("Current head");
+  await expect(snapshotHistory).toContainText(
+    "新增 1 条 Message · Assistant 1 · User 0",
+  );
+  await expect(snapshotHistory).toContainText(
+    "Extend the unanswered tail Round without replacing its local enrichment.",
+  );
+
+  await page
+    .getByLabel("Snapshot 对比基线")
+    .selectOption(headSource?.id);
+  await expect(snapshotHistory).toContainText("没有新增内容");
+  await expect(snapshotHistory).toContainText(
+    "选择的是同一个 Snapshot",
+  );
 });

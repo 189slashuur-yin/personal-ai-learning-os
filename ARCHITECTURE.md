@@ -2,12 +2,23 @@
 
 ## Current release context
 
-- Current Version：v1.8.3 data-integrity hotfix release
-- Current Focus：P0 ordinary scoped authority、Round enrichment patch authority 与 Merge fail-closed baseline 已关闭
-- Automated Status：Vitest 20 files / 393 tests；Playwright 3/3；lint/build/diff-check passed
-- Next Recommended Phase：P1/P2 consistency backlog 与产品 backlog 仍需单独批准
+- Current Version：PALOS v1.9.0 Snapshot History UX release
+- Release Baseline：v1.8.3 / `63c97f0`
+- Current Focus：read-only immutable Snapshot timeline、history comparison、assistant-first append diff 与 resolver-confirmed Detail head
+- Automated Status：Vitest 21 files / 401 tests；Playwright 3/3；lint/build/diff-check passed
+- Scope Guard：P1/P2 consistency backlog 与其它产品 backlog 不并入本 release
 
 当前架构结论仍受单浏览器、本地优先与浏览器存储边界约束。PALOS 业务数据默认使用 IndexedDB；LocalStorage 保留为轻量配置、UI 偏好、schema/storage metadata 与旧数据迁移来源。v1.0 候选必须先完成范围和验收评审，不能从本文的演进 seam 推定为已批准实现。
+
+## v1.9.0 Snapshot History UX release delta
+
+- 新增纯 Core history read model：先识别 Conversation 的唯一 v2 resourceHash，再复用 `resolveChatGPTShareSnapshotHistory()` 解析 lineage/head，并额外拒绝多 resource history 与不连续 sequence。legacy v1 只报告显式空/迁移状态，不猜测 history。
+- Conversation Detail 不再对合法 v2 Snapshot history 使用 `SourceStorage.getByConversationId()` 的 `updatedAt` 排序结果；Source Preview、Source-based read context 与 timeline 统一使用 resolver-confirmed head。blocked history 不选择伪 head。
+- 两个 stored Snapshot 间的 Message diff 复用 `compareChatGPTShareSnapshot()`：从 canonical Messages 截取 baseline projection，让 comparator 继续负责 exact prefix、same/append、projection divergence 与 suffix 输出。UI 不实现第二套 transcript diff algorithm。
+- 首个 Snapshot 以空白为 baseline；同一 Snapshot 显示 zero delta。append 默认突出 Assistant suffix，并把 User suffix 与完整前后 canonical transcript 放入次级查看。
+- `projectChatGPTShareSnapshotDelta()` 仍是 import-time Round write projection，需要当时的 canonical Message/Round baseline；它不产出持久化 diff artifact，也不适用于任意历史 pair，因此 v1.9 read path 不调用它重建过去 Round 状态。
+- 新 UI 位于现有 Conversation Detail History section，并明确区分 immutable Conversation Snapshot history 与可 Restore 的 PALOS ConversationVersion history；没有新增 route 或导航层级。
+- read model、timeline 与 diff 全部只读；没有修改 Snapshot/Conversation/Round Entity、canonical writer、restore writer、IndexedDB schema/version/store、LocalStorage key 或依赖。
 
 ## v1.8.3 data-integrity hotfix release delta
 
