@@ -199,6 +199,67 @@ test("local ChatGPT HTML creates and appends immutable canonical snapshots witho
     "Extend the unanswered tail Round without replacing its local enrichment.",
   );
 
+  const addedMessage = appendedState.messages.find((message) => message.sourceOrdinal === 3)!;
+  const messageHref = `/conversation/${conversationId}?message=${addedMessage.id}#message-${addedMessage.id}`;
+  const roundHref = `/conversation/${conversationId}?mode=workspace&round=${appendedTailRound!.id}#round-${appendedTailRound!.id}`;
+  const locate = snapshotHistory.getByRole("link", { name: "定位原 Message", exact: true });
+  await expect(locate).toHaveAttribute("href", messageHref);
+  await expect(snapshotHistory.getByRole("link", { name: "打开所在 Round" })).toHaveAttribute("href", roundHref);
+  await locate.click();
+  await expect(page).toHaveURL(messageHref);
+  const target = page.locator(`[id="message-${addedMessage.id}"]`);
+  await expect(page.getByRole("button", { name: "全部原文", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(target).toBeInViewport();
+  await expect(target).toHaveAttribute("data-message-highlighted", "true");
+  await expect(target).toContainText(String(addedMessage.content));
+  await expect(target.getByRole("button", { name: "Collapse", exact: true })).toBeVisible();
+  await expect(target).not.toHaveAttribute("data-message-highlighted", "true", { timeout: 7000 });
+  // Reopening the same link must expand a manually collapsed target again.
+  await target.getByRole("button", { name: "Collapse", exact: true }).click();
+  await snapshotHistory.getByRole("link", { name: "定位原 Message", exact: true }).click();
+  await expect(target).toHaveAttribute("data-message-highlighted", "true");
+  await expect(target.getByRole("button", { name: "Collapse", exact: true })).toBeVisible();
+  // Repeat while the previous highlight is still active, after collapsing again.
+  await target.getByRole("button", { name: "Collapse", exact: true }).click();
+  await snapshotHistory.getByRole("link", { name: "定位原 Message", exact: true }).click();
+  await expect(target).toBeInViewport();
+  await expect(target.getByRole("button", { name: "Collapse", exact: true })).toBeVisible();
+  await snapshotHistory.getByRole("link", { name: "打开所在 Round" }).click();
+  await expect(page).toHaveURL(roundHref);
+  await expect(page.locator(`[id="round-${appendedTailRound!.id}"]`)).toBeInViewport();
+
+  await page.goto(`/search?q=${encodeURIComponent(String(addedMessage.content))}`);
+  await expect(page.getByLabel("高级模式：包含 Raw Message")).not.toBeChecked();
+  await expect(page.locator(`a[href="${messageHref}"]`)).toHaveCount(0);
+  await page.getByLabel("高级模式：包含 Raw Message").check();
+  await page.locator(`a[href="${messageHref}"]`).first().click();
+  await expect(page).toHaveURL(messageHref);
+  await expect(target).toBeInViewport();
+  await expect(target).toHaveAttribute("data-message-highlighted", "true");
+
+  const beforeInvalid = await readShareSnapshotCanonicalState(page);
+  await page.goto(`/conversation/${conversationId}?message=missing#message-missing`);
+  await expect(page.getByText("不可定位：Message 不存在或不属于此 Conversation。", { exact: true })).toBeVisible();
+  await expect(page.locator('[data-message-highlighted="true"]')).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "全部原文", exact: true })).toHaveAttribute("aria-pressed", "false");
+  expect(await readShareSnapshotCanonicalState(page)).toEqual(beforeInvalid);
+
+  // A real Message in another Conversation cannot be targeted here.
+  await page.goto("/import?importPath=new&inputMode=share");
+  await page.getByLabel("Conversation 标题").fill("Other Conversation");
+  await page.getByTestId("share-snapshot-saved-html-mode").click();
+  await page.locator('input[type="file"][accept*=".html"]').setInputFiles(path.resolve("tests/fixtures/chatgpt-share-snapshot-initial.html"));
+  await page.getByRole("button", { name: "Preview Conversation Snapshot" }).click();
+  await page.getByRole("button", { name: "Confirm save Conversation Snapshot" }).click();
+  await expect(page).toHaveURL(/\/conversation\/[^/?]+\?imported=rounds$/);
+  const otherPath = new URL(page.url()).pathname;
+  const beforeForeign = await readShareSnapshotCanonicalState(page);
+  await page.goto(`${otherPath}?message=${addedMessage.id}#message-${addedMessage.id}`);
+  await expect(page.getByText("不可定位：Message 不存在或不属于此 Conversation。", { exact: true })).toBeVisible();
+  await expect(target).toHaveCount(0);
+  expect(await readShareSnapshotCanonicalState(page)).toEqual(beforeForeign);
+
+  await page.goto(`/conversation/${conversationId}`);
   await page
     .getByLabel("Snapshot 对比基线")
     .selectOption(headSource?.id);

@@ -2,7 +2,18 @@
 
 本文件记录当前仓库已经完成的 Sprint 与关键提交。日期使用仓库 commit date。
 
-当前口径：Runtime Version 为 PALOS v1.9.0 Snapshot History UX release；annotated tag `v1.9.0` 指向本次实现与文档收口提交。
+当前口径：PALOS v1.9.1 Raw Message Anchor patch release；annotated tag `v1.9.1` 指向本次实现与文档收口提交。
+
+## 2026-09-07 — PALOS v1.9.1 Raw Message Anchor Patch Release
+
+- Snapshot diff 新增 Assistant/User 内容可定位 canonical Message；可信归属时另有“打开所在 Round”。无 Round 时保留 Message-only anchor。
+- Message URL 统一为 `/conversation/{conversationId}?message={messageId}#message-{messageId}`，History 与 Global Raw Message Search 共用；Round 沿用 `?mode=workspace&round=…#round-…`。
+- Detail 自动切到 Timeline、展开 Full Raw Timeline 和目标、滚动与聚焦，并显示 5 秒高亮；高亮消退前后重复点击均可重新展开和定位。
+- 映射仅按 conversationId + sourceOrdinal，核对 exact role/content、连续 ordinal、唯一 Message ID 和 Round membership；缺失、重复、dangling 或 mismatch 不猜测，diff 文本保留且定位禁用。invalid/cross-conversation Message 参数不定位错误实体、不写 canonical 数据。
+- Round deep-link 滚动等待卡片提交渲染，普通 Round autosave 不重复滚动。Global Search advanced mode 默认关闭，Knowledge/Proposal href 保持不变。
+- 未修改 Snapshot/Message/Round/Knowledge schema、IndexedDB version/store、依赖、Snapshot import/writer/comparator semantics；无 fuzzy anchor matching、durable anchor cache、background sync 或新增 Knowledge workflow。
+- Knowledge productivity、P1/P2 consistency backlog、cross-tab live subscription 仍未完成；anchors 依赖当前本地 canonical cache，Full Timeline 未增加 virtualization。
+- 验证：发布前全量重新执行 Vitest / Playwright / lint / build / diff-check，结果见 HANDOFF。
 
 ## 2026-09-02 — PALOS v1.9.0 Snapshot History UX Release
 

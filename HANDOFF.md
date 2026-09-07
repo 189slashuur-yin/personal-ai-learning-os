@@ -1,3 +1,73 @@
+# PALOS v1.9.1 — Raw Message Anchor patch release
+
+## 2026-09-07 final pre-release audit
+
+开始前已确认 clean `main`，`HEAD = main = origin/main = v1.9.0^{}` = `56f4a018f7077280d31809039fbf112c913474de`。发布前确认候选为 9 modified + 2 untracked，共 11 files、+456/-23。用户已授权审计无 blocker 且全部门禁通过后创建 release commit、annotated tag v1.9.1 并 atomic push main + tag。
+
+### 实际用户流程
+
+首次 Snapshot → Existing append → Conversation Detail History 查看新增 Assistant/User → “定位原 Message” → 统一 Message URL → Timeline / 全部原文自动展开 → 目标 Message 展开、滚动居中并获得键盘焦点与 5 秒高亮。重复点击相同链接可重新定位，包括目标被手工折叠、高亮仍有效或已消退的情况。
+
+History 有可信 Round 归属时显示“打开所在 Round”，沿用 `?mode=workspace&round=…#round-…`。Global Search 保持默认不包含 Raw Message；打开 advanced 后，Raw Message 结果使用相同 Message anchor。
+
+### 核心机制与安全边界
+
+- `message-navigation.ts` 是纯 Core helper：统一 Message DOM ID、Message/Round URL、Conversation 内 Message ID 验证及 Snapshot Message→Round 映射。
+- Snapshot read model 的新增 diff 项返回 `anchor: { messageId, sourceOrdinal, roundId?, roundOrder? } | null`。只按 conversationId + sourceOrdinal 查找，核对 exact role/content、按 Message order 的连续 ordinal、唯一 Message ID；不以文本匹配或 Source ID 猜测。
+- Round membership 检查重复归属、同一 Round 重复 member、dangling member、foreign Conversation、重复 Round ID。目标 Round 的任一 member 损坏时整项 anchor 为 null；没有 Round 则保留 Message-only anchor。
+- Detail 读取全部 Round 的当前 cache 供 Core 验证跨 Conversation 的错误引用；React 不复制 membership 规则。
+- 不能验证的新增项保留 diff 文本，显示禁用的定位按钮和不可定位说明。原 v1.9 baseline projection 已损坏、lineage blocked 或 legacy 状态仍沿用既有阻断行为。
+- Message URL 唯一契约为 `/conversation/{conversationId}?message={messageId}#message-{messageId}`，参数编码由统一函数处理。重复 message 参数、空值、缺失 ID、foreign ID 均不可定位。
+- Message 参数导航不会保存 lastOpenedAt；invalid/foreign 参数不展开错误目标，不修改 canonical 数据。普通无参数打开 Conversation 的行为保留。
+- 导航属于临时 UI 状态，无新 workflow、schema、DB version/store、dependency、import/writer/comparator 变化。
+
+### 修改文件
+
+- 新增 `src/core/services/message-navigation.ts`：纯解析与统一导航契约。
+- `src/core/services/chatgpt-share-snapshot-history-view.ts`：diff anchor enrichment，baseline ordinal 读取排除负数与非整数。
+- `src/core/services/search-index-service.ts`：Message href；Round href 复用旧契约 helper；Knowledge/Proposal href 不变。
+- `src/app/conversation/[id]/page.tsx`：读取单一 message 参数，按 Conversation ID 隔离 Detail 实例。
+- `src/app/conversation/[id]/conversation-detail.tsx`：验证、展开、滚动、焦点、高亮和重复导航；向 History 提供 Round 验证输入。
+- `src/app/conversation/[id]/conversation-snapshot-history.tsx`：可信主/次动作与不可定位状态。
+- `src/app/conversation/[id]/round-workspace.tsx`：沿用旧 Round deep link，在目标卡片 commit 后滚动，避免初次渲染时序竞争；普通 autosave 不重复滚动。
+- 新增 `tests/message-navigation.test.ts`：URL/目标验证及 Search href 回归。
+- `tests/chatgpt-share-snapshot-history-view.test.ts`：first/adjacent/non-adjacent/same、tail/new Round、坏 ordinal/content/role/membership、UI 动作。
+- `tests/e2e/share-snapshot-import.spec.ts`：扩展真实导入、History、Message、Round、Search 链路，含重复定位及 invalid/foreign 零写入断言。
+- `PROJECT.md` / `ROADMAP.md` / `ARCHITECTURE.md` / `CHANGELOG.md` / `HANDOFF.md`：v1.9.1 patch release metadata、能力和未完成边界。
+
+### Candidate 验证记录（发布前再次运行）
+
+- 定向 Vitest：2 files / 31 tests passed。
+- 定向 Playwright Snapshot 导航流程：1/1 passed。
+- 全量 `npm test -- --run`：22 files / 424 tests passed。
+- 全量 `npm run test:e2e`：3/3 passed。
+- `npm run lint`：passed。
+- `npm run build`：passed，19 routes，TypeScript passed。
+- `git diff --check`：passed。
+- 首次 Playwright/build 因沙箱禁止写入仓库 test-results/.next 未完成；授权后相同检查通过。
+
+### Final release gates
+
+- Final pre-release audit 无代码 blocker；最终范围为原 candidate 与五份必要 release docs，未改 schema、DB version/store、dependency、Snapshot import/writer/comparator semantics。
+- `npm test -- --run`：22 files / 424 tests，exit 0。
+- `npm run test:e2e`：2026-09-07 重跑 3/3 passed，21.3s，exit 0。前一次虽有 3 项成功，但收尾挂起约 3 分钟，由本任务中断并返回 130，不计为通过；未修改代码或测试配置，重新启动测试后正常退出。
+- `npm run lint`：exit 0；`npm run build`：exit 0，TypeScript 与 19 routes 通过。
+- `git diff --check`：通过；发布前再次核对 staged diff。
+- 远端 main 发布前仍为 `56f4a018f7077280d31809039fbf112c913474de`，v1.9.1 tag 不存在。
+- 版本按 v1.9.1 patch release 收口；release commit 使用 `feat: add raw message anchors from snapshot history`，annotated tag 与 main 一同 atomic push，不使用 force。
+
+### 已知限制与下一步
+
+- Snapshot anchors 依赖当前本地 canonical cache；无 cross-tab live subscription、background sync 或 durable diff cache。
+- 连续 ordinal 链断裂后不尝试恢复后续 anchor；坏 Round 引用不猜测，即使 Message 文本仍可阅读也禁用该项定位。
+- Global Search 仍可索引普通 Raw Message；不要求它属于 Snapshot，目标页只按 Conversation + Message ID 验证。
+- Full Timeline 仍整体渲染，未增加 virtualization；History 跨 URL 导航沿用浏览器链接加载，同 URL 重复定位在当前页面处理。
+- 精确 Message-level diff、legacy 显式迁移、Knowledge/Proposal workflow、v1.8.3 P1/P2 的边界不变。
+- Final code audit：无 blocker；无无关格式化、调试日志、orphan implementation、重复导航 helper 或意外 backlog hardening。新增生产 helper 有调用与测试；新增测试文件由 Vitest 发现，不作为生产模块导入。
+- 发布操作以本次任务输出的实际 commit/tag/remote 核验结果为准。
+
+---
+
 # PALOS v1.9.0 — Snapshot History UX Release Handoff
 
 ## 2026-09-02 PALOS v1.9.0 Snapshot History UX release

@@ -2,13 +2,25 @@
 
 ## Current release context
 
-- Current Version：PALOS v1.9.0 Snapshot History UX release
-- Release Baseline：v1.8.3 / `63c97f0`
-- Current Focus：read-only immutable Snapshot timeline、history comparison、assistant-first append diff 与 resolver-confirmed Detail head
-- Automated Status：Vitest 21 files / 401 tests；Playwright 3/3；lint/build/diff-check passed
+- Current Version：PALOS v1.9.1 Raw Message Anchor patch release
+- Release Baseline：v1.9.0 / `56f4a018`
+- Current Focus：只读 Snapshot Message anchor enrichment 与统一导航契约
+- Automated Status：本次发布门禁结果见 HANDOFF
 - Scope Guard：P1/P2 consistency backlog 与其它产品 backlog 不并入本 release
 
 当前架构结论仍受单浏览器、本地优先与浏览器存储边界约束。PALOS 业务数据默认使用 IndexedDB；LocalStorage 保留为轻量配置、UI 偏好、schema/storage metadata 与旧数据迁移来源。v1.0 候选必须先完成范围和验收评审，不能从本文的演进 seam 推定为已批准实现。
+
+## v1.9.1 Raw Message Anchor delta
+
+- 纯 Core `message-navigation.ts` 集中 Message DOM ID、Message/Round URL、Message target validation 与 Snapshot anchor resolver。History read model enrich 新增 diff 为 `anchor: { messageId, sourceOrdinal, roundId?, roundOrder? } | null`；React 不复制 membership 规则。
+- resolver 读取当前 Conversation Messages 与全部 cached Rounds，拒绝跨 Conversation、重复 Round ID、重复 membership 与 dangling member；目标 Round 中任一 member 不可信则禁用整项 anchor。无 Round 不推断归属。
+- Snapshot diff 新增 Assistant/User 内容可定位 canonical Message；可信归属时另有“打开所在 Round”。无 Round 时保留 Message-only anchor。
+- Message URL 统一为 `/conversation/{conversationId}?message={messageId}#message-{messageId}`，History 与 Global Raw Message Search 共用；Round 沿用 `?mode=workspace&round=…#round-…`。
+- Detail 自动切到 Timeline、展开 Full Raw Timeline 和目标、滚动与聚焦，并显示 5 秒高亮；高亮消退前后重复点击均可重新展开和定位。
+- 映射仅按 conversationId + sourceOrdinal，核对 exact role/content、连续 ordinal、唯一 Message ID 和 Round membership；缺失、重复、dangling 或 mismatch 不猜测，diff 文本保留且定位禁用。invalid/cross-conversation Message 参数不定位错误实体、不写 canonical 数据。
+- Round deep-link 滚动等待卡片提交渲染，普通 Round autosave 不重复滚动。Global Search advanced mode 默认关闭，Knowledge/Proposal href 保持不变。
+- 未修改 Snapshot/Message/Round/Knowledge schema、IndexedDB version/store、依赖、Snapshot import/writer/comparator semantics；无 fuzzy anchor matching、durable anchor cache、background sync 或新增 Knowledge workflow。
+- Knowledge productivity、P1/P2 consistency backlog、cross-tab live subscription 仍未完成；anchors 依赖当前本地 canonical cache，Full Timeline 未增加 virtualization。
 
 ## v1.9.0 Snapshot History UX release delta
 

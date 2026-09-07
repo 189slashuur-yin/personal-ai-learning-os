@@ -6,6 +6,8 @@ import {
   isChatGPTShareSnapshotMetadata,
   type ImportedSource,
 } from "@/core/entities/imported-source";
+import type { Round } from "@/core/entities/round";
+import { messageDeepLink, roundDeepLink, type SnapshotMessageAnchor } from "@/core/services/message-navigation";
 import type { Message } from "@/core/entities/message";
 import {
   compareChatGPTShareSnapshotHistoryEntries,
@@ -18,6 +20,8 @@ type ConversationSnapshotHistoryProps = {
   conversationId: string;
   history: ChatGPTShareSnapshotHistoryView;
   messages: readonly Readonly<Message>[];
+  rounds?: readonly Readonly<Round>[];
+  onRepeatMessageNavigation?: () => void;
 };
 
 const blockedReasonLabels: Record<string, string> = {
@@ -89,10 +93,60 @@ function DiffSummary({ diff }: { diff: ChatGPTShareSnapshotHistoryDiff }) {
   );
 }
 
+function AnchorActions({
+  conversationId,
+  anchor,
+  onRepeatMessageNavigation,
+}: {
+  conversationId: string;
+  anchor?: SnapshotMessageAnchor | null;
+  onRepeatMessageNavigation?: () => void;
+}) {
+  if (!anchor) {
+    return (
+      <div className="mt-3 text-xs text-amber-800">
+        <button type="button" disabled className="mr-2 cursor-not-allowed opacity-60">
+          定位原 Message
+        </button>
+        不可定位：原 Message 或 Round 引用无法验证。
+      </div>
+    );
+  }
+  return (
+    <div className="mt-3 flex flex-wrap gap-3 text-xs">
+      <a
+        className="rounded-lg bg-zinc-950 px-3 py-2 font-semibold text-white"
+        href={messageDeepLink(conversationId, anchor.messageId)}
+        onClick={(event) => {
+          // The browser does not navigate again for an identical hash URL.
+          if (onRepeatMessageNavigation && !event.metaKey && !event.ctrlKey &&
+            !event.shiftKey && !event.altKey &&
+            event.currentTarget.href === window.location.href) {
+            event.preventDefault();
+            onRepeatMessageNavigation();
+          }
+        }}
+      >
+        定位原 Message
+      </a>
+      {anchor.roundId ? (
+        <a
+          className="rounded-lg border border-zinc-300 px-3 py-2 text-zinc-700"
+          href={roundDeepLink(conversationId, anchor.roundId)}
+        >
+          打开所在 Round
+        </a>
+      ) : null}
+    </div>
+  );
+}
+
 export function ConversationSnapshotHistory({
   conversationId,
   history,
   messages,
+  rounds,
+  onRepeatMessageNavigation,
 }: ConversationSnapshotHistoryProps) {
   const initialSelection = defaultChatGPTShareSnapshotHistorySelection(history);
   const historyKey =
@@ -124,11 +178,12 @@ export function ConversationSnapshotHistory({
         ? compareChatGPTShareSnapshotHistoryEntries({
             history,
             canonicalMessages: messages,
+            rounds,
             beforeSourceId,
             afterSourceId,
           })
         : null,
-    [afterSourceId, beforeSourceId, history, messages],
+    [afterSourceId, beforeSourceId, history, messages, rounds],
   );
   const updateHref =
     history.status === "valid"
@@ -325,6 +380,7 @@ export function ConversationSnapshotHistory({
                       <p className="mt-2 whitespace-pre-wrap break-words">
                         {message.content}
                       </p>
+                      <AnchorActions conversationId={conversationId} anchor={message.anchor} onRepeatMessageNavigation={onRepeatMessageNavigation} />
                     </li>
                   ))}
                 </ol>
@@ -343,6 +399,7 @@ export function ConversationSnapshotHistory({
                       key={`${afterSourceId}-user-${message.ordinal}`}
                     >
                       {message.content}
+                      <AnchorActions conversationId={conversationId} anchor={message.anchor} onRepeatMessageNavigation={onRepeatMessageNavigation} />
                     </li>
                   ))}
                 </ol>

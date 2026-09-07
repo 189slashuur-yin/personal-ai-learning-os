@@ -310,3 +310,63 @@ describe("v1.9 Conversation Snapshot history UI", () => {
     expect(html).toContain("创建 Snapshot Conversation");
   });
 });
+
+describe("v1.9.1 Snapshot Message anchors", () => {
+  const history = inspectChatGPTShareSnapshotHistory({ conversationId, sources: historySources() });
+  const rounds = [
+    { id: "round-1", conversationId, order: 1, title: "First", question: "", answer: "", messageIds: ["message-0", "message-1"], createdAt: "", updatedAt: "" },
+    { id: "round-2", conversationId, order: 2, title: "Tail", question: "", answer: "", messageIds: ["message-2", "message-3"], createdAt: "", updatedAt: "" },
+  ];
+  it.each([
+    [null, "snapshot-1", [0, 1]],
+    ["snapshot-1", "snapshot-3", [2, 3]],
+    ["snapshot-2", "snapshot-3", [3]],
+    ["snapshot-3", "snapshot-3", []],
+  ] as const)("maps %s → %s including first, new Round and assistant tail", (beforeSourceId, afterSourceId, ordinals) => {
+    const result = compareChatGPTShareSnapshotHistoryEntries({ history, canonicalMessages: canonicalMessages(), rounds, beforeSourceId, afterSourceId });
+    expect(result.addedMessages.map(({ anchor }) => anchor)).toEqual(ordinals.map((ordinal) => ({
+      messageId: `message-${ordinal}`, sourceOrdinal: ordinal,
+      roundId: ordinal < 2 ? "round-1" : "round-2", roundOrder: ordinal < 2 ? 1 : 2,
+    })));
+  });
+  it.each(["missing", "duplicate", "undefined ordinal", "negative ordinal", "fractional ordinal", "broken ordinal", "role", "content", "order"])("retains diff but disables anchor for %s in suffix", (fault) => {
+    const messages = canonicalMessages();
+    if (fault === "missing") messages.pop();
+    if (fault === "duplicate") messages.push({ ...messages[3], id: "duplicate" });
+    if (fault === "undefined ordinal") messages[3].sourceOrdinal = undefined;
+    if (fault === "negative ordinal") messages[3].sourceOrdinal = -1;
+    if (fault === "fractional ordinal") messages[3].sourceOrdinal = 3.5;
+    if (fault === "broken ordinal") messages[3].sourceOrdinal = 7;
+    if (fault === "role") messages[3].role = "user";
+    if (fault === "content") messages[3].content += " changed";
+    if (fault === "order") messages[3].order = messages[2].order;
+    const result = compareChatGPTShareSnapshotHistoryEntries({ history, canonicalMessages: messages, rounds, beforeSourceId: "snapshot-2", afterSourceId: "snapshot-3" });
+    expect(result.status).toBe("append");
+    expect(result.addedAssistantMessages).toHaveLength(1);
+    expect(result.addedAssistantMessages[0]).toMatchObject({ content: transcripts[2][3][1], anchor: null });
+  });
+  it.each(["dangling", "duplicate member", "multiple rounds", "other member duplicated", "foreign round", "duplicate round id"])("disables navigation for %s", (fault) => {
+    const changed = structuredClone(rounds);
+    if (fault === "dangling") changed[1].messageIds.push("missing");
+    if (fault === "duplicate member") changed[1].messageIds.push("message-3");
+    if (fault === "multiple rounds") changed[0].messageIds.push("message-3");
+    if (fault === "other member duplicated") changed[0].messageIds.push("message-2");
+    if (fault === "foreign round") changed[1].conversationId = "elsewhere";
+    if (fault === "duplicate round id") changed[0].id = changed[1].id;
+    const result = compareChatGPTShareSnapshotHistoryEntries({ history, canonicalMessages: canonicalMessages(), rounds: changed, beforeSourceId: "snapshot-2", afterSourceId: "snapshot-3" });
+    expect(result.addedAssistantMessages[0].anchor).toBeNull();
+  });
+  it("renders trusted Message/Round links, Message-only links, and a disabled untrusted action", () => {
+    const render = (messages: Message[], memberships = rounds) => renderToStaticMarkup(createElement(ConversationSnapshotHistory, { conversationId, history, messages, rounds: memberships }));
+    const trusted = render(canonicalMessages());
+    expect(trusted).toContain(`/conversation/${conversationId}?message=message-3#message-message-3`);
+    expect(trusted).toContain(`?mode=workspace&amp;round=round-2#round-round-2`);
+    expect(trusted).toContain("打开所在 Round");
+    expect(render(canonicalMessages(), [])).not.toContain("打开所在 Round");
+    const untrusted = render(canonicalMessages().slice(0, 3));
+    expect(untrusted).toContain("Only the assistant follow-up was added.");
+    expect(untrusted).toContain("不可定位");
+    expect(untrusted).toContain('disabled=""');
+    expect(untrusted).not.toContain("?message=");
+  });
+});

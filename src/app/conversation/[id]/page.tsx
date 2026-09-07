@@ -2,7 +2,7 @@ import { ConversationDetail } from "./conversation-detail";
 
 type ConversationDetailPageProps = {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ imported?: string }>;
+  searchParams: Promise<{ imported?: string; message?: string | string[] }>;
 };
 
 export default async function ConversationDetailPage({
@@ -10,11 +10,13 @@ export default async function ConversationDetailPage({
   searchParams,
 }: ConversationDetailPageProps) {
   const { id } = await params;
-  const { imported } = await searchParams;
+  const { imported, message } = await searchParams;
 
   return (
     <ConversationDetail
+      key={id}
       conversationId={id}
+      requestedMessageId={typeof message === "string" ? message : message ? "" : null}
       importedFromClipboard={imported === "clipboard"}
     />
   );

@@ -16,6 +16,7 @@ import type {
 import type { Tag } from "@/core/entities/tag";
 import type { Task } from "@/core/entities/task";
 import { DEFAULT_WORKSPACE_ID, type Workspace } from "@/core/entities/workspace";
+import { messageDeepLink, roundDeepLink } from "@/core/services/message-navigation";
 import { deriveQAPairs } from "@/core/services/qa-pair-service";
 import { parseRoundRecord } from "@/core/services/round-record";
 
@@ -255,7 +256,7 @@ export class SearchIndexService {
         sourceLabel: message.role,
         sourcePath: `${conversation?.title ?? "Conversation"} > Message #${message.order}`,
         updatedAt: message.updatedAt ?? message.createdAt,
-        href: `/conversation/${message.conversationId}`,
+        href: messageDeepLink(message.conversationId, message.id),
         fields: {
           content: message.content,
           role: message.role,
@@ -297,7 +298,7 @@ export class SearchIndexService {
         sourceLabel: "Round",
         sourcePath: `${workspacePath(workspace.id)}${workspace.id ? " > " : ""}${conversation?.title ?? "Conversation"} > Round ${round.order}`,
         updatedAt: round.updatedAt,
-        href: `/conversation/${round.conversationId}?mode=workspace&round=${encodeURIComponent(round.id)}#round-${round.id}`,
+        href: roundDeepLink(round.conversationId, round.id),
         fields: {
           title: round.title,
           question: round.question,

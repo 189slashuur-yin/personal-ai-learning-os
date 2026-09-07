@@ -3,6 +3,8 @@ import {
   isLegacyChatGPTShareSnapshotMetadata,
   type ImportedSource,
 } from "@/core/entities/imported-source";
+import type { Round } from "@/core/entities/round";
+import { createSnapshotMessageAnchorResolver, type SnapshotMessageAnchor } from "@/core/services/message-navigation";
 import type { Message } from "@/core/entities/message";
 import {
   compareChatGPTShareSnapshot,
@@ -44,6 +46,8 @@ export type ChatGPTShareSnapshotHistoryDiffStatus =
   | "blocked"
   | "invalid";
 
+export type SnapshotHistoryMessage = Readonly<ChatGPTShareSnapshotMessageDraft & { anchor?: SnapshotMessageAnchor | null }>;
+
 export type ChatGPTShareSnapshotHistoryDiff = Readonly<{
   status: ChatGPTShareSnapshotHistoryDiffStatus;
   beforeSourceId: string | null;
@@ -51,9 +55,9 @@ export type ChatGPTShareSnapshotHistoryDiff = Readonly<{
   existingMessageCount: number;
   snapshotMessageCount: number;
   commonPrefixCount: number;
-  addedMessages: readonly Readonly<ChatGPTShareSnapshotMessageDraft>[];
-  addedAssistantMessages: readonly Readonly<ChatGPTShareSnapshotMessageDraft>[];
-  addedUserMessages: readonly Readonly<ChatGPTShareSnapshotMessageDraft>[];
+  addedMessages: readonly SnapshotHistoryMessage[];
+  addedAssistantMessages: readonly SnapshotHistoryMessage[];
+  addedUserMessages: readonly SnapshotHistoryMessage[];
   comparisonStatus?: ChatGPTShareSnapshotComparisonStatus;
   error?: string;
 }>;
@@ -115,7 +119,7 @@ function completedDiff(input: {
   existingMessageCount: number;
   snapshotMessageCount: number;
   commonPrefixCount: number;
-  addedMessages: readonly Readonly<ChatGPTShareSnapshotMessageDraft>[];
+  addedMessages: readonly SnapshotHistoryMessage[];
   comparisonStatus?: ChatGPTShareSnapshotComparisonStatus;
 }): ChatGPTShareSnapshotHistoryDiff {
   return {
@@ -207,6 +211,7 @@ export function inspectChatGPTShareSnapshotHistory(input: Readonly<{
 export function compareChatGPTShareSnapshotHistoryEntries(input: Readonly<{
   history: ChatGPTShareSnapshotHistoryView;
   canonicalMessages: readonly Readonly<Message>[];
+  rounds?: readonly Readonly<Round>[];
   beforeSourceId: string | null;
   afterSourceId: string;
 }>): ChatGPTShareSnapshotHistoryDiff {
@@ -246,6 +251,14 @@ export function compareChatGPTShareSnapshotHistoryEntries(input: Readonly<{
     });
   }
 
+  const resolveAnchor = createSnapshotMessageAnchorResolver({
+    conversationId: afterSource.conversationId!,
+    messages: input.canonicalMessages,
+    rounds: input.rounds ?? [],
+  });
+  const withAnchors = (messages: readonly Readonly<ChatGPTShareSnapshotMessageDraft>[]) =>
+    messages.map((message) => ({ ...message, anchor: resolveAnchor(message) }));
+
   if (!input.beforeSourceId) {
     return completedDiff({
       status: "initial",
@@ -254,7 +267,7 @@ export function compareChatGPTShareSnapshotHistoryEntries(input: Readonly<{
       existingMessageCount: 0,
       snapshotMessageCount: parsedAfter.messages.length,
       commonPrefixCount: 0,
-      addedMessages: parsedAfter.messages,
+      addedMessages: withAnchors(parsedAfter.messages),
     });
   }
   if (input.beforeSourceId === input.afterSourceId) {
@@ -283,6 +296,8 @@ export function compareChatGPTShareSnapshotHistoryEntries(input: Readonly<{
     (message) =>
       message.conversationId === beforeSource.conversationId &&
       typeof message.sourceOrdinal === "number" &&
+      Number.isInteger(message.sourceOrdinal) &&
+      message.sourceOrdinal >= 0 &&
       message.sourceOrdinal < beforeMetadata.snapshotMessageCount,
   );
   const comparison = compareChatGPTShareSnapshot({
@@ -303,7 +318,7 @@ export function compareChatGPTShareSnapshotHistoryEntries(input: Readonly<{
       existingMessageCount: comparison.existingMessageCount,
       snapshotMessageCount: comparison.snapshotMessageCount,
       commonPrefixCount: comparison.commonPrefixCount,
-      addedMessages: comparison.suffixMessages,
+      addedMessages: withAnchors(comparison.suffixMessages),
       comparisonStatus: comparison.status,
     });
   }

@@ -28,6 +28,7 @@ import {
   inspectChatGPTShareSnapshotHistory,
   type ChatGPTShareSnapshotHistoryView,
 } from "@/core/services/chatgpt-share-snapshot-history-view";
+import { messageDomId, resolveMessageTarget } from "@/core/services/message-navigation";
 import { editMessage } from "@/core/services/message-editing";
 import { parseMessagesFromRawText } from "@/core/services/message-parser";
 import { PromptTemplateService } from "@/core/services/prompt-template-service";
@@ -81,6 +82,7 @@ import { CapabilityBadges } from "@/app/capability-badges";
 type ConversationDetailProps = {
   conversationId: string;
   importedFromClipboard?: boolean;
+  requestedMessageId?: string | null;
 };
 
 type DetailState =
@@ -99,6 +101,7 @@ type DetailState =
       knowledgeCard: KnowledgeCard | null;
       knowledgeCount: number;
       roundCount: number;
+      rounds: Round[];
       versions: ConversationVersion[];
     };
 
@@ -179,8 +182,12 @@ function createAnalyzerExecutionService(providerId?: string) {
 export function ConversationDetail({
   conversationId,
   importedFromClipboard = false,
+  requestedMessageId = null,
 }: ConversationDetailProps) {
   const [state, setState] = useState<DetailState>({ status: "loading" });
+  const [messageAnchorRequest, setMessageAnchorRequest] = useState(0);
+  const [messageHighlight, setMessageHighlight] = useState<{ id: string } | null>(null);
+  const highlightedMessageId = messageHighlight?.id ?? null;
   const [draft, setDraft] = useState("");
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("saved");
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
@@ -320,6 +327,7 @@ export function ConversationDetail({
     });
   }, [activeSearchMessageId]);
 
+  const initialMessageRequest = useRef(requestedMessageId);
   useEffect(() => {
     const loadTimer = window.setTimeout(() => {
       async function load() {
@@ -351,7 +359,7 @@ export function ConversationDetail({
         ...conversation,
         lastOpenedAt: new Date().toISOString(),
       };
-      createConversationStorage().save(openedConversation);
+      if (initialMessageRequest.current === null) createConversationStorage().save(openedConversation);
       setWorkspaces(
         new WorkspaceService(
           new BrowserWorkspaceStorage(),
@@ -435,6 +443,7 @@ export function ConversationDetail({
         knowledgeCard,
         knowledgeCount,
         roundCount: rounds.length,
+        rounds: createRoundStorage().getAll(),
         versions,
       });
       }
@@ -443,6 +452,36 @@ export function ConversationDetail({
 
     return () => window.clearTimeout(loadTimer);
   }, [conversationId, providerDetails.id]);
+
+  const anchorTarget = state.status === "ready" && state.conversation.id === conversationId
+    ? resolveMessageTarget(conversationId, requestedMessageId, state.messages) : null;
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setMessageHighlight(null);
+      if (!anchorTarget) return;
+      setDetailMode("classic");
+      setMessageView("timeline");
+      setMessageTimelineMode("full");
+      setCollapsedMessageIds((ids) => {
+        const next = new Set(ids);
+        next.delete(anchorTarget.id);
+        return next;
+      });
+      setMessageHighlight({ id: anchorTarget.id });
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [anchorTarget, messageAnchorRequest]);
+
+  useEffect(() => {
+    if (!highlightedMessageId || highlightedMessageId !== anchorTarget?.id) return;
+    const frame = window.requestAnimationFrame(() => {
+      const element = messageElements.current.get(highlightedMessageId);
+      element?.focus({ preventScroll: true });
+      element?.scrollIntoView({ behavior: "instant", block: "center" });
+    });
+    const timer = window.setTimeout(() => setMessageHighlight(null), 5000);
+    return () => { window.cancelAnimationFrame(frame); window.clearTimeout(timer); };
+  }, [messageHighlight, highlightedMessageId, anchorTarget, messageTimelineMode, messageView]);
 
   // R9: Close More Menu on outside click and Esc
   useEffect(() => {
@@ -1408,6 +1447,8 @@ export function ConversationDetail({
         </div>
       </header>
 
+      {state.status === "ready" && requestedMessageId !== null && !anchorTarget ? <p role="status" className="mt-4 rounded-lg bg-amber-50 p-4 text-sm text-amber-900">不可定位：Message 不存在或不属于此 Conversation。</p> : null}
+
       {/* v1.5.1: Warning when Messages exist but Rounds are missing */}
       {state.messages.length > 0 && roundCount === 0 ? (
         <div
@@ -1719,6 +1760,8 @@ export function ConversationDetail({
             conversationId={conversation.id}
             history={state.snapshotHistory}
             messages={state.messages}
+            rounds={state.rounds}
+            onRepeatMessageNavigation={() => setMessageAnchorRequest((request) => request + 1)}
           />
           <div className="mt-6 border-t border-zinc-200 pt-6">
             <h3 className="text-base font-semibold text-zinc-950">
@@ -2082,7 +2125,10 @@ export function ConversationDetail({
 
                   return (
                     <li
-                      className={`flex max-w-[90%] scroll-mt-8 gap-3 rounded-xl border p-4 sm:max-w-[82%] ${messageStyle(message.role)} ${selectedMessageIds.has(message.id) ? "ring-2 ring-zinc-400 ring-offset-2" : ""} ${isCurrentSearchMatch ? "outline-2 outline-offset-2 outline-amber-400" : ""}`}
+                      className={`flex max-w-[90%] scroll-mt-8 gap-3 rounded-xl border p-4 sm:max-w-[82%] ${messageStyle(message.role)} ${selectedMessageIds.has(message.id) ? "ring-2 ring-zinc-400 ring-offset-2" : ""} ${isCurrentSearchMatch ? "outline-2 outline-offset-2 outline-amber-400" : ""} ${highlightedMessageId === message.id ? "ring-4 ring-amber-400 ring-offset-4" : ""}`}
+                      id={messageDomId(message.id)}
+                      tabIndex={-1}
+                      data-message-highlighted={highlightedMessageId === message.id ? "true" : undefined}
                       key={message.id}
                       ref={(element) => {
                         if (element) {

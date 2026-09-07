@@ -4,12 +4,21 @@
 
 ## Current release
 
-- Current Version：PALOS v1.9.0 Snapshot History UX release
-- Phase：v1.9.0 release closure complete
-- Current Focus：Conversation Detail Snapshot timeline、history selection、readable Message diff 与 resolver-confirmed head
-- Release Metadata：annotated tag `v1.9.0`；release baseline `v1.8.3` / `63c97f0`
-- Automated Status：Vitest 401/401；Playwright 3/3；lint/build/diff-check passed
-- Scope Guard：不把 v1.8.3 P1/P2 backlog、URL fetching、CRDT、background sync 或 schema change 并入 v1.9
+- Current Version：PALOS v1.9.1 Raw Message Anchor patch release
+- Current Focus：History → Message / optional Round 导航闭环与 Global Search Message deep link
+- Release Metadata：annotated tag `v1.9.1`；release baseline `v1.9.0` / `56f4a018`
+- Automated Status：本次发布门禁结果见 HANDOFF
+- Scope Guard：P1/P2 consistency backlog、Knowledge productivity、cross-tab live subscription 均保持 deferred
+
+## v1.9.1 — Raw Message Anchor patch release
+
+- Snapshot diff 新增 Assistant/User 内容可定位 canonical Message；可信归属时另有“打开所在 Round”。无 Round 时保留 Message-only anchor。
+- Message URL 统一为 `/conversation/{conversationId}?message={messageId}#message-{messageId}`，History 与 Global Raw Message Search 共用；Round 沿用 `?mode=workspace&round=…#round-…`。
+- Detail 自动切到 Timeline、展开 Full Raw Timeline 和目标、滚动与聚焦，并显示 5 秒高亮；高亮消退前后重复点击均可重新展开和定位。
+- 映射仅按 conversationId + sourceOrdinal，核对 exact role/content、连续 ordinal、唯一 Message ID 和 Round membership；缺失、重复、dangling 或 mismatch 不猜测，diff 文本保留且定位禁用。invalid/cross-conversation Message 参数不定位错误实体、不写 canonical 数据。
+- Round deep-link 滚动等待卡片提交渲染，普通 Round autosave 不重复滚动。Global Search advanced mode 默认关闭，Knowledge/Proposal href 保持不变。
+- 未修改 Snapshot/Message/Round/Knowledge schema、IndexedDB version/store、依赖、Snapshot import/writer/comparator semantics；无 fuzzy anchor matching、durable anchor cache、background sync 或新增 Knowledge workflow。
+- Knowledge productivity、P1/P2 consistency backlog、cross-tab live subscription 仍未完成；anchors 依赖当前本地 canonical cache，Full Timeline 未增加 virtualization。
 
 ## v1.9.0 — Snapshot History UX release
 

@@ -15,13 +15,15 @@ PALOS 面向需要与 AI 长期协作的个人用户。产品要解决的不是�
 
 ## 当前阶段
 
-截至 2026-09-02，PALOS `v1.9.0` 已完成 Snapshot History UX release closure。该 release 只增加用户可见的 immutable Snapshot 时间线、history selection/comparison、assistant-first Message-level append diff 与 resolver-confirmed current head，不继续清理 v1.8.3 的 P1/P2 backlog。
+截至 2026-09-07，PALOS `v1.9.1` 收口 Raw Message Anchor patch release，在 v1.9.0 Snapshot History 上补全原文定位。
 
-- Current Version：PALOS v1.9.0 Snapshot History UX release
-- Release Metadata：annotated tag `v1.9.0`；release baseline 为 `v1.8.3` / `63c97f0`
-- Current Focus：immutable Snapshot history timeline、resolver-confirmed current head、history selection/comparison 与 assistant-first append diff
-- Automated Status：Vitest 401/401；Playwright 3/3；lint/build/diff-check passed
-- Deferred：Search Raw Message 精确锚点与 Knowledge 复用增强继续独立评审；v1.8.3 P1/P2 不并入本 release
+- Current Version：PALOS v1.9.1 Raw Message Anchor patch release
+- Release Metadata：annotated tag `v1.9.1`；release baseline `v1.9.0` / `56f4a018f7077280d31809039fbf112c913474de`
+- Current Focus：Snapshot diff → canonical Message anchor → optional Round link；Global Raw Message Search 共用 Message deep link
+- Automated Status：发布前重新运行 Vitest / Playwright / lint / build / diff-check，结果见 HANDOFF
+- Deferred：Knowledge productivity、v1.8.3 P1/P2 consistency backlog 与 cross-tab live subscription 均未完成
+
+定位自动切到 Timeline、展开 Full Raw Timeline 和目标 Message、滚动并给予 5 秒高亮；高亮消退前后重复点击均可再次定位。History 仅按 conversationId + sourceOrdinal 精确映射并验证 role/content/ordinal 与 Round membership；无可信映射保留内容、禁用定位，不猜测。Global Search advanced mode 默认行为保持不变。
 
 v1.9.0 在现有 History / 版本历史语境中明确区分两套历史：Conversation Snapshot 是外部对话的 immutable Source chain；PALOS ConversationVersion 是本地可 Restore 的恢复点。Snapshot timeline 默认比较最新两次 capture，突出新增 Assistant 内容，也支持首个 Snapshot、同一 Snapshot、任意较早基线、长 history 滚动与完整前后 canonical transcript 查看。读取 current head 使用既有 lineage resolver，不再由 Conversation Detail 按 `updatedAt` 推断；lineage blocked、历史编辑、缩短或 divergence 均 fail closed。
 

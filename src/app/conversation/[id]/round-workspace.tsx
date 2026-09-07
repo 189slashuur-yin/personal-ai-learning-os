@@ -28,6 +28,7 @@ export function RoundWorkspace({
 }: RoundWorkspaceProps) {
   const [rounds, setRounds] = useState<Round[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
+  const [requestedRoundId, setRequestedRoundId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [collapsedIds, setCollapsedIds] = useState<Set<string>>(new Set());
   const [migrationNotice, setMigrationNotice] = useState<string | null>(null);
@@ -37,19 +38,24 @@ export function RoundWorkspace({
     const timer = window.setTimeout(() => {
       setRounds(loadRounds(conversationId));
       setMessages(createMessageStorage().getByConversationId(conversationId));
-      const requestedRoundId = new URLSearchParams(window.location.search).get(
-        "round",
-      );
-      if (requestedRoundId) {
-        window.requestAnimationFrame(() => {
-          document
-            .getElementById(`round-${requestedRoundId}`)
-            ?.scrollIntoView({ behavior: "smooth", block: "start" });
-        });
-      }
+      setRequestedRoundId(new URLSearchParams(window.location.search).get("round"));
     }, 0);
     return () => window.clearTimeout(timer);
   }, [conversationId]);
+
+  const roundNavigationTarget = requestedRoundId && rounds.filter((round) =>
+    round.id === requestedRoundId && round.conversationId === conversationId,
+  ).length === 1 ? requestedRoundId : null;
+
+  // Wait for committed cards, without re-scrolling on ordinary Round autosaves.
+  useEffect(() => {
+    if (!roundNavigationTarget) return;
+    const frame = window.requestAnimationFrame(() => {
+      document.getElementById(`round-${roundNavigationTarget}`)
+        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [roundNavigationTarget]);
 
   const visibleRounds = useMemo(() => {
     const normalizedQuery = query.trim().toLocaleLowerCase();
