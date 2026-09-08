@@ -4,9 +4,13 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type FormEvent, useEffect, useState } from "react";
 import type { KnowledgeCard } from "@/core/entities/knowledge-card";
-import type { Round } from "@/core/entities/round";
 import { CapabilityBadges } from "@/app/capability-badges";
 import type { Tag } from "@/core/entities/tag";
+import {
+  resolveKnowledgeProvenance,
+  type KnowledgeMessageSource,
+  type KnowledgeProvenance,
+} from "@/core/services/knowledge-provenance";
 import {
   addTagToKnowledgeCard,
   createTag,
@@ -47,16 +51,28 @@ function excerpt(value: string, maxLength = 240) {
     : normalized;
 }
 
+function messageSourceUnavailableLabel(source: KnowledgeMessageSource) {
+  switch (source.status) {
+    case "dangling":
+      return "Message 已不存在";
+    case "foreign":
+      return "Message 不属于来源 Conversation";
+    case "duplicate":
+      return `来源 ID 重复保存 ${source.occurrenceCount} 次，无法确认唯一来源`;
+    case "ambiguous":
+      return "当前存在重复 Message ID，无法确认唯一来源";
+    case "unverifiable":
+      return "未保存来源 Conversation，无法验证 Message 归属";
+    case "available":
+      return "";
+  }
+}
+
 export function KnowledgeDetail({ cardId }: { cardId: string }) {
   const router = useRouter();
   const [card, setCard] = useState<KnowledgeCard | null | undefined>(undefined);
   const [draft, setDraft] = useState<Draft | null>(null);
-  const [sourceConversationTitle, setSourceConversationTitle] = useState<string | null>(null);
-  const [sourceRound, setSourceRound] = useState<Round | null>(null);
-  const [sourceRoundId, setSourceRoundId] = useState<string | null>(null);
-  const [sourceMessageCount, setSourceMessageCount] = useState<number | null>(null);
-  const [missingSourceMessageCount, setMissingSourceMessageCount] = useState(0);
-  const [sourceEvidenceExcerpt, setSourceEvidenceExcerpt] = useState<string | null>(null);
+  const [provenance, setProvenance] = useState<KnowledgeProvenance | null>(null);
   const [tags, setTags] = useState<Tag[]>([]);
   const [newTagName, setNewTagName] = useState("");
   const [tagError, setTagError] = useState<string | null>(null);
@@ -72,40 +88,17 @@ export function KnowledgeDetail({ cardId }: { cardId: string }) {
       async function load() {
         if (getStorageMode() === "indexedDB") await ensureIndexedDBLoaded();
         const storedCard = createKnowledgeCardStorage().getById(cardId);
-        const proposal = storedCard
-          ? createProposalStorage().getById(storedCard.proposalId)
-          : null;
-        const conversationId =
-          storedCard?.sourceConversationId ?? proposal?.conversationId;
-        const conversation = conversationId
-          ? createConversationStorage().getById(conversationId)
-          : null;
-        const roundId = storedCard?.sourceRoundId ?? proposal?.sourceRoundId ?? null;
-        const round = roundId ? createRoundStorage().getById(roundId) : null;
         setCard(storedCard);
         setTags(new BrowserTagStorage().getAll());
-        setSourceConversationTitle(conversation?.title ?? null);
-        setSourceRoundId(roundId);
-        setSourceRound(round);
-        setSourceMessageCount(
-          storedCard?.sourceMessageCount ??
-            proposal?.sourceMessageIds?.length ??
-            null,
-        );
-        const sourceMessageIds =
-          storedCard?.sourceMessageIds ?? proposal?.sourceMessageIds ?? [];
-        const availableMessageIds = new Set(
-          createMessageStorage().getAll().map((message) => message.id),
-        );
-        setMissingSourceMessageCount(
-          sourceMessageIds.filter(
-            (messageId) => !availableMessageIds.has(messageId),
-          ).length,
-        );
-        setSourceEvidenceExcerpt(
-          storedCard?.sourceEvidenceExcerpt ??
-            proposal?.sourceEvidence.excerpt ??
-            null,
+        setProvenance(
+          storedCard
+            ? resolveKnowledgeProvenance({
+                card: storedCard,
+                conversations: createConversationStorage().getAll(),
+                rounds: createRoundStorage().getAll(),
+                messages: createMessageStorage().getAll(),
+              })
+            : null,
         );
         setDraft(
           storedCard
@@ -122,6 +115,7 @@ export function KnowledgeDetail({ cardId }: { cardId: string }) {
       void load().catch(() => {
         setCard(null);
         setDraft(null);
+        setProvenance(null);
       });
     }, 0);
     return () => window.clearTimeout(timer);
@@ -131,7 +125,7 @@ export function KnowledgeDetail({ cardId }: { cardId: string }) {
     return <p className="workspace-shell text-sm text-zinc-500" role="status">正在读取 Knowledge…</p>;
   }
 
-  if (!card || !draft) {
+  if (!card || !draft || !provenance) {
     return (
       <main className="workspace-shell">
         <p className="eyebrow">Not found</p>
@@ -445,28 +439,110 @@ export function KnowledgeDetail({ cardId }: { cardId: string }) {
             {tagError ? <p className="mt-2 text-xs text-red-600">{tagError}</p> : null}
           </section>
 
+          <section className="mt-8 border-t border-zinc-100 pt-6" data-testid="knowledge-provenance">
+            <div className="flex flex-wrap items-center gap-3">
+              <h2 className="text-base font-semibold text-zinc-950">来源</h2>
+              {provenance.isLegacy ? (
+                <span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-medium text-amber-800">
+                  Legacy：未保存可定位来源
+                </span>
+              ) : null}
+            </div>
+            <p className="mt-1 text-sm text-zinc-500">保存时证据不会随来源实体删除；当前来源只在可严格验证时提供链接。</p>
+
+            <div className="mt-5 grid gap-4 lg:grid-cols-2">
+              <section className="rounded-xl border border-zinc-200 bg-zinc-50 p-4" data-testid="knowledge-saved-evidence">
+                <h3 className="text-sm font-semibold text-zinc-900">保存时证据</h3>
+                <dl className="mt-3 space-y-3 text-sm">
+                  <div>
+                    <dt className="text-zinc-500">来源文件 / 名称</dt>
+                    <dd className="mt-1 break-words text-zinc-900">{provenance.savedEvidence.sourceFile || "未保存来源名称"}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-zinc-500">保存时 Message 数量</dt>
+                    <dd className="mt-1 text-zinc-900">{typeof provenance.savedEvidence.sourceMessageCount === "number" ? `${provenance.savedEvidence.sourceMessageCount} 条` : "未保存消息数量"}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-zinc-500">Evidence 快照</dt>
+                    <dd className="mt-1 text-zinc-900">
+                      {provenance.savedEvidence.sourceEvidenceExcerpt ? (
+                        <blockquote className="whitespace-pre-wrap border-l-2 border-zinc-300 pl-3 leading-6">
+                          {provenance.savedEvidence.sourceEvidenceExcerpt}
+                        </blockquote>
+                      ) : "未保存证据摘录"}
+                    </dd>
+                  </div>
+                </dl>
+              </section>
+
+              <section className="rounded-xl border border-zinc-200 bg-white p-4" data-testid="knowledge-current-source">
+                <h3 className="text-sm font-semibold text-zinc-900">当前可定位来源</h3>
+                <dl className="mt-3 space-y-4 text-sm">
+                  <div>
+                    <dt className="text-zinc-500">Conversation</dt>
+                    <dd className="mt-1 text-zinc-900">
+                      {provenance.current.conversation.status === "available" ? (
+                        <Link className="font-medium text-sky-700 hover:underline" href={provenance.current.conversation.href}>
+                          {provenance.current.conversation.conversation.title}
+                        </Link>
+                      ) : provenance.current.conversation.status === "unavailable" ? (
+                        <span className="text-amber-700">来源实体已不存在，当前不可定位</span>
+                      ) : (
+                        <span className="text-zinc-500">未保存 Conversation 来源</span>
+                      )}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-zinc-500">Round</dt>
+                    <dd className="mt-1 text-zinc-900">
+                      {provenance.current.round.status === "available" ? (
+                        <Link className="font-medium text-sky-700 hover:underline" href={provenance.current.round.href}>
+                          {provenance.current.round.round.title}
+                        </Link>
+                      ) : provenance.current.round.status === "foreign" ? (
+                        <span className="text-amber-700">Round 不属于来源 Conversation，当前不可定位</span>
+                      ) : provenance.current.round.status === "unavailable" ? (
+                        <span className="text-amber-700">来源实体已不存在，当前不可定位</span>
+                      ) : (
+                        <span className="text-zinc-500">未保存 Round 来源</span>
+                      )}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-zinc-500">Messages</dt>
+                    <dd className="mt-1 text-zinc-900">
+                      {provenance.current.messagesStatus === "not-recorded" ? (
+                        <span className="text-zinc-500">未保存消息级来源</span>
+                      ) : (
+                        <ol className="space-y-2">
+                          {provenance.current.messages.map((source, index) => (
+                            <li className="rounded-lg bg-zinc-50 px-3 py-2" key={`${source.messageId}-${index}`}>
+                              {source.status === "available" && source.href ? (
+                                <>
+                                  <Link className="font-medium text-sky-700 hover:underline" href={source.href}>
+                                    Message {index + 1}
+                                  </Link>
+                                  {source.containingRound ? (
+                                    <span className="ml-2 text-xs text-zinc-500">
+                                      所在 Round：<Link className="hover:underline" href={source.containingRound.href}>{source.containingRound.round.title}</Link>
+                                    </span>
+                                  ) : null}
+                                </>
+                              ) : (
+                                <span className="text-amber-700">Message {index + 1}：{messageSourceUnavailableLabel(source)}</span>
+                              )}
+                            </li>
+                          ))}
+                        </ol>
+                      )}
+                    </dd>
+                  </div>
+                </dl>
+              </section>
+            </div>
+          </section>
+
           <dl className="mt-8 grid gap-5 border-t border-zinc-100 pt-6 text-sm sm:grid-cols-3">
-            <div><dt className="font-medium text-zinc-500">来源 Source</dt><dd className="mt-1.5 break-words text-zinc-900">{card.sourceFile}</dd></div>
-            {sourceConversationTitle ? (
-              <div>
-                <dt className="font-medium text-zinc-500">来源 Conversation</dt>
-                <dd className="mt-1.5 text-zinc-900">{sourceConversationTitle}</dd>
-              </div>
-            ) : null}
-            {sourceRound ? (
-              <div>
-                <dt className="font-medium text-zinc-500">来源 Round</dt>
-                <dd className="mt-1.5 text-zinc-900"><Link className="font-medium hover:underline" href={`/conversation/${sourceRound.conversationId}?round=${encodeURIComponent(sourceRound.id)}#round-${sourceRound.id}`}>{sourceRound.title}</Link></dd>
-              </div>
-            ) : sourceRoundId ? (
-              <div><dt className="font-medium text-zinc-500">来源 Round</dt><dd className="mt-1.5 text-amber-700">Round 已不可用；Knowledge 内容未受影响</dd></div>
-            ) : null}
-            {sourceMessageCount ? (
-              <div>
-                <dt className="font-medium text-zinc-500">来源 Messages</dt>
-                <dd className="mt-1.5 text-zinc-900">{sourceMessageCount} 条</dd>
-              </div>
-            ) : null}
             <div><dt className="font-medium text-zinc-500">创建时间</dt><dd className="mt-1.5 text-zinc-900">{formatDate(card.createdAt)}</dd></div>
             <div><dt className="font-medium text-zinc-500">更新时间</dt><dd className="mt-1.5 text-zinc-900">{formatDate(card.updatedAt)}</dd></div>
             {card.providerName ? (
@@ -487,17 +563,6 @@ export function KnowledgeDetail({ cardId }: { cardId: string }) {
             <div><dt className="font-medium text-zinc-500">状态</dt><dd className="mt-1.5 text-zinc-900">{draft.status}</dd></div>
           </dl>
           {card.previousContentSnapshots?.length ? <section className="mt-8 border-t border-zinc-100 pt-6"><h2 className="text-sm font-semibold">Previous content snapshots</h2><div className="mt-3 space-y-3">{card.previousContentSnapshots.map((snapshot) => <details className="rounded-lg border border-zinc-200 p-3" key={snapshot.capturedAt}><summary className="cursor-pointer text-xs font-semibold text-zinc-600">更新前快照 · {formatDate(snapshot.capturedAt)}</summary><p className="mt-3 whitespace-pre-wrap text-sm text-zinc-700">{snapshot.content}</p></details>)}</div></section> : null}
-          {missingSourceMessageCount > 0 && sourceEvidenceExcerpt ? (
-            <section className="mt-6 rounded-xl border border-amber-200 bg-amber-50 p-4">
-              <h2 className="text-sm font-semibold text-amber-950">
-                {missingSourceMessageCount} 条原始 Message 已不可用
-              </h2>
-              <p className="mt-1 text-xs text-amber-800">生成时保存的 Evidence 快照仍可用：</p>
-              <blockquote className="mt-3 whitespace-pre-wrap border-l-2 border-amber-300 pl-3 text-sm leading-6 text-amber-950">
-                {sourceEvidenceExcerpt}
-              </blockquote>
-            </section>
-          ) : null}
         </div>
 
         <div className="flex flex-wrap items-center justify-between gap-3 border-t border-zinc-100 bg-zinc-50 px-6 py-4 sm:px-8">

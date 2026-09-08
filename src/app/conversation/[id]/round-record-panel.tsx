@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import type { Round } from "@/core/entities/round";
 import {
@@ -18,6 +19,7 @@ import {
   createRoundMutationWriter,
   createRoundStorage,
 } from "@/infrastructure/storage/storage-factory";
+import { manualKnowledgeContent, verifyManualKnowledge } from "./manual-knowledge-persistence";
 
 const primaryFields: Array<{
   field: "notes" | "conclusion" | "nextActions";
@@ -74,6 +76,7 @@ export function RoundRecordPanel({
   const [draft, setDraft] = useState(() => parseRoundRecord(round));
   const [status, setStatus] = useState<AutosaveStatus>("unchanged");
   const [knowledgeNotice, setKnowledgeNotice] = useState<string | null>(null);
+  const [knowledgeId, setKnowledgeId] = useState<string | null>(null);
   const draftRef = useRef(draft);
   const latestRoundRef = useRef(round);
   const onSavedRef = useRef(onSaved);
@@ -155,9 +158,9 @@ export function RoundRecordPanel({
       return;
     }
 
-    const content = draftRef.current.conclusion.trim();
+    const content = manualKnowledgeContent(draftRef.current.conclusion);
 
-    if (!content) {
+    if (content === null) {
       setKnowledgeNotice("请先填写本轮结论。");
       return;
     }
@@ -171,15 +174,18 @@ export function RoundRecordPanel({
 
     if (!confirmed) return;
 
-    const result = new RoundKnowledgeService(
-      createKnowledgeCardStorage(),
-      createProposalStorage(),
-    ).createManualWithResult(storedRound, title, content);
-    setKnowledgeNotice(
-      result.created
-        ? "已保存为 Knowledge；不会影响本轮记录或参考来源。"
-        : "相同来源与内容的 Knowledge 已存在，未重复创建。",
-    );
+    const proposals = createProposalStorage();
+    const result = new RoundKnowledgeService(createKnowledgeCardStorage(), proposals)
+      .createManualWithResult(storedRound, title, content);
+    try {
+      const proposal = proposals.getById(result.card.proposalId);
+      if (!proposal) throw new Error("Manual Proposal is unavailable.");
+      await verifyManualKnowledge(result.card, proposal);
+      setKnowledgeId(result.card.id);
+      setKnowledgeNotice(result.created ? "已保存为 Knowledge；不会影响本轮记录或参考来源。" : "相同来源与内容的 Knowledge 已存在，未重复创建。");
+    } catch {
+      setKnowledgeNotice("Knowledge 尚未确认持久化；内容已保留，请重试。");
+    }
   }
 
   return (
@@ -208,6 +214,7 @@ export function RoundRecordPanel({
       </div>
 
       <div className="mt-4 grid gap-3">
+        {knowledgeId ? <Link className="text-xs font-semibold text-emerald-800 underline" href={`/knowledge/${knowledgeId}`}>打开 Knowledge</Link> : null}
         {primaryFields.map(({ field, label, placeholder }) => (
           <label className="min-w-0 text-xs font-semibold text-zinc-800" key={field}>
             <span className="flex flex-wrap items-center justify-between gap-2">

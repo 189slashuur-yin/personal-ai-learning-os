@@ -2,13 +2,26 @@
 
 ## Current release context
 
-- Current Version：PALOS v1.9.1 Raw Message Anchor patch release
-- Release Baseline：v1.9.0 / `56f4a018`
-- Current Focus：只读 Snapshot Message anchor enrichment 与统一导航契约
+- Current Version：PALOS v1.10.0 Knowledge Productivity release
+- Release Baseline：v1.9.1 / `5dbd5b03`
+- Current Focus：Knowledge provenance read model、全量 discoverability 与 durable manual creation confirmation
 - Automated Status：本次发布门禁结果见 HANDOFF
 - Scope Guard：P1/P2 consistency backlog 与其它产品 backlog 不并入本 release
 
 当前架构结论仍受单浏览器、本地优先与浏览器存储边界约束。PALOS 业务数据默认使用 IndexedDB；LocalStorage 保留为轻量配置、UI 偏好、schema/storage metadata 与旧数据迁移来源。v1.0 候选必须先完成范围和验收评审，不能从本文的演进 seam 推定为已批准实现。
+
+## v1.10.0 — Knowledge productivity architecture
+
+- 新增纯 Core `knowledge-provenance.ts` read model，以 KnowledgeCard 已持久化的 `source*` 字段和当前 Conversation/Round/Message 集合为唯一输入；不读取 Proposal、不修改 Entity/schema，也不产生写操作。
+- Conversation、Round、Message 均按唯一 ID 与 owner 严格验证。dangling、foreign、重复保存的 Message ID、当前重复实体 ID，以及缺少 Message owner context 的情况全部 fail closed，不提供导航。
+- Message 主导航复用 `messageDeepLink()`；Round 及 Message 的补充 Round 信息复用 `roundDeepLink()`，没有新增 URL 语义或 fuzzy content matching。
+- Conversation Detail 对既有 Message 或 Round deep-link 请求都不更新 `lastOpenedAt`，确保 provenance 查看/导航保持只读；普通无来源参数打开行为不变。
+- Knowledge Detail 常显“来源”，将创建时保存的 sourceFile/message count/evidence snapshot 与当前可定位实体分区展示。来源实体删除只降低导航能力，不影响 Knowledge 或保存时 evidence 的读取。
+- `conversation-knowledge.ts` 提供只读关联集合：KnowledgeCard direct provenance 优先；仅 direct 缺失时通过唯一 Proposal ownership fallback；duplicate/ambiguous ownership fail closed，按 card ID 去重，排序为 createdAt desc + ID stable fallback。
+- `manual-knowledge-persistence.ts` 的 IndexedDB 路径只调用 `putStores({ proposals: [proposal], "knowledge-cards": [card] })`。`putStores` 仅对传入 record 执行 scoped `store.put`，不 clear、不 replace、不使用 whole-cache snapshot；随后 `readAll("knowledge-cards")` 按 ID/proposalId authoritative verification。
+- Manual Round/Overview 保持 preview/confirm 和既有 Applied Proposal bridge。只有 durable verification 成功才 notify、same-tab refresh 和显示结果链接；failure 保留 draft，committed-but-unverified 不 rollback，retry/duplicate confirm 复用已有 card/proposal。
+- AI 路径仍为 Pending Proposal → Review → Knowledge；未修改 Proposal/Review lifecycle。
+- 本 release 未修改 Entity/schema、Storage/Provider abstraction、IndexedDB version/store、Snapshot ownership/writer/comparator 或依赖；没有新增 ReviewDecision/KnowledgeRevision 实体、Search/RAG/Embedding/CRDT/cross-tab/background sync。
 
 ## v1.9.1 Raw Message Anchor delta
 

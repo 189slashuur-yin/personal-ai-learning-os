@@ -2,7 +2,18 @@
 
 本文件记录当前仓库已经完成的 Sprint 与关键提交。日期使用仓库 commit date。
 
-当前口径：PALOS v1.9.1 Raw Message Anchor patch release；annotated tag `v1.9.1` 指向本次实现与文档收口提交。
+当前口径：PALOS v1.10.0 Knowledge Productivity release；annotated tag `v1.10.0` 指向本次实现与文档收口提交。
+
+## 2026-09-08 — PALOS v1.10.0 Knowledge Productivity Release
+
+- **Saved provenance**：Knowledge Detail 常显保存时 evidence 与当前可定位来源；只依赖 KnowledgeCard 自身 `source*` 字段，Proposal 删除不影响 provenance。
+- **Trusted backlinks**：Conversation/Round/Message 使用统一 deep-link helper；dangling、foreign、duplicate、ambiguous 与 legacy 数据 fail closed，来源删除只降级导航。
+- **Full discoverability**：Conversation 展示全部 direct provenance Knowledge；仅 direct 缺失时通过唯一 Proposal ownership fallback，按 card ID 去重，Active/Archived 均显示。
+- **Durable manual result**：Round/Overview preview confirm 后 scoped upsert 单个 Applied Proposal 与 KnowledgeCard，并以 authoritative read-back 验证；成功后显示结果链接并刷新本 tab。
+- **Failure and retry**：写入/验证失败不报成功、不清输入；committed-but-unverified 不补偿删除；重试与重复确认保持 card/proposal 幂等。
+- **Boundaries**：AI 仍须 Review；无 schema/store/version/dependency/contract/Snapshot 语义变化，无 Knowledge revision/update、Message draft、cross-tab sync、RAG 或 embedding。
+- **Known limits**：Cloud E2E/build 需要本地端口监听权限；P1 transcript concurrency、LocalStorage migration messaging、dormant Round CRUD 与既有 full-read lock/post-commit verification constraints 仍保留。
+- **Verification**：最终 Vitest / Playwright / lint / build / diff-check 记录见 HANDOFF。
 
 ## 2026-09-07 — PALOS v1.9.1 Raw Message Anchor Patch Release
 

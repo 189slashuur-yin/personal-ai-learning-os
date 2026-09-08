@@ -4,11 +4,20 @@
 
 ## Current release
 
-- Current Version：PALOS v1.9.1 Raw Message Anchor patch release
-- Current Focus：History → Message / optional Round 导航闭环与 Global Search Message deep link
-- Release Metadata：annotated tag `v1.9.1`；release baseline `v1.9.0` / `56f4a018`
+- Current Version：PALOS v1.10.0 Knowledge Productivity release
+- Current Focus：Knowledge provenance、Conversation 全量发现与可靠人工创建闭环
+- Release Metadata：annotated tag `v1.10.0`；release baseline `v1.9.1` / `5dbd5b03`
 - Automated Status：本次发布门禁结果见 HANDOFF
-- Scope Guard：P1/P2 consistency backlog、Knowledge productivity、cross-tab live subscription 均保持 deferred
+- Scope Guard：P1/P2 consistency backlog、cross-tab live subscription、Knowledge revision/update 与 manual Message draft 均保持 deferred
+
+## v1.10.0 — Knowledge Productivity release
+
+- Knowledge Detail 常显“保存时证据”和“当前可定位来源”；Conversation/Round/Message 只有唯一 owner 验证通过才显示链接，Proposal 不参与 provenance read model。
+- Conversation Detail 全量展示 direct `sourceConversationId` 关联 Knowledge；direct 缺失时才使用唯一 Proposal ownership fallback，按 card ID 去重并保留 Archived。
+- Round 结论与 Conversation Overview 保持显式 preview/confirm 和 manual Applied Proposal bridge；durable write 与 authoritative read-back 后才反馈成功并提供结果链接。
+- 写失败不假成功、不清输入；committed-but-unverified 不补偿删除；retry/duplicate confirm 复用已有 card/proposal；成功后本 tab 立即刷新列表。
+- AI Pending Proposal → Review → Knowledge 保持不变；未新增 Message→Knowledge、Knowledge revision/update、cross-tab subscription 或后台同步。
+- 未修改 Entity/schema、IndexedDB version/store、Storage/Provider contract、Snapshot writer/comparator/ownership 或依赖。
 
 ## v1.9.1 — Raw Message Anchor patch release
 

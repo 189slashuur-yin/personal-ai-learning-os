@@ -14,6 +14,7 @@ import type { Conversation } from "@/core/entities/conversation";
 import type { ConversationVersion } from "@/core/entities/conversation-version";
 import type { ImportedSource } from "@/core/entities/imported-source";
 import type { KnowledgeCard } from "@/core/entities/knowledge-card";
+import { listConversationKnowledge } from "@/core/services/conversation-knowledge";
 import type { Message, MessageRole } from "@/core/entities/message";
 import type { Proposal } from "@/core/entities/proposal";
 import type { Round } from "@/core/entities/round";
@@ -98,7 +99,7 @@ type DetailState =
       snapshotHistory: ChatGPTShareSnapshotHistoryView;
       messages: Message[];
       proposals: Proposal[];
-      knowledgeCard: KnowledgeCard | null;
+      knowledgeCards: KnowledgeCard[];
       knowledgeCount: number;
       roundCount: number;
       rounds: Round[];
@@ -359,7 +360,12 @@ export function ConversationDetail({
         ...conversation,
         lastOpenedAt: new Date().toISOString(),
       };
-      if (initialMessageRequest.current === null) createConversationStorage().save(openedConversation);
+      const isRoundNavigation = new URLSearchParams(
+        window.location.search,
+      ).has("round");
+      if (initialMessageRequest.current === null && !isRoundNavigation) {
+        createConversationStorage().save(openedConversation);
+      }
       setWorkspaces(
         new WorkspaceService(
           new BrowserWorkspaceStorage(),
@@ -398,13 +404,12 @@ export function ConversationDetail({
           : conversationProposals
       ).sort((left, right) => right.createdAt.localeCompare(left.createdAt));
       const knowledgeCardStorage = createKnowledgeCardStorage();
-      const knowledgeCard = proposals
-        .map((proposal) => knowledgeCardStorage.getByProposalId(proposal.id))
-        .find((card) => card !== null) ?? null;
-      const proposalIds = new Set(proposals.map((proposal) => proposal.id));
-      const knowledgeCount = knowledgeCardStorage
-        .getAll()
-        .filter((card) => proposalIds.has(card.proposalId)).length;
+      const knowledgeCards = listConversationKnowledge(
+        conversationId,
+        knowledgeCardStorage.getAll(),
+        proposalStorage.getAll(),
+      );
+      const knowledgeCount = knowledgeCards.length;
       const messages = createMessageStorage().getByConversationId(
         conversationId,
       );
@@ -440,7 +445,7 @@ export function ConversationDetail({
         snapshotHistory,
         messages,
         proposals,
-        knowledgeCard,
+        knowledgeCards,
         knowledgeCount,
         roundCount: rounds.length,
         rounds: createRoundStorage().getAll(),
@@ -452,6 +457,24 @@ export function ConversationDetail({
 
     return () => window.clearTimeout(loadTimer);
   }, [conversationId, providerDetails.id]);
+
+  useEffect(() => {
+    const refresh = (event: Event) => {
+      const target = (event as CustomEvent<{ conversationId?: string }>).detail?.conversationId;
+      if (target !== conversationId) return;
+      setState((current) => {
+        if (current.status !== "ready") return current;
+        const knowledgeCards = listConversationKnowledge(
+          conversationId,
+          createKnowledgeCardStorage().getAll(),
+          createProposalStorage().getAll(),
+        );
+        return { ...current, knowledgeCards, knowledgeCount: knowledgeCards.length };
+      });
+    };
+    window.addEventListener("palos:knowledge-created", refresh);
+    return () => window.removeEventListener("palos:knowledge-created", refresh);
+  }, [conversationId]);
 
   const anchorTarget = state.status === "ready" && state.conversation.id === conversationId
     ? resolveMessageTarget(conversationId, requestedMessageId, state.messages) : null;
@@ -634,7 +657,7 @@ export function ConversationDetail({
     );
   }
 
-  const { conversation, source, proposals, knowledgeCard, roundCount } = state;
+  const { conversation, source, proposals, knowledgeCards, roundCount } = state;
   const importProfileService = new ImportProfileService();
   const importProfile = conversation.importProfileId
     ? importProfileService.getById(conversation.importProfileId)
@@ -915,10 +938,6 @@ export function ConversationDetail({
     setState({
       ...state,
       proposals: state.proposals.filter((item) => item.id !== proposal.id),
-      knowledgeCard:
-        state.knowledgeCard?.proposalId === proposal.id
-          ? null
-          : state.knowledgeCard,
     });
   }
 
@@ -2511,8 +2530,10 @@ export function ConversationDetail({
           <p className="detail-kicker">07 · Knowledge</p>
           <h2 className="detail-title">KnowledgeCard</h2>
         </div>
-        {knowledgeCard ? (
-          <div className="rounded-xl border border-emerald-200 bg-emerald-50/50 p-5">
+        {knowledgeCards.length ? (
+          <div className="grid gap-3" data-testid="conversation-knowledge-list">
+          {knowledgeCards.map((knowledgeCard) => (
+          <div className="rounded-xl border border-emerald-200 bg-emerald-50/50 p-5" key={knowledgeCard.id}>
             <div className="flex items-start justify-between gap-4">
               <h3 className="font-semibold text-zinc-950">
                 {knowledgeCard.title}
@@ -2524,10 +2545,15 @@ export function ConversationDetail({
             <p className="mt-3 text-sm leading-6 text-zinc-700">
               {knowledgeCard.content}
             </p>
+            <Link className="mt-3 inline-block text-sm font-semibold text-emerald-800 underline" href={`/knowledge/${knowledgeCard.id}`}>
+              打开 Knowledge Detail
+            </Link>
+          </div>
+          ))}
           </div>
         ) : (
           <div className="rounded-xl border border-dashed border-zinc-300 bg-zinc-50 p-5 text-sm text-zinc-500">
-            接受 Proposal 后，KnowledgeCard 会显示在这里。
+            暂无关联 Knowledge。可从 Round / Overview 预览确认后手动创建，或在 Review 中审核 AI Proposal。
           </div>
         )}
       </section>

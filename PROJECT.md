@@ -15,13 +15,17 @@ PALOS 面向需要与 AI 长期协作的个人用户。产品要解决的不是�
 
 ## 当前阶段
 
-截至 2026-09-07，PALOS `v1.9.1` 收口 Raw Message Anchor patch release，在 v1.9.0 Snapshot History 上补全原文定位。
+截至 2026-09-08，PALOS `v1.10.0` 收口 Knowledge Productivity workflow，在 v1.9.1 的可信 Message/Round anchor 上补全 Knowledge 来源回看、Conversation 全量发现和可靠人工创建反馈。
 
-- Current Version：PALOS v1.9.1 Raw Message Anchor patch release
-- Release Metadata：annotated tag `v1.9.1`；release baseline `v1.9.0` / `56f4a018f7077280d31809039fbf112c913474de`
-- Current Focus：Snapshot diff → canonical Message anchor → optional Round link；Global Raw Message Search 共用 Message deep link
+- Current Version：PALOS v1.10.0 Knowledge Productivity release
+- Release Metadata：annotated tag `v1.10.0`；release baseline `v1.9.1` / `5dbd5b03ae43ccd7667e144ed9d8ea27bb3f9a7c`
+- Current Focus：Knowledge saved evidence → trusted source backlink；Conversation → all related Knowledge；manual Round/Overview → durable Knowledge result
 - Automated Status：发布前重新运行 Vitest / Playwright / lint / build / diff-check，结果见 HANDOFF
-- Deferred：Knowledge productivity、v1.8.3 P1/P2 consistency backlog 与 cross-tab live subscription 均未完成
+- Deferred：cross-tab live refresh、Knowledge update/revision、manual Message→Knowledge draft，以及 v1.8.3 P1/P2 consistency backlog
+
+v1.10.0 将保存时 evidence 与当前可定位来源分离。Knowledge Detail 只根据 KnowledgeCard 自身 `source*` 字段解析 Conversation/Round/Message backlink；dangling、foreign、duplicate、ambiguous 和 legacy 数据 fail closed，Proposal 删除不影响已保存 evidence。Conversation Detail 全量列出 direct provenance 命中的 Knowledge，只有 direct 缺失时才通过唯一 Proposal ownership 兼容 legacy 卡。
+
+人工 Round/Overview 仍须 preview/confirm，并继续使用既有 Applied Proposal bridge。IndexedDB 路径仅 scoped upsert 本次 Proposal/KnowledgeCard，随后 authoritative read-back；验证成功后才反馈成功、提供 Knowledge 链接并刷新本 tab 列表。失败保留输入并可重试，committed-but-unverified 不补偿删除，重复确认保持幂等。AI 路径仍为 Pending Proposal → Review → Knowledge。
 
 定位自动切到 Timeline、展开 Full Raw Timeline 和目标 Message、滚动并给予 5 秒高亮；高亮消退前后重复点击均可再次定位。History 仅按 conversationId + sourceOrdinal 精确映射并验证 role/content/ordinal 与 Round membership；无可信映射保留内容、禁用定位，不猜测。Global Search advanced mode 默认行为保持不变。
 

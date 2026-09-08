@@ -1,7 +1,39 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { writeFileSync } from "node:fs";
 
 test.setTimeout(90_000);
+
+async function readCanonicalState(page: Page) {
+  return page.evaluate(async () => {
+    const database = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open("palos-db", 1);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    const storeNames = [
+      "conversations",
+      "messages",
+      "rounds",
+      "sources",
+      "proposals",
+      "knowledge-cards",
+      "conversation-versions",
+    ];
+    const transaction = database.transaction(storeNames, "readonly");
+    const records = await Promise.all(
+      storeNames.map(
+        (storeName) =>
+          new Promise<unknown[]>((resolve, reject) => {
+            const request = transaction.objectStore(storeName).getAll();
+            request.onsuccess = () => resolve(request.result);
+            request.onerror = () => reject(request.error);
+          }),
+      ),
+    );
+    database.close();
+    return records;
+  });
+}
 
 test("inline Round records autosave, inherit passively, and stay responsive", async ({
   page,
@@ -197,6 +229,21 @@ test("inline Round records autosave, inherit passively, and stay responsive", as
     "当前总论内容",
   );
 
+  const overviewPanel = page.locator("section").filter({ hasText: "Conversation Overview / 对话总览" }).first();
+  const beforeCancelledOverview = await readCanonicalState(page);
+  page.once("dialog", (dialog) => dialog.dismiss());
+  await overviewPanel.getByRole("button", { name: "保存为 Knowledge" }).click();
+  expect(await readCanonicalState(page)).toEqual(beforeCancelledOverview);
+  await expect(page.locator('[data-overview-field="currentState"]')).toHaveValue("当前总论内容");
+
+  page.once("dialog", (dialog) => dialog.accept());
+  await overviewPanel.getByRole("button", { name: "保存为 Knowledge" }).click();
+  await expect(overviewPanel).toContainText("Conversation Overview 已保存为 Knowledge。");
+  const overviewKnowledgeLink = overviewPanel.getByRole("link", { name: "打开 Knowledge" });
+  await expect(overviewKnowledgeLink).toHaveAttribute("href", /^\/knowledge\/.+/);
+  await page.goto(detailUrl);
+  await expect(page.getByTestId("conversation-knowledge-list")).toContainText("当前总论内容");
+
   await page.getByRole("button", { name: "继续这个主题" }).click();
   const continueText = page.getByLabel("继续这个主题文本");
   await expect(continueText).toContainText("我的备注：rapid final draft");
@@ -219,7 +266,42 @@ test("inline Round records autosave, inherit passively, and stay responsive", as
     "相同来源与内容的 Knowledge 已存在，未重复创建。",
   );
   await page.goto("/knowledge");
-  await expect(page.locator('a[href^="/knowledge/"]')).toHaveCount(1);
+  const knowledgeLink = page.locator('a[href^="/knowledge/"]').first();
+  await expect(knowledgeLink).toBeVisible();
+  const knowledgeHref = await knowledgeLink.getAttribute("href");
+  expect(knowledgeHref).toBeTruthy();
+  await page.goto(knowledgeHref!);
+  await expect(page.getByTestId("knowledge-saved-evidence")).toContainText(
+    "Round one answer",
+  );
+  const currentKnowledgeSource = page.getByTestId("knowledge-current-source");
+  const messageLink = currentKnowledgeSource.getByRole("link", {
+    name: "Message 1",
+  });
+  const messageHref = await messageLink.getAttribute("href");
+  expect(messageHref).toMatch(
+    new RegExp(`^/conversation/${conversationId}\\?message=.+#message-.+$`),
+  );
+  const beforeMessageNavigation = await readCanonicalState(page);
+  await messageLink.click();
+  await expect(page).toHaveURL(messageHref!);
+  const messageAnchorId = decodeURIComponent(new URL(page.url()).hash.slice(1));
+  await expect(page.locator(`[id="${messageAnchorId}"]`)).toBeVisible();
+  expect(await readCanonicalState(page)).toEqual(beforeMessageNavigation);
+
+  await page.goto(knowledgeHref!);
+  const roundLink = page
+    .getByTestId("knowledge-current-source")
+    .locator('a[href*="?mode=workspace&round="]')
+    .first();
+  const roundHref = await roundLink.getAttribute("href");
+  expect(roundHref).toMatch(
+    new RegExp(`^/conversation/${conversationId}\\?mode=workspace&round=.+#round-.+$`),
+  );
+  const beforeRoundNavigation = await readCanonicalState(page);
+  await roundLink.click();
+  await expect(page).toHaveURL(roundHref!);
+  expect(await readCanonicalState(page)).toEqual(beforeRoundNavigation);
   await page.goto(detailUrl);
 
   await page.setViewportSize({ width: 1280, height: 900 });
@@ -290,7 +372,7 @@ test("inline Round records autosave, inherit passively, and stay responsive", as
   await page.goto("/review");
   await expect(page.getByText("Round 1 · 本轮结论", { exact: true })).toHaveCount(0);
   await page.goto("/knowledge");
-  await expect(page.locator('a[href^="/knowledge/"]')).toHaveCount(1);
+  await expect(page.locator('a[href^="/knowledge/"]')).toHaveCount(2);
 
   expect(pageErrors).toEqual([]);
   expect(consoleErrors).toEqual([]);

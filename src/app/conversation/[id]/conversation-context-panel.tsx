@@ -36,6 +36,7 @@ import {
   getStorageMode,
 } from "@/infrastructure/storage/storage-factory";
 import { drainPendingWritesOrThrow } from "@/infrastructure/storage/indexeddb/database";
+import { manualKnowledgeContent, verifyManualKnowledge } from "./manual-knowledge-persistence";
 
 const contextPlaceholders: Record<ConversationContextField, string> = {
   longTermBackground: "长期目标、稳定偏好、项目背景…",
@@ -94,6 +95,7 @@ export function ConversationContextPanel({
   const [saveStatus, setSaveStatus] =
     useState<AutosaveStatus>("unchanged");
   const [notice, setNotice] = useState<string | null>(null);
+  const [knowledgeId, setKnowledgeId] = useState<string | null>(null);
   const [nextActionTitle, setNextActionTitle] = useState("");
   const [tasks, setTasks] = useState<Task[]>([]);
   const [editorOpen, setEditorOpen] = useState(false);
@@ -257,9 +259,9 @@ export function ConversationContextPanel({
       setNotice("Overview 尚未保存成功，请重试后再创建 Knowledge。");
       return;
     }
-    const content = draftRef.current.currentState?.trim();
+    const content = manualKnowledgeContent(draftRef.current.currentState);
 
-    if (!content) {
+    if (content === null) {
       setNotice("请先填写当前总论。");
       return;
     }
@@ -274,19 +276,22 @@ export function ConversationContextPanel({
 
     if (!confirmed) return;
 
-    const result = new RoundKnowledgeService(
-      createKnowledgeCardStorage(),
-      createProposalStorage(),
-    ).createConversationManualWithResult(
+    const proposals = createProposalStorage();
+    const result = new RoundKnowledgeService(createKnowledgeCardStorage(), proposals).createConversationManualWithResult(
       currentConversation,
       title,
       content,
     );
-    setNotice(
-      result.created
-        ? "Conversation Overview 已保存为 Knowledge。"
-        : "相同来源与内容的 Knowledge 已存在，未重复创建。",
-    );
+    try {
+      const proposal = proposals.getById(result.card.proposalId);
+      if (!proposal) throw new Error("Manual Proposal is unavailable.");
+      await verifyManualKnowledge(result.card, proposal);
+      setKnowledgeId(result.card.id);
+      setNotice(result.created ? "Conversation Overview 已保存为 Knowledge。" : "相同来源与内容的 Knowledge 已存在，未重复创建。");
+    } catch {
+      setKnowledgeId(null);
+      setNotice("Knowledge 尚未确认持久化；Overview 已保留，请重试。");
+    }
   }
 
   function reloadTasks(service: TaskService) {
@@ -444,6 +449,7 @@ export function ConversationContextPanel({
           {notice ? (
             <span className="text-xs font-medium text-zinc-800" role="status">
               {notice}
+              {knowledgeId ? <> <Link className="font-semibold underline" href={`/knowledge/${knowledgeId}`}>打开 Knowledge</Link></> : null}
             </span>
           ) : null}
         </div>

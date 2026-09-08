@@ -1,3 +1,100 @@
+# PALOS v1.10.0 — Knowledge Productivity release closure
+
+## 2026-09-08 final audit and release handoff
+
+本轮以 `main = origin/main = v1.9.1^{}` = `5dbd5b03ae43ccd7667e144ed9d8ea27bb3f9a7c` 为基线，对已 qualified 的 Sprint 1 + Sprint 2 candidate 完成 final audit。审计前工作树恰好为 7 modified + 7 untracked、staged 为空且无第 15 个路径；未重新迁移或重做实现。
+
+### 用户可见闭环
+
+- Sprint 1：Knowledge Detail 常显保存时 evidence 与当前可定位来源；可信 Conversation/Round/Message backlink 分别复用既有 URL helper。来源删除后 Knowledge/evidence 仍可读，导航降级。
+- Sprint 2：Conversation Detail 全量展示关联 Knowledge，包含 Active/Archived，计数与列表一致。direct provenance 优先，仅 legacy card 缺 direct 时才使用唯一 Proposal ownership fallback。
+- Round 结论和 Conversation Overview 仍须 preview/confirm，使用既有 manual Applied Proposal bridge。durable verification 成功后才显示成功、提供 `/knowledge/{id}` 并触发 same-tab refresh。
+- failure 不清输入、不显示成功；committed-but-unverified 不补偿删除；retry/duplicate confirm 复用已有 card/proposal。AI Pending Proposal → Review → Knowledge 保持不变。
+
+### Final audit 结论
+
+- Provenance read model 不读取 Proposal，不做 fuzzy inference；dangling/foreign/duplicate/ambiguous/legacy fail closed。Message/Round 分别复用 `messageDeepLink()` / `roundDeepLink()`。
+- Message/Round provenance navigation 不更新 `lastOpenedAt`，普通 Conversation 打开仍正常更新；E2E 对七个 canonical stores 做导航前后零写入比较。
+- Conversation 关联 read model direct-first、fallback-only-when-missing、ambiguous fail closed、ID 去重与稳定排序均有 Core 回归。
+- `manual-knowledge-persistence.ts` 只调用 `putStores({ proposals: [proposal], "knowledge-cards": [card] })`；底层 `putStores` 只逐条 upsert 传入 records，不 clear、不 replace、不调用 `replaceStores` / `flushCachesToIndexedDB`，没有 whole-cache authority 或跨 tab collateral overwrite 回归。
+- durable write → authoritative Knowledge read-back → notify 顺序有故障注入测试；write failure、committed-but-unverified、retry 和 duplicate 均不执行补偿删除。
+- 新增三个 production helper 均有生产引用和测试；四个新增测试文件均被 Vitest/Playwright 发现，无 orphan/duplicate helper。
+- package/dependency、Entity/schema、IndexedDB version 1 / 七 stores、Storage/Provider contract、Proposal/Review lifecycle、Snapshot import/writer/comparator/ownership 均无变化。
+
+### Release scope files
+
+- Sprint 1 only：`ARCHITECTURE.md`、`HANDOFF.md`、Knowledge Detail、`knowledge-provenance.ts` 与两份 provenance tests。
+- Sprint 1 + Sprint 2 overlap：Conversation Detail、`v17-inline-autosave.spec.ts`。
+- Sprint 2 only：Conversation Context/Round panels、`manual-knowledge-persistence.ts`、`conversation-knowledge.ts` 与两份 tests。
+- Release metadata 新增：`PROJECT.md`、`ROADMAP.md`、`CHANGELOG.md`；`ARCHITECTURE.md` / `HANDOFF.md` 从 candidate 更新为 release closure。
+
+### Remaining limitations and accepted constraints
+
+- 无 cross-tab live refresh/subscription、background sync 或 CRDT。
+- 无 Knowledge update/revision workflow；无 manual Message→Knowledge draft workflow。
+- P1 transcript concurrency、LocalStorage migration 覆盖提示、dormant Round CRUD backlog 继续 deferred。
+- LocalStorage debug/migration、authoritative full-read lock 成本和 post-commit committed-but-unverified constraints 保持既有接受状态。
+- Cloud Playwright/Turbopack 需要 `127.0.0.1:3100` 本地端口监听权限；不修改业务代码规避。
+
+### Release plan and gates
+
+- Final metadata 后全量 `npm test -- --run`：26 files / 443 tests passed。
+- `npm run test:e2e`：3/3 passed，49.8s；Cloud 沙箱内需允许 `127.0.0.1:3100` 本地监听。
+- `npm run lint`：passed。
+- `npm run build`：passed，TypeScript 与 19 routes；首次默认沙箱因 Turbopack 内部端口监听 `EPERM`，使用既定本地监听权限后通过。
+- `git diff --check`：passed。
+- 全部门禁通过后使用唯一 commit `feat: complete knowledge productivity workflow`，创建 annotated tag `v1.10.0`，atomic push `main` + tag；禁止 force/rebase/额外 branch/PR。
+
+---
+
+# PALOS v1.10.0 Sprint 1 candidate — Knowledge 来源可回看
+
+## 2026-09-07 implementation handoff（未提交、未做 release closure）
+
+本轮从 clean `main = origin/main = v1.9.1^{}` = `5dbd5b03ae43ccd7667e144ed9d8ea27bb3f9a7c` 开始，只实现 Knowledge provenance 的只读解析与导航体验。
+
+### 用户流程
+
+Knowledge Detail 现在始终显示“来源”，并明确拆为“保存时证据”和“当前可定位来源”。保存时的 sourceFile、Message 数量和 evidence excerpt 即使 Conversation/Round/Message 已删除仍可查看；当前 Conversation、Round、Message 只有通过唯一 ID 与 owner 校验后才显示链接。Message 链接进入 v1.9.1 Message anchor；可唯一映射 Round 时只作为补充入口，Round URL 沿用既有 workspace deep link。
+
+### 解析与安全边界
+
+- `knowledge-provenance.ts` 是纯 Core read model，只读取 KnowledgeCard 自身 `source*` 字段及当前 Conversation/Round/Message；Proposal 不参与解析，因此 Proposal 删除后 provenance 仍可用。
+- Conversation 必须按 `sourceConversationId` 唯一存在；Round 必须唯一存在、owner Conversation 可定位，并在 Knowledge 保存 Conversation ID 时与其一致。
+- Message 必须唯一存在、Knowledge 已保存 Conversation owner 且二者一致。duplicate sourceMessageIds、duplicate current entity、dangling、foreign、缺 owner 均显示明确 unavailable 状态且无链接。
+- Message 使用 `messageDeepLink()`；Round 使用 `roundDeepLink()`。不做 fuzzy content match，不新增 URL 语义。
+- Conversation Detail 在 Message 或 Round deep-link 请求下都跳过 `lastOpenedAt` 更新；UI 查看和 Link 导航不写 canonical 数据。普通无参数打开行为以及 Knowledge 创建/edit/archive/duplicate/export 逻辑未改。
+
+### 修改文件
+
+- `src/core/services/knowledge-provenance.ts`：集中 provenance 只读解析与可信状态。
+- `src/app/knowledge/[id]/knowledge-detail.tsx`：常显来源双区，移除 Proposal provenance fallback，渲染可信链接与降级状态。
+- `src/app/conversation/[id]/conversation-detail.tsx`：既有 Round deep link 与 Message deep link 一样保持只读，不更新 `lastOpenedAt`。
+- `tests/knowledge-provenance.test.ts`：完整/部分/legacy、dangling/foreign/duplicate、Proposal/源实体删除、只读与 URL 契约覆盖。
+- `tests/knowledge-detail-provenance-ui.test.ts`：Detail 分区、缺失状态和 Core resolver wiring 回归。
+- `tests/e2e/v17-inline-autosave.spec.ts`：复用既有真实 fixture，增加 Knowledge Detail → Message anchor → Round deep link。
+- `ARCHITECTURE.md` / `HANDOFF.md`：candidate 架构与交接记录。
+
+### 验证记录
+
+- 定向 Vitest：3 files / 16 tests passed。
+- 定向 Playwright：1/1 passed。首次受限沙箱无法监听 `127.0.0.1:3100`，获准本机监听后通过；首次业务断言误用了 Knowledge 正文，改为真实 evidence 摘录后通过。最终 E2E 还逐 store 比较两次导航前后的七个 canonical stores，均保持不变。
+- 全量 `npm test -- --run`：24 files / 437 tests passed。
+- 全量 `npm run test:e2e`：3/3 passed。
+- `npm run lint`：passed。
+- `npm run build`：passed，TypeScript 与 19 routes 通过。
+- `git diff --check`：passed。
+- Scope audit：package dependency、Entity schema、IndexedDB version/store 与 Storage/Provider abstraction 均零变化。
+
+### 限制与下一步边界
+
+- 当前来源解析基于本 tab 已加载的本地 canonical cache；本 Sprint 不增加 cross-tab live sync。
+- Legacy Knowledge 没有保存定位字段时只显示明确缺失状态，不从 Proposal 或相似文本重建来源。
+- duplicate/foreign/dangling 数据不提供部分猜测链接；修复历史数据不在本 Sprint。
+- 未发现需要 ADR 的新架构决策，也未发现阻断 Sprint 2 的问题。
+
+---
+
 # PALOS v1.9.1 — Raw Message Anchor patch release
 
 ## 2026-09-07 final pre-release audit
