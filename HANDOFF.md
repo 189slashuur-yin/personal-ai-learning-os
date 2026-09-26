@@ -1,3 +1,55 @@
+# PALOS v1.10.1 — Stabilization release
+
+## 2026-09-26 release handoff
+
+基线为 `v1.10.0^{}` / `06a87b170ef392c456ccf95c4348bcc962969e9b`。本版按 **7 个 P1 + 1 个 P2** 收口，修复明细和审计边界见紧随其后的 stabilization candidate 记录。它是 bugfix patch，无新 feature、Entity/schema、IndexedDB version/七个 store、Provider/Storage contract、package 或 immutable Snapshot 语义变化。ADR-005 是独立未跟踪的 v1.11 Sprint 0 草稿，不属于本次提交或 tag。
+
+延期事项的唯一当前清单见 [ROADMAP.md](./ROADMAP.md#reconciled-deferred-product-backlog-v1101)；其中历史用户反馈仅明确标注有对话证据的 More 菜单问题，其余为当前代码/文档审计推导或待人工验证。普通 transcript 并发已在本版修复，不再列为未修技术债。此前 v1.8.3/v1.10.0 章节中的 deferred 描述保留为当时的历史记录。
+
+Release gates：Vitest 27 files / 457 passed；Playwright 4/4；lint、build、`git diff --check` passed。远端 commit/tag 核验见本次发布任务的最终报告。工作区发布后可保留且仅保留未跟踪的 ADR-005 草稿。
+
+---
+
+# PALOS post-v1.10.0 — Bug Burn-down / Stabilization candidate
+
+## 2026-09-09 stabilization handoff（未提交、未发版）
+
+本轮以 `main = origin/main = v1.10.0^{}` = `06a87b170ef392c456ccf95c4348bcc962969e9b` 为基线，执行 post-v1.10.0 的并发、原子性、耐久性和关键用户路径审计。开始时唯一工作树内容是用户已有且未跟踪的 `docs/adr/ADR-005-knowledge-context-reuse.md`；该草稿保持未修改。本轮不包含 v1.11 功能、版本号、依赖、schema、IndexedDB version/store、真实 AI Provider、commit、tag 或 push。
+
+### 已确认并修复
+
+- 普通 transcript 写入现在在同一 authoritative IndexedDB transaction 中校验 Conversation、Source、Message 与 Round baseline。Message 编辑、TXT/manual append、ChatGPT append 和 Source autosave 均 fail closed，避免跨 tab stale writer 覆盖；失败在 UI 可见并保留草稿。
+- 新 Conversation 导入现在将 Conversation、Source、Message、Round 作为一次跨 store 原子 mutation；ChatGPT external identity/metadata 同步写入，不再通过后续补写形成 partial aggregate。故障注入证明 transaction abort 后四个 store 都不留记录。
+- 重新生成 Messages 在已有 Message/Round 时明确说明影响并二次确认，随后原子替换 Messages 且清空关联 Rounds，避免 Round 继续引用已删除 Message。ChatGPT Round 编号改为 `max(order) + 1`，兼容有缺口的历史 order。
+- Analyzer 生成 Proposal 的成功状态现在必须经过 canonical write、authoritative read-back 和 cache reload 后的再次验证；失败不会设置 current pointer 或展示虚假成功，且 Conversation 与 `/analysis` 的初次分析及 retry 路径一致。
+- Review 接受/拒绝现在对 Proposal 与目标 KnowledgeCard 做 transaction 内的 authoritative stale-baseline 校验，并在同一 transaction 内写 Proposal/KnowledgeCard；写后 read-back 与 reload verification 成功后才导航。并发 reject、目标 Knowledge 被另一 tab 修改、事务中止以及 committed-but-unverified 均 fail closed，不做危险补偿回滚。
+- `knowledge-update` Proposal 缺失目标 KnowledgeCard 时不再退化为创建新卡片，而是显示明确错误且零 canonical mutation。
+- Legacy LocalStorage → IndexedDB 迁移 UI 现在明确是七个 store 的“完整替换”，同时展示来源与将被替换的目标计数；执行前重新读取双方计数，任一侧在 preview 后变化即取消并要求重新预览。
+
+### 审计结论与边界
+
+- Snapshot import 的 new/append/same/blocked、ownership、history/diff、重复 URL 导航和 Message/Round deep link 已由现有 Core 与完整 E2E 覆盖；未复现新的 canonical 写入或路由缺陷。
+- App Restore 保留既有双确认、preflight、backup、atomic replace 和 committed-but-unverified fail-closed 语义；故障注入已有覆盖，本轮未改。
+- `replaceStores` 的生产调用仍只存在于明确的 migration/restore/clear 流程；普通用户路径使用 scoped/authoritative writer。`flushCachesToIndexedDB` 无生产调用。
+- `RoundService` 的 create/delete/merge/split/reorder/rebind/updateRound 当前无生产调用，因此记录为 dormant P2/feature debt，不为本轮引入大规模重构。
+- 长 Conversation 的虚拟化/性能优化、完整 Knowledge update/revision workflow、cross-tab live subscription/CRDT 仍属 Feature/Optimization，不是本轮已复现 blocker。
+
+### 关键文件
+
+- `src/infrastructure/storage/indexeddb/idb-conversation-transcript-mutation-writer.ts` 与 transcript/import services：aggregate baseline、原子导入与 scoped mutation。
+- `src/app/conversation/[id]/proposal-persistence.ts`、`src/app/review/review-persistence.ts`：Proposal/Review authoritative persistence 与 durable verification。
+- Conversation、Analysis、Review、Import、Data Management UI：失败可见、确认文案和 stale preflight。
+- `tests/indexeddb-reliability.test.ts`、`tests/post-v110-stabilization-ui.test.ts`、`tests/e2e/review-workflow.spec.ts`：并发、事务中止、耐久性、迁移 UX 与真实 Review 闭环回归。
+
+### 验证记录
+
+- 全量 Vitest：27 files / 457 tests passed。
+- 全量 Playwright：4/4 passed；覆盖 Demo Analyzer → Proposal → Review accept → Knowledge、reject 与 reload，且收集 console/page errors。
+- `npm run lint`、`npm run build` 与 `git diff --check` 均通过；Turbopack build 与 Playwright 在受限环境中需要既定的本地端口监听权限。
+- 当前结论：本轮范围内没有已知 release blocker；上述 dormant API 与产品能力缺口作为非阻断 backlog 保留。
+
+---
+
 # PALOS v1.10.0 — Knowledge Productivity release closure
 
 ## 2026-09-08 final audit and release handoff

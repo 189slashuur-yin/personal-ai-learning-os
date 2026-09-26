@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import type { Proposal } from "@/core/entities/proposal";
+import type { KnowledgeCard } from "@/core/entities/knowledge-card";
 import type { Conversation } from "@/core/entities/conversation";
 import type { Message } from "@/core/entities/message";
 import type { Round } from "@/core/entities/round";
@@ -21,8 +22,8 @@ import {
   ensureIndexedDBLoaded,
   getStorageMode,
 } from "@/infrastructure/storage/storage-factory";
-import { drainPendingWritesOrThrow } from "@/infrastructure/storage/indexeddb/database";
 import { CapabilityBadges } from "@/app/capability-badges";
+import { persistIndexedDBReviewDecision } from "./review-persistence";
 
 type ReviewState =
   | { status: "loading" }
@@ -45,6 +46,7 @@ function formatDate(value: string) {
 export function ReviewProposal({ proposalId }: { proposalId?: string }) {
   const router = useRouter();
   const [state, setState] = useState<ReviewState>({ status: "loading" });
+  const [reviewError, setReviewError] = useState<string | null>(null);
 
   useEffect(() => {
     const loadTimer = window.setTimeout(() => {
@@ -113,10 +115,28 @@ export function ReviewProposal({ proposalId }: { proposalId?: string }) {
     );
   }
 
-  async function persistCanonicalReviewState() {
+  async function persistReviewDecision(
+    expectedProposal: Proposal,
+    proposal: Proposal,
+    card?: KnowledgeCard,
+    expectedCard?: KnowledgeCard,
+  ) {
+    const storages = createStorageInstances();
     if (getStorageMode() === "indexedDB") {
-      await drainPendingWritesOrThrow();
+      await persistIndexedDBReviewDecision(
+        expectedProposal,
+        proposal,
+        card,
+        expectedCard,
+      );
+      return;
     }
+    if (card) {
+      const existing = storages.knowledgeCards.getById(card.id);
+      if (existing) storages.knowledgeCards.update(card);
+      else storages.knowledgeCards.save(card);
+    }
+    storages.proposals.saveCurrent(proposal);
   }
 
   async function handleAccept() {
@@ -127,23 +147,54 @@ export function ReviewProposal({ proposalId }: { proposalId?: string }) {
     const storages = createStorageInstances();
     const proposalStorage = storages.proposals;
     const knowledgeStorage = storages.knowledgeCards;
-    if (state.proposal.purpose === "knowledge-update" && state.proposal.targetKnowledgeId) {
-      const updated = new RoundKnowledgeService(knowledgeStorage, proposalStorage).applyUpdate(state.proposal);
-      if (updated) {
-        proposalStorage.saveCurrent(applyProposal(acceptProposal(state.proposal)));
-        await persistCanonicalReviewState();
-        router.push(`/knowledge/${updated.id}`);
+    setReviewError(null);
+    if (state.proposal.purpose === "knowledge-update") {
+      const targetCard = state.proposal.targetKnowledgeId
+        ? knowledgeStorage.getById(state.proposal.targetKnowledgeId)
+        : null;
+      const updated = new RoundKnowledgeService(
+        knowledgeStorage,
+        proposalStorage,
+      ).prepareUpdate(state.proposal);
+      if (!targetCard || !updated) {
+        setReviewError(
+          "目标 Knowledge 已不存在，更新建议未接受，也不会错误创建新的 Knowledge。",
+        );
         return;
       }
+      const appliedProposal = applyProposal(acceptProposal(state.proposal));
+      try {
+        await persistReviewDecision(
+          state.proposal,
+          appliedProposal,
+          updated,
+          targetCard,
+        );
+        router.push(`/knowledge/${updated.id}`);
+      } catch (error) {
+        setReviewError(
+          error instanceof Error
+            ? `接受失败：${error.message}`
+            : "接受失败，持久化状态未确认。",
+        );
+      }
+      return;
     }
     const existingCard = knowledgeStorage.getByProposalId(state.proposal.id);
 
     if (existingCard) {
       const appliedProposal = applyProposal(state.proposal);
-      proposalStorage.saveCurrent(appliedProposal);
-      setState({ ...state, proposal: appliedProposal });
-      await persistCanonicalReviewState();
-      router.push(`/knowledge/${existingCard.id}`);
+      try {
+        await persistReviewDecision(state.proposal, appliedProposal);
+        setState({ ...state, proposal: appliedProposal });
+        router.push(`/knowledge/${existingCard.id}`);
+      } catch (error) {
+        setReviewError(
+          error instanceof Error
+            ? `接受失败：${error.message}`
+            : "接受失败，持久化状态未确认。",
+        );
+      }
       return;
     }
 
@@ -152,11 +203,21 @@ export function ReviewProposal({ proposalId }: { proposalId?: string }) {
     const knowledgeCard = createKnowledgeCard(acceptedProposal);
 
     if (knowledgeCard) {
-      knowledgeStorage.save(knowledgeCard);
-      new BrowserAppEventLogStorage().record("knowledge created", knowledgeCard.id);
-      proposalStorage.saveCurrent(applyProposal(acceptedProposal));
-      await persistCanonicalReviewState();
-      router.push(`/knowledge/${knowledgeCard.id}`);
+      try {
+        await persistReviewDecision(
+          state.proposal,
+          applyProposal(acceptedProposal),
+          knowledgeCard,
+        );
+        new BrowserAppEventLogStorage().record("knowledge created", knowledgeCard.id);
+        router.push(`/knowledge/${knowledgeCard.id}`);
+      } catch (error) {
+        setReviewError(
+          error instanceof Error
+            ? `接受失败：${error.message}`
+            : "接受失败，持久化状态未确认。",
+        );
+      }
       return;
     }
 
@@ -169,9 +230,17 @@ export function ReviewProposal({ proposalId }: { proposalId?: string }) {
     }
 
     const rejectedProposal = rejectProposal(state.proposal);
-    createStorageInstances().proposals.saveCurrent(rejectedProposal);
-    await persistCanonicalReviewState();
-    setState({ ...state, proposal: rejectedProposal });
+    setReviewError(null);
+    try {
+      await persistReviewDecision(state.proposal, rejectedProposal);
+      setState({ ...state, proposal: rejectedProposal });
+    } catch (error) {
+      setReviewError(
+        error instanceof Error
+          ? `拒绝失败：${error.message}`
+          : "拒绝失败，持久化状态未确认。",
+      );
+    }
   }
 
   const isPending = state.proposal.status === "Pending";
@@ -185,6 +254,11 @@ export function ReviewProposal({ proposalId }: { proposalId?: string }) {
 
   return (
     <article className="mt-8 max-w-2xl space-y-6 rounded-xl border border-zinc-200 bg-white p-6">
+      {reviewError ? (
+        <p className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700" role="alert">
+          {reviewError}
+        </p>
+      ) : null}
       <div>
         <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500">
           {state.proposal.generatedBy}

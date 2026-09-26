@@ -2,7 +2,7 @@
 
 ## Current release context
 
-- Current Version：PALOS v1.10.0 Knowledge Productivity release
+- Current Version：PALOS v1.10.1 Stabilization patch release（无 schema/store/contract 变化）
 - Release Baseline：v1.9.1 / `5dbd5b03`
 - Current Focus：Knowledge provenance read model、全量 discoverability 与 durable manual creation confirmation
 - Automated Status：本次发布门禁结果见 HANDOFF

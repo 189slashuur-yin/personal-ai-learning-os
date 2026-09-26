@@ -169,6 +169,13 @@ export class RoundKnowledgeService {
   }
 
   applyUpdate(proposal: Proposal) {
+    const updated = this.prepareUpdate(proposal);
+    if (!updated) return null;
+    this.knowledge.update(updated);
+    return updated;
+  }
+
+  prepareUpdate(proposal: Proposal) {
     if (!proposal.targetKnowledgeId) return null;
     const card = this.knowledge.getById(proposal.targetKnowledgeId);
     if (!card) return null;
@@ -177,7 +184,6 @@ export class RoundKnowledgeService {
       ...card, content: proposal.summary, summary: proposal.summary, updatedAt: timestamp,
       previousContentSnapshots: [...(card.previousContentSnapshots ?? []), { content: card.content, summary: card.summary, capturedAt: timestamp }],
     };
-    this.knowledge.update(updated);
     return updated;
   }
 }

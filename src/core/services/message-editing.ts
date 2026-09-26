@@ -40,6 +40,9 @@ export async function editMessage(
   if (!conversation) {
     return null;
   }
+  const expectedMessages = storages.messages.getByConversationId(
+    conversation.id,
+  );
 
   const timestamp = new Date().toISOString();
   const nextMessage: Message = {
@@ -57,6 +60,10 @@ export async function editMessage(
     {
       conversationIds: [conversation.id],
       operation,
+      expected: {
+        conversations: [conversation],
+        messages: expectedMessages,
+      },
       put: {
         conversations: [nextConversation],
         messages: [nextMessage],

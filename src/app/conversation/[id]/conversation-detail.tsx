@@ -78,6 +78,7 @@ import { ConversationWorkspaceMode } from "./conversation-workspace-mode";
 import { ConversationContextPanel } from "./conversation-context-panel";
 import { ConversationSnapshotHistory } from "./conversation-snapshot-history";
 import { RoundNavigator } from "./round-navigator";
+import { persistIndexedDBGeneratedProposal } from "./proposal-persistence";
 import { CapabilityBadges } from "@/app/capability-badges";
 
 type ConversationDetailProps = {
@@ -106,7 +107,7 @@ type DetailState =
       versions: ConversationVersion[];
     };
 
-type SaveStatus = "saved" | "editing";
+type SaveStatus = "saved" | "editing" | "error";
 type MessageView = "timeline" | "qa-pairs";
 type QAPairSort = "order" | "updated" | "question";
 
@@ -204,6 +205,7 @@ export function ConversationDetail({
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [messageDraft, setMessageDraft] = useState("");
   const [savedMessageId, setSavedMessageId] = useState<string | null>(null);
+  const [transcriptError, setTranscriptError] = useState<string | null>(null);
   const [snapshotName, setSnapshotName] = useState("");
   const [snapshotDescription, setSnapshotDescription] = useState("");
   const [restoreStatus, setRestoreStatus] = useState<string | null>(null);
@@ -570,11 +572,18 @@ export function ConversationDetail({
         };
 
         const conversationStorage = createConversationStorage();
+        const expectedSources = sourceStorage
+          .getAll()
+          .filter((source) => source.conversationId === state.conversation.id);
         await executeShareSnapshotTranscriptMutation(
           sourceStorage,
           {
             conversationIds: [state.conversation.id],
             operation: "autosave Conversation Source",
+            expected: {
+              conversations: [state.conversation],
+              sources: expectedSources,
+            },
             put: {
               conversations: [nextConversation],
               sources: [nextSource],
@@ -603,6 +612,7 @@ export function ConversationDetail({
         );
       })().catch((error) => {
         console.error("Conversation Source autosave failed:", error);
+        setSaveStatus("error");
         if (error instanceof ShareSnapshotMutationBlockedError) {
           setState((currentState) =>
             currentState.status === "ready"
@@ -673,6 +683,14 @@ export function ConversationDetail({
     process.env.NEXT_PUBLIC_PALOS_ANALYZER_DIAGNOSTICS,
   );
 
+  async function persistGeneratedProposal(proposal: Proposal) {
+    if (getStorageMode() === "indexedDB") {
+      await persistIndexedDBGeneratedProposal(proposal);
+    } else {
+      createProposalStorage().saveCurrent(proposal);
+    }
+  }
+
   function scrollToAnchor(anchorId: string) {
     const element = document.getElementById(anchorId);
     if (element) {
@@ -707,7 +725,16 @@ export function ConversationDetail({
       ...result.proposal,
       sourceType: "conversation",
     };
-    createProposalStorage().saveCurrent(conversationProposal);
+    try {
+      await persistGeneratedProposal(conversationProposal);
+    } catch (error) {
+      setAnalyzerError(
+        error instanceof Error
+          ? `Proposal 保存失败：${error.message}`
+          : "Proposal 保存失败，持久化状态未确认。",
+      );
+      return;
+    }
     setAnalyzerError(null);
     setAnalyzerSuccess(`已从 Source 生成整理建议「${conversationProposal.title}」。请在 Review 页面审核后确认加入 Knowledge。`);
     setState({
@@ -728,9 +755,16 @@ export function ConversationDetail({
       setAnalyzerError(result.run.error?.message ?? "Round Analyzer 运行失败。");
       return;
     }
-    const proposalStorage = createProposalStorage();
-    proposalStorage.save(result.proposal);
-    proposalStorage.saveCurrent(result.proposal);
+    try {
+      await persistGeneratedProposal(result.proposal);
+    } catch (error) {
+      setAnalyzerError(
+        error instanceof Error
+          ? `Proposal 保存失败：${error.message}`
+          : "Proposal 保存失败，持久化状态未确认。",
+      );
+      return;
+    }
     setAnalyzerError(null);
     setAnalyzerSuccess(`已从 Round「${round.title}」生成整理建议。请在 Review 页面审核后确认加入 Knowledge。`);
     setState({ ...state, proposals: [result.proposal, ...state.proposals] });
@@ -833,9 +867,16 @@ export function ConversationDetail({
       return;
     }
 
-    const proposalStorage = createProposalStorage();
-    proposalStorage.saveFromMessages(result.proposal);
-    proposalStorage.saveCurrent(result.proposal);
+    try {
+      await persistGeneratedProposal(result.proposal);
+    } catch (error) {
+      setAnalyzerError(
+        error instanceof Error
+          ? `Proposal 保存失败：${error.message}`
+          : "Proposal 保存失败，持久化状态未确认。",
+      );
+      return;
+    }
     setAnalyzerError(null);
     setAnalyzerSuccess(`已从 ${selectedMessages.length} 条选中 Messages 生成整理建议。请在 Review 页面审核后确认加入 Knowledge。`);
     setState({
@@ -871,7 +912,16 @@ export function ConversationDetail({
         return;
       }
 
-      createProposalStorage().saveCurrent(result.proposal);
+      try {
+        await persistGeneratedProposal(result.proposal);
+      } catch (error) {
+        setAnalyzerError(
+          error instanceof Error
+            ? `Proposal 保存失败：${error.message}`
+            : "Proposal 保存失败，持久化状态未确认。",
+        );
+        return;
+      }
       setAnalyzerError(null);
       setState({
         ...state,
@@ -902,9 +952,16 @@ export function ConversationDetail({
       return;
     }
 
-    const proposalStorage = createProposalStorage();
-    proposalStorage.saveFromMessages(result.proposal);
-    proposalStorage.saveCurrent(result.proposal);
+    try {
+      await persistGeneratedProposal(result.proposal);
+    } catch (error) {
+      setAnalyzerError(
+        error instanceof Error
+          ? `Proposal 保存失败：${error.message}`
+          : "Proposal 保存失败，持久化状态未确认。",
+      );
+      return;
+    }
     setAnalyzerError(null);
     setState({
       ...state,
@@ -960,9 +1017,9 @@ export function ConversationDetail({
     }
 
     if (
-      state.messages.length > 0 &&
+      (state.messages.length > 0 || state.rounds.length > 0) &&
       !window.confirm(
-        `当前已有 ${state.messages.length} 条 Message。继续将覆盖现有 Messages，确定吗？`,
+        `当前已有 ${state.messages.length} 条 Message、${state.rounds.length} 个关联 Round。继续会替换 Messages 并删除这些 Round（包括其备注、结论与固定参考），确定吗？`,
       )
     ) {
       return;
@@ -976,34 +1033,54 @@ export function ConversationDetail({
       : parseMessagesFromRawText(draft, state.conversation.id);
     const sourceStorage = createSourceStorage();
     const messageStorage = createMessageStorage();
+    const roundStorage = createRoundStorage();
+    setTranscriptError(null);
     try {
       await executeShareSnapshotTranscriptMutation(
         sourceStorage,
         {
           conversationIds: [state.conversation.id],
           operation: "regenerate Conversation Messages",
+          expected: {
+            messages: state.messages,
+            rounds: state.rounds,
+          },
           replaceMessages: [
             {
               conversationId: state.conversation.id,
               messages,
             },
           ],
+          replaceRounds: [
+            {
+              conversationId: state.conversation.id,
+              rounds: [],
+            },
+          ],
         },
-        () =>
+        () => {
           messageStorage.replaceByConversationId(
             state.conversation.id,
             messages,
-          ),
+          );
+          roundStorage.replaceByConversationId(state.conversation.id, []);
+        },
       );
     } catch (error) {
       console.error("Message regeneration failed:", error);
+      setTranscriptError(
+        error instanceof Error
+          ? `Messages 重新生成失败：${error.message}`
+          : "Messages 重新生成失败，请重试。",
+      );
       if (error instanceof ShareSnapshotMutationBlockedError) {
         setState({ ...state, shareSnapshotOwned: true });
       }
       return;
     }
     setSelectedMessageIds(new Set());
-    setState({ ...state, messages });
+    setState({ ...state, messages, rounds: [], roundCount: 0 });
+    setRoundWorkspaceRevision((current) => current + 1);
   }
 
   function toggleMessage(messageId: string) {
@@ -1119,6 +1196,7 @@ export function ConversationDetail({
     }
 
     let result;
+    setTranscriptError(null);
     try {
       result = await editMessage(messageId, messageDraft, {
         conversations: createConversationStorage(),
@@ -1127,6 +1205,11 @@ export function ConversationDetail({
       });
     } catch (error) {
       console.error("Message editing failed:", error);
+      setTranscriptError(
+        error instanceof Error
+          ? `Message 保存失败：${error.message}`
+          : "Message 保存失败，请重试。",
+      );
       if (error instanceof ShareSnapshotMutationBlockedError) {
         setState({ ...state, shareSnapshotOwned: true });
       }
@@ -1932,11 +2015,19 @@ export function ConversationDetail({
             </div>
             <p
               className={
-                saveStatus === "saved" ? "text-emerald-700" : "text-amber-700"
+                saveStatus === "saved"
+                  ? "text-emerald-700"
+                  : saveStatus === "error"
+                    ? "text-red-700"
+                    : "text-amber-700"
               }
               role="status"
             >
-              {saveStatus === "saved" ? "Saved" : "Editing..."}
+              {saveStatus === "saved"
+                ? "Saved"
+                : saveStatus === "error"
+                  ? "Save failed — edit to retry"
+                  : "Editing..."}
             </p>
           </div>
         </div>
@@ -1982,6 +2073,14 @@ export function ConversationDetail({
             全部原文
           </button>
         </div>
+        {transcriptError ? (
+          <p
+            className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+            role="alert"
+          >
+            {transcriptError}
+          </p>
+        ) : null}
         {messageTimelineMode === "collapsed" ? (
           <p className="text-sm text-zinc-500">原始消息已隐藏。Round 是默认阅读与操作入口。点击「预览原文」查看前 {PREVIEW_MESSAGE_COUNT} 条，或「全部原文」查看完整内容。</p>
         ) : (

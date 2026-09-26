@@ -15,13 +15,13 @@ PALOS 面向需要与 AI 长期协作的个人用户。产品要解决的不是�
 
 ## 当前阶段
 
-截至 2026-09-08，PALOS `v1.10.0` 收口 Knowledge Productivity workflow，在 v1.9.1 的可信 Message/Round anchor 上补全 Knowledge 来源回看、Conversation 全量发现和可靠人工创建反馈。
+截至 2026-09-26，PALOS `v1.10.1` 在 v1.10.0 Knowledge Productivity 基础上收口 7 个 P1 + 1 个 P2 正确性问题；本版无新功能，延期产品事项见 ROADMAP。
 
-- Current Version：PALOS v1.10.0 Knowledge Productivity release
-- Release Metadata：annotated tag `v1.10.0`；release baseline `v1.9.1` / `5dbd5b03ae43ccd7667e144ed9d8ea27bb3f9a7c`
+- Current Version：PALOS v1.10.1 Stabilization patch release
+- Release Metadata：annotated tag `v1.10.1`；release baseline `v1.10.0` / `06a87b170ef392c456ccf95c4348bcc962969e9b`
 - Current Focus：Knowledge saved evidence → trusted source backlink；Conversation → all related Knowledge；manual Round/Overview → durable Knowledge result
 - Automated Status：发布前重新运行 Vitest / Playwright / lint / build / diff-check，结果见 HANDOFF
-- Deferred：cross-tab live refresh、Knowledge update/revision、manual Message→Knowledge draft，以及 v1.8.3 P1/P2 consistency backlog
+- Deferred：cross-tab live refresh、Knowledge revision、manual Message→Knowledge draft 及 ROADMAP 中的 UX/能力/技术债清单；普通 transcript 并发与 migration 提示已在 v1.10.1 修复
 
 v1.10.0 将保存时 evidence 与当前可定位来源分离。Knowledge Detail 只根据 KnowledgeCard 自身 `source*` 字段解析 Conversation/Round/Message backlink；dangling、foreign、duplicate、ambiguous 和 legacy 数据 fail closed，Proposal 删除不影响已保存 evidence。Conversation Detail 全量列出 direct provenance 命中的 Knowledge，只有 direct 缺失时才通过唯一 Proposal ownership 兼容 legacy 卡。
 

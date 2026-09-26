@@ -4,11 +4,39 @@
 
 ## Current release
 
-- Current Version：PALOS v1.10.0 Knowledge Productivity release
-- Current Focus：Knowledge provenance、Conversation 全量发现与可靠人工创建闭环
-- Release Metadata：annotated tag `v1.10.0`；release baseline `v1.9.1` / `5dbd5b03`
-- Automated Status：本次发布门禁结果见 HANDOFF
-- Scope Guard：P1/P2 consistency backlog、cross-tab live subscription、Knowledge revision/update 与 manual Message draft 均保持 deferred
+- Current Version：PALOS v1.10.1 Stabilization patch release
+- Current Focus：7 个 P1 + 1 个 P2 正确性修复及延期产品清单收口；无新 feature
+- Release Metadata：annotated tag `v1.10.1`；release baseline `v1.10.0` / `06a87b17`
+- Automated Status：本次发布门禁结果见 HANDOFF 与发布任务最终报告
+- Scope Guard：ADR-005 / v1.11 Knowledge Context Reuse 不在本版；延期事项见下方清单
+
+## Reconciled deferred product backlog (v1.10.1)
+
+此表是当前待办入口，按 repo 与历史 HANDOFF/ROADMAP 重新归类。**Needs manual validation** 表示尚未确认当前版本存在缺陷，不能视作 confirmed bug；**Confirmed missing** 表示现有实现未覆盖；**Planned** 表示明确的后续能力；**Technical debt** 表示已接受的实现约束。来源列仅将证据明确的 More 菜单标为历史用户反馈，其他均为当前代码/文档审计或产品验收问题。
+
+| 分组 | 事项 | 状态 | 来源/下一步验证 |
+| --- | --- | --- | --- |
+| UX / Manual validation | More menu 布局、overflow、操作入口位置 | Needs manual validation | 历史用户反馈；复测当前宽/窄屏展开与是否挤布局 |
+| UX / Manual validation | 长 Timeline 可用性 | Needs manual validation | 当前已有 Message/Round anchor；长列表体验需实测，virtualization 另列 |
+| UX / Manual validation | Continue Import 入口、成功反馈与重复导入体验 | Needs manual validation | 审计现有 Import 流程后用真实重复导入验证 |
+| UX / Manual validation | Snapshot History / Conversation Version / App Restore 的统一版本管理体验 | Needs manual validation | 三种语义均存在；验证命名、入口与影响范围能否理解 |
+| UX / Manual validation | Overview / Summary / Note / Context / Conclusion 概念清晰度 | Needs manual validation | 文档定义存在；验证是否重复或造成认知负担 |
+| UX / Manual validation | Settings 数据管理简化 | Needs manual validation | 正确性提示已加强；验证底层术语是否过多 |
+| UX / Manual validation | Search relevance/noise 与结果有用性 | Needs manual validation | 已有关键词、fuzzy、过滤和多类型结果；用真实数据评估 |
+| UX / Manual validation | Analyzer / Proposal / Review 的概念与入口 | Needs manual validation | 保留人工 Review 边界；验证用户是否理解建议为何不直接成为 Knowledge |
+| UX / Manual validation | Conversation sorting | Needs manual validation | 核实当前排序选项是否满足实际组织需求 |
+| UX / Manual validation | Workspace / 多级 Folder UX | Needs manual validation | 早期路线记录多层能力；复测当前层级、导航与过滤，不预判为缺失 |
+| Planned capabilities | Knowledge → Context Reuse | Planned | ADR-005 / v1.11 Sprint 0 草稿；本版不实现 |
+| Planned capabilities | Knowledge revision lifecycle | Planned | 当前仅有局部 update/snapshot primitive；完整用户流程待设计 |
+| Planned capabilities | Manual Message → Knowledge | Confirmed missing | 现有人工路径来自 Round/Overview；需要单独设计草稿与 provenance |
+| Planned capabilities | cross-tab live refresh | Planned | 当前通过冲突保护避免覆盖，不提供实时订阅刷新 |
+| Planned capabilities | Timeline virtualization | Planned | 当前 Full Raw Timeline 无 virtualization；性能优化待压测 |
+| Planned capabilities | Daily Sync / continuous import | Needs manual validation | 先核对现有导入/自动化范围，再确定是否作为新能力 |
+| Technical debt / accepted constraints | dormant Round CRUD authority | Technical debt | create/delete/merge/split/reorder/rebind 无生产 caller；启用前补 guard |
+| Technical debt / accepted constraints | LocalStorage legacy/debug mode | Technical debt | 不具备 IndexedDB transaction 同等级一致性 |
+| Technical debt / accepted constraints | full-read lock 与 post-commit verification | Technical debt | authoritative transaction 使用 full-store read；并发后验证可能 committed-but-unverified，禁止补偿覆盖 |
+
+普通 transcript 同 aggregate stale overwrite 已在 v1.10.1 修复，**不是**未修 backlog。Merge 安全与 UX 作为发布后只读审计补充核实，未在此表断言新 bug。
 
 ## v1.10.0 — Knowledge Productivity release
 

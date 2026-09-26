@@ -2,7 +2,14 @@
 
 本文件记录当前仓库已经完成的 Sprint 与关键提交。日期使用仓库 commit date。
 
-当前口径：PALOS v1.10.0 Knowledge Productivity release；annotated tag `v1.10.0` 指向本次实现与文档收口提交。
+当前口径：PALOS v1.10.1 stabilization / bugfix patch release；annotated tag `v1.10.1` 指向本次修复与文档收口提交。
+
+## 2026-09-26 — PALOS v1.10.1 Stabilization Patch Release
+
+- 关闭 **7 个 P1、1 个 P2** 正确性问题：普通 transcript 跨 tab stale overwrite、新导入 partial aggregate、regenerate 后悬空 Round、Proposal 假成功、Review stale/partial decision、缺失目标的 knowledge-update 错建卡、LocalStorage→IndexedDB 全量替换提示与 preflight，以及 sparse ChatGPT Round order。
+- IndexedDB 普通 transcript mutation 在事务内核对 authoritative baseline；新导入原子写入 Conversation/Source/Message/Round 及 ChatGPT external metadata；Proposal/Review 仅在耐久写入与回读验证后反馈成功。
+- 本版是纯 stabilization/bugfix patch，**没有新 feature**，未修改 package/dependency、Entity schema、IndexedDB version/七个 store、Provider/Storage contract 或 immutable Snapshot 语义。ADR-005 Knowledge → Context Reuse 属 v1.11 草稿，不在本版。
+- 历史延期的 UX、能力与技术债统一记录于 ROADMAP 的「Reconciled deferred product backlog」；状态未由本版修复。自动门禁及 release commit/tag 核验记录见 HANDOFF。
 
 ## 2026-09-08 — PALOS v1.10.0 Knowledge Productivity Release
 

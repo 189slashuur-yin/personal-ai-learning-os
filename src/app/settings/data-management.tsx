@@ -57,7 +57,10 @@ export function DataManagement() {
   // ---- Migration state ----
   const [currentMode, setCurrentMode] = useState<StorageMode>(getStorageMode);
   const [migratePreview, setMigratePreview] = useState<
-    Record<string, number> | null
+    {
+      localStorage: Record<string, number>;
+      indexedDB: Record<string, number>;
+    } | null
   >(null);
   const [migrating, setMigrating] = useState(false);
   const [migrateReport, setMigrateReport] = useState<string | null>(null);
@@ -283,19 +286,44 @@ export function DataManagement() {
 
   // ---- Migration helpers ----
 
-  function previewMigration() {
+  function readLegacyMigrationStores(): { name: StoreName; data: unknown[] }[] {
+    return [
+      { name: "conversations", data: new BrowserConversationStorage().getAll() },
+      { name: "messages", data: new BrowserMessageStorage().getAll() },
+      { name: "rounds", data: new BrowserRoundStorage().getAll() },
+      { name: "sources", data: new BrowserSourceStorage().getAll() },
+      { name: "proposals", data: new BrowserProposalStorage().getAll() },
+      {
+        name: "knowledge-cards",
+        data: new BrowserKnowledgeCardStorage().getAll(),
+      },
+      {
+        name: "conversation-versions",
+        data: new BrowserConversationVersionStorage().getAll(),
+      },
+    ];
+  }
+
+  async function countLegacyMigrationTargets() {
+    return Object.fromEntries(
+      await Promise.all(
+        readLegacyMigrationStores().map(async ({ name }) => [
+          name,
+          await countStore(name),
+        ] as const),
+      ),
+    );
+  }
+
+  async function previewMigration() {
     try {
-      const counts: Record<string, number> = {
-        Conversations: new BrowserConversationStorage().getAll().length,
-        Messages: new BrowserMessageStorage().getAll().length,
-        Rounds: new BrowserRoundStorage().getAll().length,
-        Sources: new BrowserSourceStorage().getAll().length,
-        Proposals: new BrowserProposalStorage().getAll().length,
-        "Knowledge Cards": new BrowserKnowledgeCardStorage().getAll().length,
-        "Conversation Versions":
-          new BrowserConversationVersionStorage().getAll().length,
-      };
-      setMigratePreview(counts);
+      const stores = readLegacyMigrationStores();
+      setMigratePreview({
+        localStorage: Object.fromEntries(
+          stores.map(({ name, data }) => [name, data.length]),
+        ),
+        indexedDB: await countLegacyMigrationTargets(),
+      });
       setMigrateError(null);
     } catch {
       setMigrateError("无法读取 LocalStorage 数据用于预览。");
@@ -306,7 +334,7 @@ export function DataManagement() {
     if (!migratePreview) return;
     if (
       !window.confirm(
-        "将把 LocalStorage 中的全部数据复制到 IndexedDB。\n\n" +
+        "这是全量替换，不是合并或追加。继续后，七个 IndexedDB 业务 store 会先清空，再写入当前 LocalStorage 数据；仅存在于 IndexedDB 的记录会被删除。\n\n" +
           "• LocalStorage 原数据不会删除\n" +
           "• 迁移后 PALOS 继续使用默认 IndexedDB\n" +
           "• LocalStorage legacy/debug 切换仅用于兼容和调试\n\n" +
@@ -320,27 +348,20 @@ export function DataManagement() {
     setMigrateReport(null);
 
     try {
-      const stores: {
-        name: StoreName;
-        data: unknown[];
-      }[] = [
-        {
-          name: "conversations",
-          data: new BrowserConversationStorage().getAll(),
-        },
-        { name: "messages", data: new BrowserMessageStorage().getAll() },
-        { name: "rounds", data: new BrowserRoundStorage().getAll() },
-        { name: "sources", data: new BrowserSourceStorage().getAll() },
-        { name: "proposals", data: new BrowserProposalStorage().getAll() },
-        {
-          name: "knowledge-cards",
-          data: new BrowserKnowledgeCardStorage().getAll(),
-        },
-        {
-          name: "conversation-versions",
-          data: new BrowserConversationVersionStorage().getAll(),
-        },
-      ];
+      const stores = readLegacyMigrationStores();
+      const currentLocalStorageCounts = Object.fromEntries(
+        stores.map(({ name, data }) => [name, data.length]),
+      );
+      const currentIndexedDBCounts = await countLegacyMigrationTargets();
+      if (
+        JSON.stringify(currentLocalStorageCounts) !==
+          JSON.stringify(migratePreview.localStorage) ||
+        JSON.stringify(currentIndexedDBCounts) !==
+          JSON.stringify(migratePreview.indexedDB)
+      ) {
+        setMigratePreview(null);
+        throw new Error("数据在预览后发生变化，请重新预览并确认替换范围。");
+      }
 
       const totalRecords = stores.reduce(
         (sum, store) => sum + store.data.length,
@@ -504,7 +525,7 @@ export function DataManagement() {
               旧 LocalStorage 数据不会自动删除
             </p>
             <p className="mt-1 text-xs text-sky-800">
-              此工具只用于检测旧版本业务数据，并复制到 IndexedDB。正常新用户无需执行这一步。
+              此工具只用于检测旧版本业务数据，并全量替换 IndexedDB 的七个业务 store。它不会合并两边数据；正常新用户无需执行这一步。
             </p>
           </div>
 
@@ -519,29 +540,34 @@ export function DataManagement() {
           ) : (
             <div className="rounded-lg border border-sky-200 bg-sky-50 p-4">
               <p className="text-sm font-semibold text-sky-900">
-                迁移预览（LocalStorage → IndexedDB）
+                全量替换预览（LocalStorage → IndexedDB）
               </p>
               <dl className="mt-3 grid grid-cols-2 gap-x-6 gap-y-2 text-sm sm:grid-cols-4">
-                {Object.entries(migratePreview).map(([label, count]) => (
+                {Object.entries(migratePreview.localStorage).map(([label, count]) => (
                   <div key={label}>
                     <dt className="text-xs text-sky-700">{label}</dt>
-                    <dd className="text-lg font-bold text-sky-900">{count}</dd>
+                    <dd className="text-lg font-bold text-sky-900">
+                      {migratePreview.indexedDB[label] ?? 0} → {count}
+                    </dd>
                   </div>
                 ))}
               </dl>
-              <p className="mt-3 text-xs text-sky-700">
-                总计：{Object.values(migratePreview).reduce((a, b) => a + b, 0)} 条记录。
-                {Object.values(migratePreview).every((count) => count === 0)
+              <p className="mt-3 text-xs font-semibold text-red-700">
+                每项显示“当前 IndexedDB → 替换后 LocalStorage”。仅存在于 IndexedDB 的记录会被删除；此操作不是复制、合并或追加。
+              </p>
+              <p className="mt-2 text-xs text-sky-700">
+                替换后总计：{Object.values(migratePreview.localStorage).reduce((a, b) => a + b, 0)} 条记录。
+                {Object.values(migratePreview.localStorage).every((count) => count === 0)
                   ? "无需迁移。"
                   : "LocalStorage 原数据不会被删除。"}
               </p>
               <button
                 className="mt-3 rounded-lg bg-sky-700 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-800 disabled:opacity-40"
-                disabled={migrating || Object.values(migratePreview).every((count) => count === 0)}
+                disabled={migrating || Object.values(migratePreview.localStorage).every((count) => count === 0)}
                 onClick={executeMigration}
                 type="button"
               >
-                {migrating ? "迁移中…" : "迁移旧数据到 IndexedDB"}
+                {migrating ? "替换中…" : "以旧数据全量替换 IndexedDB"}
               </button>
             </div>
           )}

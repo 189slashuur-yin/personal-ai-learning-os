@@ -289,39 +289,39 @@ export class ChatGPTExportImportService {
         this.sources,
         this.messages,
         this.rounds,
-      ).confirm(importPreview, { title: preview.title, workspaceId });
-      const conversation = this.conversations.getById(result.conversationId);
-      if (!conversation) throw new Error("Imported Conversation is unavailable.");
-      this.conversations.save({
-        ...conversation,
-        externalSource: "chatgpt",
-        externalConversationId: preview.externalConversationId,
-        importedAt: timestamp,
-        lastExternalUpdateTime: preview.updateTime,
-      });
-      const storedMessages = this.messages.getByConversationId(result.conversationId);
-      this.messages.saveMany(
-        storedMessages.map((message, index) => ({
-          ...message,
-          externalMessageId: preview.messages[index]?.externalMessageId,
+      ).confirm(importPreview, {
+        title: preview.title,
+        workspaceId,
+        external: {
+          externalSource: "chatgpt",
+          externalConversationId: preview.externalConversationId,
+          importedAt: timestamp,
+          lastExternalUpdateTime: preview.updateTime,
+        },
+        messageMetadata: preview.messages.map((message) => ({
+          externalMessageId: message.externalMessageId,
           contentHash:
-            preview.messages[index]?.contentHash ??
-            contentHash(message.role, message.content),
+            message.contentHash ?? contentHash(message.role, message.content),
         })),
-      );
-      return {
-        conversationId: result.conversationId,
-        appended: storedMessages.length,
+      });
+      const complete = (confirmed: Awaited<typeof result>) => ({
+        conversationId: confirmed.conversationId,
+        appended: confirmed.messageCount,
         skipped: 0,
-        roundsCreated: result.roundCount,
-        messageIds: result.messageIds,
-        roundIds: result.roundIds,
-      };
+        roundsCreated: confirmed.roundCount,
+        messageIds: confirmed.messageIds,
+        roundIds: confirmed.roundIds,
+      });
+      return result instanceof Promise ? result.then(complete) : complete(result);
     }
 
     const existing = this.conversations.getById(preview.existingConversationId);
     if (!existing) throw new Error("Existing Conversation is unavailable.");
     const storedMessages = this.messages.getByConversationId(existing.id);
+    const storedRounds = this.rounds.getByConversationId(existing.id);
+    const storedSources = this.sources
+      .getAll()
+      .filter((source) => source.conversationId === existing.id);
     const externalIds = new Set(storedMessages.flatMap((message) => message.externalMessageId ? [message.externalMessageId] : []));
     const hashes = new Set(storedMessages.map((message) => message.contentHash ?? contentHash(message.role, message.content)));
     const additions = preview.messages.filter((message) => {
@@ -354,7 +354,8 @@ export class ChatGPTExportImportService {
 
     // Generate rounds for appended messages using structured derivation (no text round-trip)
     const appendImportPreview = buildStructuredImportPreview(additions, preview.title);
-    const startRoundOrder = this.rounds.getByConversationId(existing.id).length + 1;
+    const startRoundOrder =
+      storedRounds.reduce((max, round) => Math.max(max, round.order), 0) + 1;
     const createdRounds: Round[] = appendImportPreview.rounds.flatMap((round, index) => {
       const mappedIds = round.messageIndexes
         .map((idx: number) => newMessages[idx]?.id)
@@ -378,6 +379,12 @@ export class ChatGPTExportImportService {
       {
         conversationIds: [existing.id],
         operation: "append ChatGPT export",
+        expected: {
+          conversations: [existing],
+          sources: storedSources,
+          messages: storedMessages,
+          rounds: storedRounds,
+        },
         put: {
           conversations: [updatedConversation],
           messages: newMessages,
@@ -412,6 +419,10 @@ export class ChatGPTExportImportService {
     if (!target) throw new Error("Target conversation not found.");
 
     const existingMessages = this.messages.getByConversationId(targetConversationId);
+    const existingRounds = this.rounds.getByConversationId(targetConversationId);
+    const existingSources = this.sources
+      .getAll()
+      .filter((source) => source.conversationId === targetConversationId);
 
     const existingExternalIds = new Set(
       existingMessages.flatMap((m) => (m.externalMessageId ? [m.externalMessageId] : [])),
@@ -456,7 +467,8 @@ export class ChatGPTExportImportService {
       contentHash: m.contentHash,
     }));
     const appendImportPreview = buildStructuredImportPreview(additions, preview.title);
-    const startRoundOrder = this.rounds.getByConversationId(target.id).length + 1;
+    const startRoundOrder =
+      existingRounds.reduce((max, round) => Math.max(max, round.order), 0) + 1;
     const createdRounds: Round[] = appendImportPreview.rounds.flatMap((round, index) => {
       const mappedIds = round.messageIndexes
         .map((idx: number) => newMessages[idx]?.id)
@@ -499,6 +511,12 @@ export class ChatGPTExportImportService {
       {
         conversationIds: [target.id],
         operation: "append ChatGPT export",
+        expected: {
+          conversations: [target],
+          sources: existingSources,
+          messages: existingMessages,
+          rounds: existingRounds,
+        },
         put: {
           conversations: [updatedConversation],
           sources: [appendedSource],

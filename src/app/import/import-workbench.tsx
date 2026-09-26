@@ -451,7 +451,7 @@ export function ImportWorkbench() {
       const result =
         importPath === "existing"
           ? await importService.appendToConversation(effectivePreview, existingTargetId)
-          : importService.confirm(effectivePreview, { title, workspaceId });
+          : await importService.confirm(effectivePreview, { title, workspaceId });
 
       setImportProgress((current) =>
         updateImportOperationProgress(current, {

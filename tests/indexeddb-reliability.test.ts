@@ -8,6 +8,7 @@ import { ImportService } from "@/core/services/import-service";
 import { ConversationVersionService } from "@/core/services/conversation-version-service";
 import { ConversationMergeService } from "@/core/services/conversation-merge-service";
 import { MessageToRoundMigrationService } from "@/core/services/message-to-round-migration";
+import { editMessage } from "@/core/services/message-editing";
 import {
   batchDeleteConversationWorkspace,
   deleteConversationSidecarMetadata,
@@ -53,6 +54,9 @@ import { IndexedDBKnowledgeCardStorage } from "@/infrastructure/storage/indexedd
 import { IndexedDBConversationVersionStorage } from "@/infrastructure/storage/indexeddb/idb-conversation-version-storage";
 import { IndexedDBConversationVersionRestoreWriter } from "@/infrastructure/storage/indexeddb/idb-conversation-version-restore-writer";
 import {
+  IndexedDBConversationTranscriptMutationWriter,
+} from "@/infrastructure/storage/indexeddb/idb-conversation-transcript-mutation-writer";
+import {
   IndexedDBRoundMutationWriter,
   RoundMutationConflictError,
 } from "@/infrastructure/storage/indexeddb/idb-round-mutation-writer";
@@ -63,6 +67,8 @@ import { BrowserTaskStorage } from "@/infrastructure/storage/browser-task-storag
 import { SearchIndexService } from "@/core/services/search-index-service";
 import type { SearchIndexData } from "@/core/services/search-index-service";
 import { resolveProposalReviewLookup } from "@/core/services/proposal-review-lookup";
+import { persistIndexedDBReviewDecision } from "@/app/review/review-persistence";
+import { persistIndexedDBGeneratedProposal } from "@/app/conversation/[id]/proposal-persistence";
 
 type StoreData = Map<string, unknown>;
 
@@ -2912,7 +2918,7 @@ describe("PALOS v1.4.9 — Round persistence across flush/clear/reload", () => {
 
     const previews = service.parseExport(CHATGPT_FIXTURE);
     const importPreview = service.previewImport(previews[0]);
-    const result = service.importConversation(importPreview);
+    const result = await service.importConversation(importPreview);
 
     expect(result.appended).toBeGreaterThan(0);
     expect(result.roundsCreated).toBeGreaterThan(0);
@@ -3013,7 +3019,7 @@ describe("PALOS v1.4.9 — Round persistence across flush/clear/reload", () => {
     );
     const previews = service.parseExport(CHATGPT_FIXTURE);
     const importPreview = service.previewImport(previews[0]);
-    const result = service.importConversation(importPreview);
+    const result = await service.importConversation(importPreview);
 
     // Flush → clear → reload (simulates page navigation to Detail)
     await flushCachesToIndexedDB();
@@ -3064,7 +3070,7 @@ describe("PALOS v1.4.9 — Round persistence across flush/clear/reload", () => {
     const messages = new IndexedDBMessageStorage();
     const rounds = new IndexedDBRoundStorage();
 
-    const importResult = new ImportService(
+    const importResult = await new ImportService(
       conversations,
       sources,
       messages,
@@ -3331,7 +3337,7 @@ async function importSmallChatGPTConversation() {
     storages.messages,
     storages.rounds,
   );
-  const result = service.importConversation(
+  const result = await service.importConversation(
     service.previewImport({
       externalConversationId: "post-destructive-import",
       title: "Post destructive import",
@@ -4652,5 +4658,363 @@ describe("PALOS v1.6.4 — Existing TXT append durability", () => {
         name: "v164-append.txt",
       }),
     );
+  });
+});
+
+describe("post-v1.10.0 ordinary transcript concurrency", () => {
+  it("creates a new imported aggregate atomically with no partial records on abort", async () => {
+    await replaceStores({
+      conversations: [],
+      sources: [],
+      messages: [],
+      rounds: [],
+    });
+    clearCaches();
+    await preloadAll();
+    const storages = createStorageInstances("indexedDB");
+    const preview = new ImportParserPipeline().preview(
+      {
+        name: "atomic-new.txt",
+        channel: "file",
+        content: "User: atomic question\nAssistant: atomic answer",
+        mediaType: "text/plain",
+      },
+      "txt",
+    );
+    fakeIndexedDB.failTransactions = 1;
+
+    await expect(
+      new ImportService(
+        storages.conversations,
+        storages.sources,
+        storages.messages,
+        storages.rounds,
+      ).confirm(preview, { title: "Atomic new import" }),
+    ).rejects.toThrow("forced failure");
+
+    expect(await readAll("conversations")).toEqual([]);
+    expect(await readAll("sources")).toEqual([]);
+    expect(await readAll("messages")).toEqual([]);
+    expect(await readAll("rounds")).toEqual([]);
+  });
+
+  it("fails a stale Message edit closed instead of overwriting a concurrent append", async () => {
+    const conversationId = "stale-edit-conversation";
+    const original = message("stale-edit-original", conversationId, 0);
+    await replaceStores({
+      conversations: [conversation(conversationId)],
+      sources: [],
+      messages: [original],
+      rounds: [],
+    });
+    clearCaches();
+    await preloadAll();
+
+    const storages = createStorageInstances("indexedDB");
+    const concurrent = message("stale-edit-concurrent", conversationId, 1);
+    await writeOne("messages", concurrent);
+
+    await expect(
+      editMessage(original.id, "stale replacement", {
+        conversations: storages.conversations,
+        sources: storages.sources,
+        messages: storages.messages,
+      }),
+    ).rejects.toThrow("Messages changed; preview again");
+
+    expect(
+      (await readAll<Message>("messages"))
+        .sort((left, right) => left.order - right.order)
+        .map(({ id, content, order }) => ({ id, content, order })),
+    ).toEqual([
+      { id: original.id, content: original.content, order: 0 },
+      { id: concurrent.id, content: concurrent.content, order: 1 },
+    ]);
+  });
+
+  it("aborts a stale ordinary append before duplicate ordering or partial side effects", async () => {
+    const conversationId = "stale-append-conversation";
+    const original = message("stale-append-original", conversationId, 0);
+    await replaceStores({
+      conversations: [conversation(conversationId)],
+      sources: [],
+      messages: [original],
+      rounds: [],
+    });
+    clearCaches();
+    await preloadAll();
+
+    const storages = createStorageInstances("indexedDB");
+    const service = new ImportService(
+      storages.conversations,
+      storages.sources,
+      storages.messages,
+      storages.rounds,
+    );
+    const preview = new ImportParserPipeline().preview(
+      {
+        name: "stale-append.txt",
+        channel: "file",
+        content: "User: appended question\nAssistant: appended answer",
+        mediaType: "text/plain",
+      },
+      "txt",
+    );
+    const concurrent = message("stale-append-concurrent", conversationId, 1);
+    await writeOne("messages", concurrent);
+
+    await expect(
+      service.appendToConversation(preview, conversationId),
+    ).rejects.toThrow("Messages changed; preview again");
+
+    expect(
+      (await readAll<Message>("messages"))
+        .sort((left, right) => left.order - right.order)
+        .map(({ id, order }) => ({ id, order })),
+    ).toEqual([
+      { id: original.id, order: 0 },
+      { id: concurrent.id, order: 1 },
+    ]);
+    expect(await readAll("sources")).toEqual([]);
+    expect(await readAll("rounds")).toEqual([]);
+  });
+
+  it("aborts a stale ChatGPT export append and preserves the concurrent Message", async () => {
+    const conversationId = "stale-chatgpt-append";
+    const original = message("stale-chatgpt-original", conversationId, 0);
+    await replaceStores({
+      conversations: [conversation(conversationId)],
+      sources: [],
+      messages: [original],
+      rounds: [],
+    });
+    clearCaches();
+    await preloadAll();
+
+    const storages = createStorageInstances("indexedDB");
+    const service = new ChatGPTExportImportService(
+      storages.conversations,
+      storages.sources,
+      storages.messages,
+      storages.rounds,
+    );
+    const concurrent = message("stale-chatgpt-concurrent", conversationId, 1);
+    await writeOne("messages", concurrent);
+
+    await expect(
+      service.appendToConversation(
+        {
+          externalConversationId: "external-stale-chatgpt",
+          title: "Concurrent append fixture",
+          messages: [
+            {
+              role: "assistant",
+              content: "new export answer",
+              contentHash: "new-export-hash",
+              externalMessageId: "new-export-id",
+            },
+          ],
+          unsupportedCount: 0,
+          isLarge: false,
+        },
+        conversationId,
+      ),
+    ).rejects.toThrow("Messages changed; preview again");
+
+    expect(
+      (await readAll<Message>("messages"))
+        .sort((left, right) => left.order - right.order)
+        .map(({ id, order }) => ({ id, order })),
+    ).toEqual([
+      { id: original.id, order: 0 },
+      { id: concurrent.id, order: 1 },
+    ]);
+    expect(await readAll("sources")).toEqual([]);
+    expect(await readAll("rounds")).toEqual([]);
+  });
+
+  it("detects a stale Source autosave baseline in the authoritative transaction", async () => {
+    const conversationId = "stale-source-conversation";
+    const original = sourceRecord("stale-source-original", conversationId);
+    await replaceStores({
+      conversations: [conversation(conversationId)],
+      sources: [original],
+    });
+    clearCaches();
+    await preloadAll();
+
+    const concurrent = {
+      ...original,
+      content: "concurrent source content",
+      updatedAt: "2026-09-08T12:00:00.000Z",
+    };
+    await writeOne("sources", concurrent);
+
+    await expect(
+      new IndexedDBConversationTranscriptMutationWriter().execute({
+        conversationIds: [conversationId],
+        operation: "test stale Source autosave",
+        expected: { sources: [original] },
+        put: {
+          sources: [
+            {
+              ...original,
+              content: "stale source content",
+              updatedAt: "2026-09-08T12:01:00.000Z",
+            },
+          ],
+        },
+      }),
+    ).rejects.toThrow("Sources changed; preview again");
+
+    expect(await readAll("sources")).toEqual([concurrent]);
+  });
+});
+
+describe("post-v1.10.0 Review durability", () => {
+  it("reports generated Proposal failure without leaving a partial canonical record", async () => {
+    const proposal = proposalRecord(
+      "generated-proposal-abort",
+      "review-conversation",
+      "review-source",
+    );
+    await replaceStores({
+      conversations: [conversation("review-conversation")],
+      sources: [sourceRecord("review-source", "review-conversation")],
+      proposals: [],
+    });
+    clearCaches();
+    await preloadAll();
+    fakeIndexedDB.failTransactions = 1;
+
+    await expect(persistIndexedDBGeneratedProposal(proposal)).rejects.toThrow(
+      "forced failure",
+    );
+    expect(await readAll("proposals")).toEqual([]);
+    expect(new IndexedDBProposalStorage().getAll()).toEqual([]);
+  });
+
+  it("persists an Applied Proposal and KnowledgeCard atomically and verifies reload", async () => {
+    const expectedProposal = proposalRecord("review-atomic-proposal", "review-conversation", "review-source");
+    const proposal = {
+      ...expectedProposal,
+      status: "Applied" as const,
+    };
+    const card = knowledgeRecord("review-atomic-card", proposal.id);
+    await replaceStores({
+      conversations: [conversation("review-conversation")],
+      sources: [sourceRecord("review-source", "review-conversation")],
+      proposals: [expectedProposal],
+      "knowledge-cards": [],
+    });
+    clearCaches();
+    await preloadAll();
+
+    await persistIndexedDBReviewDecision(expectedProposal, proposal, card);
+
+    expect(await readAll("proposals")).toEqual([proposal]);
+    expect(await readAll("knowledge-cards")).toEqual([card]);
+    expect(new IndexedDBProposalStorage().getById(proposal.id)?.status).toBe("Applied");
+    expect(new IndexedDBKnowledgeCardStorage().getById(card.id)?.proposalId).toBe(proposal.id);
+  });
+
+  it("exposes no partial Review state when the atomic transaction aborts", async () => {
+    const expectedProposal = proposalRecord("review-abort-proposal", "review-conversation", "review-source");
+    const proposal = {
+      ...expectedProposal,
+      status: "Applied" as const,
+    };
+    const card = knowledgeRecord("review-abort-card", proposal.id);
+    await replaceStores({
+      conversations: [conversation("review-conversation")],
+      sources: [sourceRecord("review-source", "review-conversation")],
+      proposals: [expectedProposal],
+      "knowledge-cards": [],
+    });
+    clearCaches();
+    await preloadAll();
+
+    fakeIndexedDB.failTransactions = 1;
+    await expect(
+      persistIndexedDBReviewDecision(expectedProposal, proposal, card),
+    ).rejects.toThrow("forced failure");
+
+    expect(await readAll("proposals")).toEqual([expectedProposal]);
+    expect(await readAll("knowledge-cards")).toEqual([]);
+  });
+
+  it("fails a stale accept closed after another tab rejects the Proposal", async () => {
+    const expectedProposal = proposalRecord(
+      "review-conflict-proposal",
+      "review-conversation",
+      "review-source",
+    );
+    const appliedProposal = { ...expectedProposal, status: "Applied" as const };
+    const rejectedProposal = { ...expectedProposal, status: "Rejected" as const };
+    const card = knowledgeRecord("review-conflict-card", expectedProposal.id);
+    await replaceStores({
+      conversations: [conversation("review-conversation")],
+      sources: [sourceRecord("review-source", "review-conversation")],
+      proposals: [expectedProposal],
+      "knowledge-cards": [],
+    });
+    clearCaches();
+    await preloadAll();
+    await writeOne("proposals", rejectedProposal);
+
+    await expect(
+      persistIndexedDBReviewDecision(
+        expectedProposal,
+        appliedProposal,
+        card,
+      ),
+    ).rejects.toThrow("Proposal changed after Review loaded");
+
+    expect(await readAll("proposals")).toEqual([rejectedProposal]);
+    expect(await readAll("knowledge-cards")).toEqual([]);
+  });
+
+  it("fails a stale Knowledge update closed after the target card changes", async () => {
+    const expectedProposal = {
+      ...proposalRecord("review-update-proposal", "review-conversation", "review-source"),
+      purpose: "knowledge-update" as const,
+      targetKnowledgeId: "review-update-card",
+    };
+    const appliedProposal = { ...expectedProposal, status: "Applied" as const };
+    const expectedCard = knowledgeRecord(
+      "review-update-card",
+      "review-original-proposal",
+    );
+    const updatedCard = {
+      ...expectedCard,
+      content: "Tab A update",
+      summary: "Tab A update",
+    };
+    const concurrentCard = {
+      ...expectedCard,
+      content: "Tab B update",
+      summary: "Tab B update",
+    };
+    await replaceStores({
+      conversations: [conversation("review-conversation")],
+      sources: [sourceRecord("review-source", "review-conversation")],
+      proposals: [expectedProposal],
+      "knowledge-cards": [expectedCard],
+    });
+    clearCaches();
+    await preloadAll();
+    await writeOne("knowledge-cards", concurrentCard);
+
+    await expect(
+      persistIndexedDBReviewDecision(
+        expectedProposal,
+        appliedProposal,
+        updatedCard,
+        expectedCard,
+      ),
+    ).rejects.toThrow("Target Knowledge changed after Review loaded");
+
+    expect(await readAll("proposals")).toEqual([expectedProposal]);
+    expect(await readAll("knowledge-cards")).toEqual([concurrentCard]);
   });
 });

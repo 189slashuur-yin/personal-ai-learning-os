@@ -68,6 +68,7 @@ function requestedStoreNames(
   if ((command.replaceMessages?.length ?? 0) > 0) requested.add("messages");
   if ((command.replaceRounds?.length ?? 0) > 0) requested.add("rounds");
   if (command.expected?.conversations) requested.add("conversations");
+  if (command.expected?.sources) requested.add("sources");
   if (command.expected?.messages) requested.add("messages");
   if (command.expected?.rounds) requested.add("rounds");
   if (command.expected?.conversationVersions) {
@@ -113,6 +114,10 @@ function assertExpectedOwnership(
     command.expected?.conversations?.some(
       (conversation) => !conversationIds.has(conversation.id),
     ) ||
+    command.expected?.sources?.some(
+      (source) =>
+        !source.conversationId || !conversationIds.has(source.conversationId),
+    ) ||
     command.expected?.messages?.some(
       (message) => !conversationIds.has(message.conversationId),
     ) ||
@@ -134,12 +139,28 @@ function assertBaseline(
   baseline: ConversationTranscriptMutationBaseline,
   authoritative: {
     conversations: readonly Conversation[];
+    sources: readonly ImportedSource[];
     messages: readonly Message[];
     rounds: readonly Round[];
     conversationVersions: readonly ConversationVersion[];
   },
 ): void {
   const conversationIds = new Set(command.conversationIds);
+  if (
+    baseline.sources &&
+    !recordsMatch(
+      authoritative.sources.filter((record) =>
+        Boolean(
+          record.conversationId && conversationIds.has(record.conversationId),
+        ),
+      ),
+      baseline.sources,
+    )
+  ) {
+    throw new Error(
+      "Conversation transcript mutation baseline conflict: Sources changed; preview again.",
+    );
+  }
   if (
     baseline.conversations &&
     !recordsMatch(
@@ -310,6 +331,7 @@ async function validateAndWrite(
         if (command.expected) {
           assertBaseline(command, command.expected, {
             conversations: conversationsRequest?.result ?? [],
+            sources: sourcesRequest.result,
             messages: messagesRequest?.result ?? [],
             rounds: roundsRequest?.result ?? [],
             conversationVersions: versionsRequest?.result ?? [],

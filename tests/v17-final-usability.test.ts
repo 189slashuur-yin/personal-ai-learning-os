@@ -55,6 +55,10 @@ const conversationOverviewSource = readFileSync(
   ),
   "utf8",
 );
+const reviewProposalSource = readFileSync(
+  new URL("../src/app/review/review-proposal.tsx", import.meta.url),
+  "utf8",
+);
 
 const timestamp = "2026-07-22T00:00:00.000Z";
 
@@ -557,6 +561,33 @@ describe("PALOS v1.7 final Overview, Knowledge, and layout boundaries", () => {
     expect(second).toEqual({ card: first.card, created: false });
     expect(knowledge.getAll()).toHaveLength(1);
     expect(proposals.getAll()).toHaveLength(1);
+  });
+
+  it("fails a missing-target Knowledge update closed without creating a card", () => {
+    const knowledge = new InMemoryKnowledgeStorage();
+    const proposals = new InMemoryProposalStorage();
+    const service = new RoundKnowledgeService(knowledge, proposals);
+    const updateProposal: Proposal = {
+      id: "missing-target-update",
+      title: "Update missing card",
+      summary: "must not become a new card",
+      sourceType: "round",
+      sourceRoundId: "knowledge-round",
+      conversationId: "conversation",
+      sourceEvidence: { sourceName: "Round 1", excerpt: "evidence" },
+      generatedBy: "Demo Analyzer Generated",
+      status: "Pending",
+      purpose: "knowledge-update",
+      targetKnowledgeId: "deleted-card",
+      createdAt: timestamp,
+    };
+
+    expect(service.prepareUpdate(updateProposal)).toBeNull();
+    expect(knowledge.getAll()).toEqual([]);
+    expect(proposals.getAll()).toEqual([]);
+    expect(reviewProposalSource).toContain(
+      "更新建议未接受，也不会错误创建新的 Knowledge",
+    );
   });
 
   it("labels dynamic recommendations and fixed references explicitly", () => {

@@ -17,8 +17,10 @@ import { BrowserProviderConfigurationStorage } from "@/infrastructure/storage/br
 import {
   createProposalStorage,
   createSourceStorage,
+  getStorageMode,
 } from "@/infrastructure/storage/storage-factory";
 import { CapabilityBadges } from "@/app/capability-badges";
+import { persistIndexedDBGeneratedProposal } from "@/app/conversation/[id]/proposal-persistence";
 
 type AnalysisState =
   | { status: "analyzing" }
@@ -44,6 +46,14 @@ function runSourceAnalysis(source: ImportedSource, simulateFailure = false) {
     new PromptTemplateService(new BrowserPromptTemplateStorage()),
     new BrowserAnalyzerRunStorage(),
   ).runSource(source, { simulateRecoverableError: simulateFailure });
+}
+
+async function persistProposal(proposal: Proposal) {
+  if (getStorageMode() === "indexedDB") {
+    await persistIndexedDBGeneratedProposal(proposal);
+  } else {
+    createProposalStorage().saveCurrent(proposal);
+  }
 }
 
 export function AnalysisResult() {
@@ -90,8 +100,18 @@ export function AnalysisResult() {
 
       if (result.proposal) {
         const proposal = result.proposal;
-        createProposalStorage().saveCurrent(proposal);
-        setState({ status: "complete", proposal });
+        try {
+          await persistProposal(proposal);
+          setState({ status: "complete", proposal });
+        } catch (error) {
+          setState({
+            status: "error",
+            message:
+              error instanceof Error
+                ? `Proposal 保存失败：${error.message}`
+                : "Proposal 保存失败，持久化状态未确认。",
+          });
+        }
       } else {
         setState({
           status: "error",
@@ -127,8 +147,18 @@ export function AnalysisResult() {
       return;
     }
 
-    createProposalStorage().saveCurrent(result.proposal);
-    setState({ status: "complete", proposal: result.proposal });
+    try {
+      await persistProposal(result.proposal);
+      setState({ status: "complete", proposal: result.proposal });
+    } catch (error) {
+      setState({
+        status: "error",
+        message:
+          error instanceof Error
+            ? `Proposal 保存失败：${error.message}`
+            : "Proposal 保存失败，持久化状态未确认。",
+      });
+    }
   }
 
   if (state.status === "missing-source") {

@@ -2,7 +2,10 @@ import type { ConversationStorage } from "@/core/contracts/conversation-storage"
 import type { MessageStorage } from "@/core/contracts/message-storage";
 import type { RoundStorage } from "@/core/contracts/round-storage";
 import type { SourceStorage } from "@/core/contracts/source-storage";
-import type { ConversationSourceType } from "@/core/entities/conversation";
+import type {
+  Conversation,
+  ConversationSourceType,
+} from "@/core/entities/conversation";
 import type { ConversationParserId, ImportPreview } from "@/core/entities/import-parser";
 import type { Message } from "@/core/entities/message";
 import type { Round } from "@/core/entities/round";
@@ -11,6 +14,16 @@ import { executeShareSnapshotTranscriptMutation } from "@/core/services/share-sn
 export type ConfirmImportInput = {
   title?: string;
   workspaceId?: string;
+  external?: Pick<
+    Conversation,
+    | "externalSource"
+    | "externalConversationId"
+    | "importedAt"
+    | "lastExternalUpdateTime"
+  >;
+  messageMetadata?: Array<
+    Pick<Message, "externalMessageId" | "contentHash">
+  >;
 };
 
 const sourceTypeByParser: Record<ConversationParserId, ConversationSourceType> = {
@@ -46,6 +59,8 @@ export class ImportService {
       order,
       createdAt: timestamp,
       updatedAt: timestamp,
+      externalMessageId: input.messageMetadata?.[order]?.externalMessageId,
+      contentHash: input.messageMetadata?.[order]?.contentHash,
     }));
     const canonicalRounds: Round[] = preview.rounds.map((round) => ({
       id: crypto.randomUUID(),
@@ -59,7 +74,7 @@ export class ImportService {
       updatedAt: timestamp,
     }));
 
-    this.conversations.save({
+    const conversation = {
       id: conversationId,
       title: input.title?.trim() || preview.suggestedTitle,
       sourceType: sourceTypeByParser[preview.parserId],
@@ -68,9 +83,10 @@ export class ImportService {
       createdAt: timestamp,
       updatedAt: timestamp,
       lastOpenedAt: timestamp,
-    });
+      ...input.external,
+    } satisfies Conversation;
     const sourceId = crypto.randomUUID();
-    this.sources.save({
+    const source = {
       id: sourceId,
       conversationId,
       kind: "text",
@@ -78,11 +94,34 @@ export class ImportService {
       content: preview.artifact.content,
       importedAt: timestamp,
       updatedAt: timestamp,
-    });
-    this.messages.saveMany(canonicalMessages);
-    this.rounds.saveMany(canonicalRounds);
+    } as const;
 
-    return {
+    const mutation = executeShareSnapshotTranscriptMutation(
+      this.sources,
+      {
+        conversationIds: [conversationId],
+        operation: "create imported Conversation transcript",
+        expected: {
+          conversations: [],
+          sources: [],
+          messages: [],
+          rounds: [],
+        },
+        put: {
+          conversations: [conversation],
+          sources: [source],
+          messages: canonicalMessages,
+          rounds: canonicalRounds,
+        },
+      },
+      () => {
+        this.conversations.save(conversation);
+        this.sources.save(source);
+        this.messages.saveMany(canonicalMessages);
+        this.rounds.saveMany(canonicalRounds);
+      },
+    );
+    const result = {
       conversationId,
       messageCount: canonicalMessages.length,
       roundCount: canonicalRounds.length,
@@ -93,6 +132,11 @@ export class ImportService {
       roundIds: canonicalRounds.map((round) => round.id),
       skippedCount: 0,
     };
+    const complete = () => {
+      this.sources.saveCurrent(source);
+      return result;
+    };
+    return mutation instanceof Promise ? mutation.then(complete) : complete();
   }
 
   appendToConversation(preview: ImportPreview, conversationId: string) {
@@ -120,6 +164,9 @@ export class ImportService {
     }));
     const messageIds = appendedMessages.map((message) => message.id);
     const existingRounds = this.rounds.getByConversationId(conversationId);
+    const existingSources = this.sources
+      .getAll()
+      .filter((source) => source.conversationId === conversationId);
     const startRoundOrder =
       existingRounds.reduce((max, round) => Math.max(max, round.order), 0) + 1;
     const appendedRounds: Round[] = preview.rounds.map((round, index) => ({
@@ -154,6 +201,12 @@ export class ImportService {
       {
         conversationIds: [conversationId],
         operation: "append imported transcript",
+        expected: {
+          conversations: [conversation],
+          sources: existingSources,
+          messages: existingMessages,
+          rounds: existingRounds,
+        },
         put: {
           conversations: [updatedConversation],
           sources: [appendedSource],

@@ -28,6 +28,7 @@ export type ConversationTranscriptRoundReplacement = Readonly<{
 
 export type ConversationTranscriptMutationBaseline = Readonly<{
   conversations?: readonly Readonly<Conversation>[];
+  sources?: readonly Readonly<ImportedSource>[];
   messages?: readonly Readonly<Message>[];
   rounds?: readonly Readonly<Round>[];
   conversationVersions?: readonly Readonly<ConversationVersion>[];
