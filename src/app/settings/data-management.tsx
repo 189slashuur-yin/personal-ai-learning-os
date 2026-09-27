@@ -435,9 +435,9 @@ export function DataManagement() {
       <p className="mt-3 text-xs leading-5 text-amber-700">脚本继续保留，但不会替浏览器执行；LocalStorage 请用下方 App Data 导出。</p>
 
       <div className="mt-6 border-t border-zinc-100 pt-5">
-        <h3 className="font-semibold">Export / Import App Data</h3>
+        <h3 className="font-semibold">应用备份与恢复 / Export App Data</h3>
         <p className="mt-1 text-xs text-zinc-500">
-          导出/导入 PALOS 自身的全部业务数据（IndexedDB + LocalStorage 配置），用于备份恢复或跨浏览器迁移。
+          导出/导入当前浏览器中的全部 PALOS 业务数据（IndexedDB + LocalStorage 配置），用于整应用备份恢复或跨浏览器迁移。恢复时会替换所选范围的现有数据。
           与 ChatGPT Export Import（在 Import 页面导入 conversations.json）是不同功能：
           App Data 导入会替换现有数据，ChatGPT Import 会创建或追加 Conversation。
         </p>

@@ -4,10 +4,10 @@ PALOS 是一个本地优先的个人 AI 上下文管理工作区。它保留可�
 
 ## Project Status
 
-- Current Version：v1.8.1 hardening candidate（working tree；未 commit、未 tag）
-- Current Phase：Immutable ChatGPT Conversation Snapshot release hardening
-- Current Focus：最终 release audit 与 clean release commit
-- Verification：20 个 Vitest 文件 / 374 tests；Playwright release gate 3/3；lint/build/diff-check passed
+- Current Version：v1.10.2 UX / compatibility patch release
+- Current Phase：v1.10.x stabilization / cleanup complete
+- Current Focus：导入兼容、长对话可达性与清晰的恢复范围
+- Verification：27 个 Vitest 文件 / 457 tests；Playwright 11/11；lint/build/diff-check passed
 
 ### Feature Matrix
 
@@ -29,8 +29,8 @@ PALOS 是一个本地优先的个人 AI 上下文管理工作区。它保留可�
 | Knowledge | ✅ | Review 后生成、编辑、归档与来源追溯。 |
 | Provider | ✅ | Demo Provider 与可选本地 Ollama；云 Provider 未启用。 |
 | Version | ✅ | Conversation History、版本记录与恢复点。 |
-| Import | ✅ v1.6.5 candidate | New / Existing × ChatGPT Export / Paste Text / TXT File 六种组合；Preview、进度、flush/reload verification 与明确错误。 |
-| Export / Restore | ✅ candidate | PALOS App Data restore 先预校验并备份，写入后验证；失败只在备份恢复也通过验证时声明已回滚。 |
+| Import | ✅ v1.10.2 | New / Existing × ChatGPT Export / Paste Text / TXT File；同一次导出的多个 `conversations-*.json` 分片可一次选择，先预览再确认。 |
+| Export / Restore | ✅ | PALOS App Data restore 先预校验并备份，写入后验证；失败只在备份恢复也通过验证时声明已回滚。 |
 | Recipe | ✅ foundation | 本地手动工作流模板；不自动执行，不是 Agent。 |
 | Tag | ✅ | Tag 管理、关联与筛选。 |
 | Proposal | ✅ | Source / Messages 分析、证据与生成元数据。 |

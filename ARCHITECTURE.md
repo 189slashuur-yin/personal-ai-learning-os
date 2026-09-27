@@ -2,11 +2,13 @@
 
 ## Current release context
 
-- Current Version：PALOS v1.10.1 Stabilization patch release（无 schema/store/contract 变化）
-- Release Baseline：v1.9.1 / `5dbd5b03`
-- Current Focus：Knowledge provenance read model、全量 discoverability 与 durable manual creation confirmation
+- Current Version：PALOS v1.10.2 UX / compatibility patch release（无 schema/store/对外 contract 变化）
+- Release Baseline：v1.10.1 / `8a803c8b`
+- Current Focus：多分片导入、100 条 Timeline 展示窗口、既有导入与恢复入口说明
 - Automated Status：本次发布门禁结果见 HANDOFF
-- Scope Guard：P1/P2 consistency backlog 与其它产品 backlog 不并入本 release
+- Scope Guard：ADR-005 / v1.11 与其它延期能力不并入本 release
+
+v1.10.2 将同一次 ChatGPT Export 的 `conversations-*.json` 分片合并预览与导入；普通浏览和 Message deep link 均可进入长 Timeline 的任意 100 条展示段。分段只影响 UI 渲染，不改变 Message、Search、Analyzer、Export 或 Knowledge 来源解析的持久化与服务边界。
 
 当前架构结论仍受单浏览器、本地优先与浏览器存储边界约束。PALOS 业务数据默认使用 IndexedDB；LocalStorage 保留为轻量配置、UI 偏好、schema/storage metadata 与旧数据迁移来源。v1.0 候选必须先完成范围和验收评审，不能从本文的演进 seam 推定为已批准实现。
 

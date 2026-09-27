@@ -2,7 +2,15 @@
 
 本文件记录当前仓库已经完成的 Sprint 与关键提交。日期使用仓库 commit date。
 
-当前口径：PALOS v1.10.1 stabilization / bugfix patch release；annotated tag `v1.10.1` 指向本次修复与文档收口提交。
+当前口径：PALOS v1.10.2 UX / compatibility patch release；annotated tag `v1.10.2` 对应本次发布提交。
+
+## 2026-09-27 — PALOS v1.10.2 UX / Compatibility Patch Release
+
+- 修复 Merge 成功后的目标 Conversation 链接；一次选择同一次 ChatGPT 导出的多个 `conversations-*.json` 分片，合并预览和导入，重复 external Conversation ID 在写入前报错。
+- Continue Import 增加详情入口并澄清新建跳过、已有目标追加及普通 TXT 按原样追加的反馈；390×320 More 菜单校正视口边界。
+- 长 Timeline 以 100 条为展示窗口，提供上一段／下一段及范围／总数；Message 搜索与深链定位到目标段。外部对话快照、Conversation 恢复点与应用备份／恢复的范围在页面和 Help 中分别说明。
+- 合成 2005 Message 浏览器验收从首段逐段到末段，并验证第 101、1000、2000 和末条深链；Raw Message 搜索 10 次查询、快速改写与跨 Conversation 跳转通过。11 项 Playwright、457 项 Vitest 及 lint/build/diff-check 的最终结果见 HANDOFF。
+- 未修改 package/dependency、Entity schema、IndexedDB version 1／七个 store、对外 Storage／Provider contract 或 immutable Snapshot 语义；ADR-005 / v1.11 不在本版。
 
 ## 2026-09-26 — PALOS v1.10.1 Stabilization Patch Release
 

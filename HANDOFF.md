@@ -1,3 +1,46 @@
+# PALOS v1.10.2 — UX / compatibility release
+
+## 2026-09-27 Final Acceptance / release closure
+
+- 发布基线 `HEAD = origin/main = v1.10.1^{}` 为 `8a803c8bf1093116c934e2c7dfff59451f1b51b2`；独立未跟踪 ADR-005 的 SHA-256 保持 `07fb94c759b768953014c9751fac2a7783ef52235f6cc51d8cc2cebea09c1fe7`，不纳入 release commit。
+- 2005 条合成 Message 的浏览器验收从 1–100 连续浏览至 2001–2005；第 101、1000、2000、2005 条 deep link 均进入正确段并滚动、高亮；搜索跳段后仍可前后浏览。100 条仅为 UI 展示窗口。逐段切换约 8–9 秒，记录为优化债。
+- Raw Message 浏览器 10 次合成查询覆盖长短英文、中文、数字、常见词和无结果；单项约 372–395 ms，8 个唯一片段 top-1 均正确，常见词 4 项、无结果 0 项。快速输入／清空／重输无 stale result，跨 Conversation 点击定位正确，未见 console、network 或 runtime error。
+- Merge 成功目标链接、ChatGPT 多分片与“同一次导出”提示、390×320 More 菜单及外部点击／ESC 均通过浏览器回归。Continue Import 从详情保留目标，同一 TXT 连续两次各追加 2 Messages，反馈不显示误导性 `0 skipped`。外部对话快照／Conversation 恢复点／应用备份与恢复的范围文案与 Help 一致。
+- 最终门禁：targeted Vitest 84/84、全量 Vitest 457/457、Playwright 11/11、lint、production build、`git diff --check`。Playwright 在当前候选文件的可写副本上运行；此前 `listen EPERM` 已通过仅 localhost 测试服务器权限解决。三张验收截图仅含合成数据，保存在本次任务输出目录，不纳入 Git。
+- package/dependency、Entity schema、IndexedDB version 1／七个 store、对外 Storage／Provider contract 与 immutable Snapshot 语义未变；ADR-005 / v1.11、Knowledge revision、manual Message→Knowledge、Daily Sync、cross-tab live refresh、RAG 和 Timeline virtualization 未实现。剩余理解度问题属人工 UX 验证，导入内存与长对话切换耗时属优化 backlog。
+- **Release decision：YES**。本版使用单一 release commit 与 annotated tag `v1.10.2`；提交和远端核验值见发布任务报告。
+
+## 2026-09-27 candidate handoff
+
+基线核对：`HEAD = origin/main = v1.10.1^{}` 为 `8a803c8bf1093116c934e2c7dfff59451f1b51b2`；annotated tag object 为 `871a6198b9e7142ff4d09ac440a5787107b6f06e`。开始时仅有未跟踪 ADR-005，SHA-256 为 `07fb94c759b768953014c9751fac2a7783ef52235f6cc51d8cc2cebea09c1fe7`。本轮未修改该文件，未 commit、tag、push 或开 PR；`v1.10.1` 仍是已发布版本。
+
+### Confirmed fixed
+
+- Merge 成功后曾清空 `mergeTargetId`，导致成功卡片的“打开目标 Conversation”链接丢失 ID。现在保留目标 ID 到导航或“执行其他合并”，不改变 Merge 数据/事务语义；浏览器回归覆盖实际合并和导航。
+- ChatGPT Export 之前虽接受 `conversations-000.json` 文件名，但每次只读取所选第一份。现在一次选择多个 `conversations-*.json` 并作为同一批预览、选择、导入和统计；单文件 `conversations.json` 保持支持。重复 external Conversation ID 在写入前报错；manifest、账户、资产等其他 JSON 被忽略，不导入 canonical Conversation。未新增 zip parser、附件项目或依赖。manifest 不作为 provenance 证明或导入驱动。
+- 普通 TXT 追加成功文案不再显示误导性的 `0 skipped`，而是说明普通文本按原样追加。大文件解析中现在能显示原有警告；新建模式跳过已有 ChatGPT Conversation，后续增量须明确选已有目标。
+- 390×320 视口复现 More 菜单右边界溢出；使用实测尺寸校正左右/底部位置并限制高度。浏览器回归覆盖布局宽度、ESC、外部点击。
+- 真实 3,930 Message 对话展开 Full Raw Timeline 曾超过浏览器交互超时；两个原文入口改为每段最多 100 条，可逐段浏览全部原文。搜索匹配与 Message deep link 自动切至目标所在段；合成 120 条回归覆盖后段、深链接及重复导航。没有持久化或 Message/Round 模型变化。
+- 历史页面与 Help 区分外部对话快照、Conversation 恢复点和整应用备份恢复；Help 分别定义 Overview、Note、Summary、Context、Conclusion 等概念。Analyzer 区说明 Proposal 需要 Review，移除两个指向同一 Review 页面且语义重复的 CTA。
+
+### Real export / UX evidence（只记录数字）
+
+- 两个真实对话分片合计约 76.64 MB，101 个 unique Conversation、14,616 条可导入 User/Assistant 文本 Message、754 条不支持内容；跨分片 external Conversation ID 无重复。隔离 Chrome 一次选两份并附 manifest 后解析约 0.7 秒，导入 101 个约 35.5 秒，观察到的 JS heap 峰值约 664 MiB，无 pageerror。再次导入同批数据全部跳过，无重复新建。
+- 最大对话有 3,930 条可导入 Message。修复后的独立浏览器测试：Detail 首次可交互约 11.5 秒，打开原文约 6.5 秒、当前段渲染 100 条；中段 Message 深链接约 12.1 秒定位成功，未见 pageerror。耗时仍是优化债；早期未分段版本的完整原文在测试时限内无法完成交互。
+- Search：隔离浏览器 10 个真实唯一标题的 Conversation top-1 为 10/10；用同一搜索服务对 5 个真实原话片段评估，Message top-1 与 top-5 均为 5/5。5 次片段查询共 11 个结果，其中 6 个是 fuzzy，top-5 汇总中 4 个 fuzzy；短标题样本产生 2 个结果、0 个 fuzzy。Raw Message 默认隐藏合理。浏览器 Raw Message 批量片段查询未在本次测试时限内完成，需进一步验证交互性能；没有据此改 ranking/threshold 或引入语义搜索。
+- Analyzer → Proposal → Review 的真实浏览器 accept/reject 与 reload 路径由现有 E2E 通过；人工 Review 边界未改。Explorer 有按更新时间/手动顺序，主 Conversation 列表无同样明显的排序入口；Explorer 选父节点含子节点，主列表和 Search 按 Workspace 精确匹配。后两者记录为 UX 预期核实，不改层级模型。
+- 三张 candidate 截图仅使用合成数据，存放在本次任务的独立输出目录；未把真实对话正文写入仓库、日志、截图或报告。
+
+### Gates / scope / remaining work
+
+- Targeted Vitest：57/57；全量 Vitest：27 files、457/457；Playwright：8/8；lint、production build、`git diff --check` 均通过。
+- `package.json`/lockfile、Entity schema、IndexedDB version 1 与七个 store、Storage/Provider 对外 contract、Merge transaction、immutable Snapshot 与 Review lifecycle 均未修改。内部 UI props `ChatGPTExportImportCallbacks.onParseStart` 增加大文件布尔参数；属于本轮范围内的内部签名变化。
+- **Needs manual/user validation**：Continue Import 文案是否易懂、三种恢复范围与 Overview 系列概念的认知负担、Analyzer/Review CTA、主列表排序和父子 Workspace 筛选预期。自动路径通过不等于真人问题已解决。
+- **Planned feature**：ADR-005 / v1.11、Knowledge revision、manual Message→Knowledge、Daily Sync、cross-tab live refresh 均未实现。
+- **Optimization / technical debt**：大导出峰值内存与 35 秒批量导入、长 Detail 首屏和深链接延迟、Raw Message 搜索浏览器批量查询表现。下一轮先量化再决定是否优化；不把代码审计结论冒充已验证 bug。
+
+---
+
 # PALOS v1.10.1 — Stabilization release
 
 ## 2026-09-26 release handoff

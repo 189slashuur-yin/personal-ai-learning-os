@@ -217,6 +217,8 @@ export function ConversationDetail({
   const [messageView, setMessageView] = useState<MessageView>("timeline");
   const [messageTimelineMode, setMessageTimelineMode] = useState<"collapsed" | "preview" | "full">("collapsed");
   const PREVIEW_MESSAGE_COUNT = 5;
+  const TIMELINE_PAGE_SIZE = 100;
+  const [messagePageStart, setMessagePageStart] = useState(0);
   const [detailMode, setDetailMode] = useState<"classic" | "workspace">("classic");
   const [qaPairSearchQuery, setQAPairSearchQuery] = useState("");
   const [qaPairSort, setQAPairSort] = useState<QAPairSort>("order");
@@ -328,7 +330,7 @@ export function ConversationDetail({
         block: "center",
       });
     });
-  }, [activeSearchMessageId]);
+  }, [activeSearchMessageId, messagePageStart]);
 
   const initialMessageRequest = useRef(requestedMessageId);
   useEffect(() => {
@@ -487,6 +489,10 @@ export function ConversationDetail({
       setDetailMode("classic");
       setMessageView("timeline");
       setMessageTimelineMode("full");
+      if (state.status === "ready") {
+        const targetIndex = state.messages.findIndex((message) => message.id === anchorTarget.id);
+        if (targetIndex >= 0) setMessagePageStart(Math.floor(targetIndex / TIMELINE_PAGE_SIZE) * TIMELINE_PAGE_SIZE);
+      }
       setCollapsedMessageIds((ids) => {
         const next = new Set(ids);
         next.delete(anchorTarget.id);
@@ -495,7 +501,7 @@ export function ConversationDetail({
       setMessageHighlight({ id: anchorTarget.id });
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [anchorTarget, messageAnchorRequest]);
+  }, [anchorTarget, messageAnchorRequest, state]);
 
   useEffect(() => {
     if (!highlightedMessageId || highlightedMessageId !== anchorTarget?.id) return;
@@ -668,6 +674,8 @@ export function ConversationDetail({
   }
 
   const { conversation, source, proposals, knowledgeCards, roundCount } = state;
+  const timelinePageStart = Math.min(messagePageStart, Math.max(0, Math.floor((state.messages.length - 1) / TIMELINE_PAGE_SIZE) * TIMELINE_PAGE_SIZE));
+  const timelineMessages = state.messages.slice(timelinePageStart, timelinePageStart + TIMELINE_PAGE_SIZE);
   const importProfileService = new ImportProfileService();
   const importProfile = conversation.importProfileId
     ? importProfileService.getById(conversation.importProfileId)
@@ -1146,6 +1154,10 @@ export function ConversationDetail({
     const nextMessageId = searchMatchIds[nextIndex];
 
     setActiveSearchIndex(nextIndex);
+    if (state.status === "ready") {
+      const messageIndex = state.messages.findIndex((message) => message.id === nextMessageId);
+      if (messageIndex >= 0) setMessagePageStart(Math.floor(messageIndex / TIMELINE_PAGE_SIZE) * TIMELINE_PAGE_SIZE);
+    }
     setCollapsedMessageIds((currentIds) => {
       const nextIds = new Set(currentIds);
       nextIds.delete(nextMessageId);
@@ -1167,6 +1179,8 @@ export function ConversationDetail({
       : null;
 
     if (firstMatch) {
+      const messageIndex = state.status === "ready" ? state.messages.findIndex((message) => message.id === firstMatch.id) : -1;
+      if (messageIndex >= 0) setMessagePageStart(Math.floor(messageIndex / TIMELINE_PAGE_SIZE) * TIMELINE_PAGE_SIZE);
       setCollapsedMessageIds((currentIds) => {
         const nextIds = new Set(currentIds);
         nextIds.delete(firstMatch.id);
@@ -1649,7 +1663,7 @@ export function ConversationDetail({
             <h2 className="text-lg font-semibold text-zinc-900">原始对话 / Raw Timeline</h2>
             <p className="mt-1 text-sm text-zinc-500">
               {state.messages.length > 0
-                ? `${state.messages.length} 条 Message — 点击展开查看完整原始对话记录`
+                ? `${state.messages.length} 条 Message — 点击展开，长对话可分段浏览全部原文`
                 : "暂无原始 Messages"}
             </p>
           </div>
@@ -1658,8 +1672,9 @@ export function ConversationDetail({
         {rawTimelineOpen ? (
           <div className="border-t border-zinc-100 px-5 pb-5">
             {state.messages.length > 0 ? (
+              <>
               <ol className="mt-4 max-h-[32rem] space-y-3 overflow-auto">
-                {state.messages.map((message) => (
+                {timelineMessages.map((message) => (
                   <li
                     key={message.id}
                     className={`flex max-w-[90%] gap-3 rounded-xl border p-4 sm:max-w-[82%] ${
@@ -1684,6 +1699,14 @@ export function ConversationDetail({
                   </li>
                 ))}
               </ol>
+              {state.messages.length > TIMELINE_PAGE_SIZE ? (
+                <div className="mt-3 flex items-center justify-between gap-3 text-xs text-zinc-600">
+                  <button disabled={timelinePageStart === 0} onClick={() => setMessagePageStart(Math.max(0, timelinePageStart - TIMELINE_PAGE_SIZE))} type="button">上一段</button>
+                  <span>显示 {timelinePageStart + 1}–{Math.min(timelinePageStart + TIMELINE_PAGE_SIZE, state.messages.length)} / {state.messages.length}</span>
+                  <button disabled={timelinePageStart + TIMELINE_PAGE_SIZE >= state.messages.length} onClick={() => setMessagePageStart(timelinePageStart + TIMELINE_PAGE_SIZE)} type="button">下一段</button>
+                </div>
+              ) : null}
+              </>
             ) : (
               <p className="mt-4 rounded-lg bg-zinc-50 px-4 py-6 text-center text-sm text-zinc-500">
                 暂无原始 Messages，可能是失败导入或空 Conversation。
@@ -1854,7 +1877,7 @@ export function ConversationDetail({
           <p className="detail-kicker">History / 版本历史</p>
           <h2 className="detail-title">历史与恢复</h2>
           <p className="detail-description">
-            Conversation Snapshot 保留外部对话的 immutable capture history；PALOS 版本记录保存本地恢复点。两者语义独立，不会互相覆盖。
+            外部对话快照用于查看导入前后的原文变化；Conversation 恢复点用于恢复这条对话及其 Messages。全部 PALOS 本地数据的备份与恢复在 Settings。
           </p>
         </div>
         <div>
@@ -1867,10 +1890,10 @@ export function ConversationDetail({
           />
           <div className="mt-6 border-t border-zinc-200 pt-6">
             <h3 className="text-base font-semibold text-zinc-950">
-              PALOS 版本记录与 Restore
+              Conversation 恢复点
             </h3>
             <p className="mt-2 text-sm leading-6 text-zinc-600">
-              Auto Snapshot · Manual Snapshot · Import · Split · Merge · Delete · Duplicate · Move · Restore。仅保存 Conversation 与 Messages，不包含 Proposal、Knowledge、AnalyzerRun、Tag 或 Provider。
+              在整理或合并前自动创建，也可手动创建。恢复当前 Conversation 与 Messages，并同步对齐本对话的 Round 消息引用；Proposal、Knowledge、AnalyzerRun、Tag、Provider 和其他对话不受影响。
             </p>
           {restoreStatus ? (
             <p
@@ -2088,7 +2111,7 @@ export function ConversationDetail({
           <div className="flex flex-wrap items-center justify-between gap-3">
             <p className="text-sm text-zinc-500">
               {state.messages.length > 0
-                ? `已生成 ${state.messages.length} 条 Message${messageTimelineMode === "preview" ? ` · 显示前 ${Math.min(PREVIEW_MESSAGE_COUNT, state.messages.length)} 条` : ""}`
+                ? `已生成 ${state.messages.length} 条 Message${messageTimelineMode === "preview" ? ` · 显示前 ${Math.min(PREVIEW_MESSAGE_COUNT, state.messages.length)} 条` : messageTimelineMode === "full" && state.messages.length > TIMELINE_PAGE_SIZE ? ` · 显示 ${timelinePageStart + 1}–${Math.min(timelinePageStart + TIMELINE_PAGE_SIZE, state.messages.length)} 条` : ""}`
                 : "尚未生成 Message"}
             </p>
             <div className="flex flex-wrap gap-2">
@@ -2098,7 +2121,7 @@ export function ConversationDetail({
                 onClick={() => setMessageTimelineMode("full")}
                 type="button"
               >
-                展开全部（{state.messages.length} 条）
+                浏览全部（{state.messages.length} 条）
               </button>
             ) : null}
             <button
@@ -2235,7 +2258,7 @@ export function ConversationDetail({
               <ol className="mt-4 space-y-4">
                 {(messageTimelineMode === "preview"
                   ? state.messages.slice(0, PREVIEW_MESSAGE_COUNT)
-                  : state.messages
+                  : timelineMessages
                 ).map((message) => {
                   const isCollapsed = collapsedMessageIds.has(message.id);
                   const isCurrentSearchMatch =
@@ -2366,6 +2389,13 @@ export function ConversationDetail({
                   );
                 })}
               </ol>
+              {messageTimelineMode === "full" && state.messages.length > TIMELINE_PAGE_SIZE ? (
+                <div className="mt-4 flex items-center justify-between gap-3 rounded-lg border border-zinc-200 bg-white px-4 py-3 text-sm">
+                  <button className="font-semibold text-sky-700 disabled:text-zinc-300" disabled={timelinePageStart === 0} onClick={() => setMessagePageStart(Math.max(0, timelinePageStart - TIMELINE_PAGE_SIZE))} type="button">← 上一段</button>
+                  <span className="text-zinc-500">{timelinePageStart + 1}–{Math.min(timelinePageStart + TIMELINE_PAGE_SIZE, state.messages.length)} / {state.messages.length}</span>
+                  <button className="font-semibold text-sky-700 disabled:text-zinc-300" disabled={timelinePageStart + TIMELINE_PAGE_SIZE >= state.messages.length} onClick={() => setMessagePageStart(timelinePageStart + TIMELINE_PAGE_SIZE)} type="button">下一段 →</button>
+                </div>
+              ) : null}
               {messageTimelineMode === "preview" && state.messages.length > PREVIEW_MESSAGE_COUNT ? (
                 <div className="mt-4 rounded-lg border border-dashed border-zinc-300 bg-zinc-50 p-4 text-center">
                   <p className="text-sm text-zinc-500">还有 {state.messages.length - PREVIEW_MESSAGE_COUNT} 条 Message 未显示。</p>
@@ -2530,7 +2560,7 @@ export function ConversationDetail({
           <p className="detail-kicker">06 · AI 整理建议（可选，不是必经流程）</p>
           <h2 className="detail-title">Proposal / 整理建议</h2>
           <p className="detail-description">
-            AI 生成的整理草稿，可选使用。没有 Proposal 也可以直接手动创建 Knowledge。按创建时间查看、追溯和管理当前 Conversation 下的所有 Proposal。
+            Analyzer 只生成 Proposal 整理草稿，不会直接写入 Knowledge。你可以在下方查看建议，再进入 Review 确认或拒绝；也可以跳过 AI，手动创建 Knowledge。
           </p>
         </div>
         <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
@@ -2592,7 +2622,7 @@ export function ConversationDetail({
               </button>
             ) : null}
             {(latestAnalyzerRun.status === "failed" || latestAnalyzerRun.status === "timeout") ? <div className="mt-3 flex flex-wrap gap-2"><button className="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-xs font-semibold" onClick={switchToDemo} type="button">Switch to Demo</button><Link className="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-xs font-semibold" href="/settings">Increase Timeout</Link></div> : null}
-            {latestAnalyzerRun.status === "completed" ? <div className="mt-3 flex flex-wrap gap-2"><Link className="rounded-lg bg-zinc-950 px-3.5 py-2 text-xs font-semibold text-white hover:bg-zinc-800" href="/review">Open Proposal</Link><Link className="rounded-lg border border-zinc-300 bg-white px-3.5 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-50" href="/review">Review Proposal</Link></div> : null}
+            {latestAnalyzerRun.status === "completed" ? <p className="mt-3 text-xs text-emerald-900">整理建议已保存在下方列表。打开对应建议后可进入 Review 确认或拒绝。</p> : null}
           </div>
         ) : null}
         {analyzerSuccess ? (

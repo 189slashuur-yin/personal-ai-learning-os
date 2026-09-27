@@ -4,13 +4,24 @@
 
 ## Current release
 
-- Current Version：PALOS v1.10.1 Stabilization patch release
-- Current Focus：7 个 P1 + 1 个 P2 正确性修复及延期产品清单收口；无新 feature
-- Release Metadata：annotated tag `v1.10.1`；release baseline `v1.10.0` / `06a87b17`
+- Current Version：PALOS v1.10.2 UX / compatibility patch release
+- Current Focus：ChatGPT Export 分片兼容、长 Timeline 可达性、导入与恢复文案
+- Release Metadata：annotated tag `v1.10.2`；release baseline `v1.10.1` / `8a803c8b`
 - Automated Status：本次发布门禁结果见 HANDOFF 与发布任务最终报告
 - Scope Guard：ADR-005 / v1.11 Knowledge Context Reuse 不在本版；延期事项见下方清单
 
-## Reconciled deferred product backlog (v1.10.1)
+## v1.10.2 UX / compatibility release
+
+本节记录 v1.10.2 的实现与浏览器验收。下方 v1.10.1 backlog 保留当时的需求来源与判断；真人理解度仍需单独验证。
+
+| 分类 | 本轮状态与下一步 |
+| --- | --- |
+| Confirmed fixed | Merge 成功后的目标链接；一次选择同一次 ChatGPT 导出的多个 `conversations-*.json` 分片并忽略非对话元数据；More 手机窄屏右/下边界溢出；长 Timeline 可逐段浏览并保持精确深链接。合成 2005 Message 浏览器测试到达末条并验证四个边界深链。 |
+| Needs manual/user validation | Continue Import 的新建/追加反馈、三种恢复范围文案、Overview/Note/Summary/Context/Conclusion 定义、Analyzer → Proposal → Review 的用户理解、主 Conversation 列表排序入口与父子 Workspace 筛选预期。自动路径与文案已核实，仍需真人判断是否易懂。 |
+| Planned feature | ADR-005 / Knowledge Context Reuse、Knowledge revision、Manual Message→Knowledge、Daily Sync、cross-tab live refresh 继续独立排期，不在本 candidate 实现。 |
+| Optimization / technical debt | 大导出浏览器峰值内存约 664 MiB、长 Conversation Detail 首屏约 11.5 秒和深链接约 12 秒；合成 2005 Message 浏览器逐段切换约 8–9 秒。Raw Message 的 10 次合成查询约 372–395 ms/次且唯一片段 top-1 正确；真实数据上的相关性仍可继续观察。没有引入新的存储模型或搜索架构。 |
+
+## Reconciled deferred product backlog (v1.10.1 baseline)
 
 此表是当前待办入口，按 repo 与历史 HANDOFF/ROADMAP 重新归类。**Needs manual validation** 表示尚未确认当前版本存在缺陷，不能视作 confirmed bug；**Confirmed missing** 表示现有实现未覆盖；**Planned** 表示明确的后续能力；**Technical debt** 表示已接受的实现约束。来源列仅将证据明确的 More 菜单标为历史用户反馈，其他均为当前代码/文档审计或产品验收问题。
 

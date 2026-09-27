@@ -167,7 +167,7 @@ export interface ChatGPTExportImportSharedState {
 
 export interface ChatGPTExportImportCallbacks {
   onClearFile: () => void;
-  onParseStart: () => void;
+  onParseStart: (isLarge: boolean) => void;
   onParseError: (error: string) => void;
   onFileParsed: (
     fileInfo: { name: string; size: number },
@@ -380,8 +380,9 @@ export function ChatGPTExportImport({
 
   // ---- File selection ----
   async function chooseFile(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    if (!file) return;
+    const selectedFiles = Array.from(event.target.files ?? []);
+    event.target.value = "";
+    if (selectedFiles.length === 0) return;
 
     // Reset all state
     onClearFile();
@@ -390,9 +391,10 @@ export function ChatGPTExportImport({
     setStatus(null);
     setProgress(createImportOperationProgress("parsing"));
 
-    if (!FILE_PATTERN.test(file.name)) {
+    const files = selectedFiles.filter((file) => FILE_PATTERN.test(file.name));
+    if (files.length === 0) {
       onParseError(
-        "请选择 conversations.json 或 conversations-*.json（例如 conversations-000.json）。不支持直接读取 zip 文件。",
+        "请选择 conversations.json 或 conversations-*.json（例如 conversations-000.json）。其他导出元数据不会作为对话导入；不支持直接读取 zip 文件。",
       );
       setProgress(
         failImportOperation(
@@ -403,16 +405,30 @@ export function ChatGPTExportImport({
       return;
     }
 
-    const isLarge = file.size > LARGE_FILE_THRESHOLD;
-    onParseStart();
+    const totalSize = files.reduce((sum, file) => sum + file.size, 0);
+    const isLarge = totalSize > LARGE_FILE_THRESHOLD;
+    onParseStart(isLarge);
 
     try {
-      const text = await file.text();
-      const parsed = service().parseExport(text);
-      if (parsed.length === 0) {
-        throw new Error("文件中没有可导入的 ChatGPT Conversation。 ");
+      const parsed: ChatGPTConversationPreview[] = [];
+      const seenIds = new Set<string>();
+      for (const file of files.sort((a, b) => a.name.localeCompare(b.name))) {
+        const text = await file.text();
+        const part = service().parseExport(text);
+        for (const conversation of part) {
+          if (seenIds.has(conversation.externalConversationId)) {
+            throw new Error("所选文件包含重复的 Conversation ID；请只选择同一次导出的分片，避免混合不同导出。");
+          }
+          seenIds.add(conversation.externalConversationId);
+          parsed.push(conversation);
+        }
+        // Let the browser paint progress between large files.
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
       }
-      onFileParsed({ name: file.name, size: file.size }, parsed, isLarge);
+      if (parsed.length === 0) {
+        throw new Error("所选文件中没有可导入的 ChatGPT Conversation。");
+      }
+      onFileParsed({ name: files.length === 1 ? files[0].name : `${files.length} 个 ChatGPT 对话分片`, size: totalSize }, parsed, isLarge);
       setProgress(createImportOperationProgress("preview-ready", parsed.length));
     } catch (error) {
       const message =
@@ -1033,9 +1049,8 @@ export function ChatGPTExportImport({
         <BulkDiagnosticsCopyButton />
       </div>
       <p className="mt-2 text-sm leading-6 text-zinc-600">
-        先在 ChatGPT 导出 zip 中解压文件，再选择 conversations.json 或
-        conversations-*.json。 当前不解析 zip、附件、图片、tool call、canvas、voice
-        或 shared link。
+        先解压 ChatGPT 导出 zip。请选择同一次导出的全部 conversations-*.json 分片；
+        单文件 conversations.json 也支持。其他 JSON 元数据会忽略；当前不解析 zip、附件、图片、tool call、canvas、voice 或 shared link。
       </p>
 
       {/* P0-1: Current mode indicator */}
@@ -1065,7 +1080,7 @@ export function ChatGPTExportImport({
               : "border-zinc-300 hover:border-zinc-500"
           }`}
         >
-          选择 conversations.json / conversations-*.json
+          选择 conversations.json / 全部分片
           <input
             accept=".json,application/json"
             className="sr-only"
@@ -1074,6 +1089,7 @@ export function ChatGPTExportImport({
               (!targetConversationId || existingConversations.length === 0)
             }
             onChange={chooseFile}
+            multiple
             type="file"
           />
         </label>

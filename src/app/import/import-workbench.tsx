@@ -140,10 +140,10 @@ export function ImportWorkbench() {
       setChatGptLargeWarning(false);
       setChatGptLoading(false);
     },
-    onParseStart: () => {
+    onParseStart: (isLarge: boolean) => {
       setChatGptLoading(true);
       setChatGptParseError(null);
-      setChatGptLargeWarning(false);
+      setChatGptLargeWarning(isLarge);
     },
     onParseError: (error: string) => {
       setChatGptParseError(error);
@@ -321,7 +321,6 @@ export function ImportWorkbench() {
       setMergeReport(`✅ 已合并：${result.appendedMessages.length} Messages · ${result.appendedRounds.length} Rounds →「${mergePreview.targetConversation.title}」`);
       setMergePreview(null);
       setMergeSourceId("");
-      setMergeTargetId("");
     } catch (error) {
       setError(
         error instanceof Error
@@ -539,7 +538,7 @@ export function ImportWorkbench() {
 
       if (importPath === "existing") {
         setImportReport(
-          `✅ 已追加到「${targetTitle}」：${actualMessageDelta} Messages · ${actualRoundDelta} Rounds · 0 skipped`,
+          `✅ 已追加到「${targetTitle}」：${actualMessageDelta} Messages · ${actualRoundDelta} Rounds。普通文本按原样追加，不做重复内容去重。`,
         );
         return;
       }
@@ -588,8 +587,8 @@ export function ImportWorkbench() {
         <summary className="cursor-pointer text-sm font-semibold text-emerald-950">📦 怎么导入 ChatGPT 数据？</summary>
         <ol className="mt-3 list-inside list-decimal space-y-1 text-sm leading-7 text-emerald-900">
           <li>在 ChatGPT 设置（Settings）里选择 <strong>导出数据（Export data）</strong>，等待 OpenAI 发送下载邮件。</li>
-          <li>下载 zip 文件并解压，找到 <code className="rounded bg-emerald-100 px-1.5 py-0.5 text-xs font-semibold">conversations.json</code>。</li>
-          <li>在本页面选择 <strong>「📦 导入 ChatGPT Export」</strong>，上传 conversations.json 即可。重复导入会自动去重，只追加新消息。</li>
+          <li>下载 zip 文件并解压，找到 <code className="rounded bg-emerald-100 px-1.5 py-0.5 text-xs font-semibold">conversations.json</code>，或全部 <code>conversations-*.json</code> 分片。</li>
+          <li>在本页面选择 <strong>「📦 导入 ChatGPT Export」</strong>，一次选中全部对话分片。新建模式跳过已有 Conversation；要把同一对话的新增消息继续导入，请选已有目标后追加。</li>
         </ol>
         <p className="mt-2 text-xs text-emerald-700">注意：当前只导入 User / Assistant 文本；附件、图片、tool call、canvas、voice 与 shared link 会被跳过或不处理。</p>
       </details>

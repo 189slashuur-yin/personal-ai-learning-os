@@ -211,14 +211,13 @@ export function ConversationSnapshotHistory({
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <p className="text-xs font-semibold uppercase tracking-wider text-sky-700">
-            Conversation Snapshot History
+            外部对话快照 / Snapshot History
           </p>
           <h3 className="mt-2 text-lg font-semibold text-zinc-950">
             Snapshot 时间线与新增内容
           </h3>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-600">
-            这里展示 immutable Source chain；它与下方可 Restore 的 PALOS
-            版本记录是两套独立历史。
+            每次捕获外部对话都会保留一份不可变记录，供查看新增内容和历史差异；这里不能回滚 PALOS 内的整理结果。需要恢复当前对话，请使用下方的 Conversation 恢复点。
           </p>
         </div>
         <Link
