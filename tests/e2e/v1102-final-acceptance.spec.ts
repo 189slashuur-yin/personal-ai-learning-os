@@ -26,10 +26,19 @@ async function importConversations(page: import("@playwright/test").Page, conver
   });
   await page.getByRole("button", { name: "全选", exact: true }).click();
   await page.getByRole("button", { name: conversations.length === 1 ? "导入为新 Conversation" : `批量导入 ${conversations.length} 个为新 Conversation`, exact: true }).click();
+  await expect(page.getByRole("link", { name: "打开 →" })).toHaveCount(conversations.length);
 }
 
 test("Timeline reaches the last page and locates boundary deep links", async ({ page }) => {
   test.setTimeout(600_000);
+  const errors: string[] = [];
+  let cancelledPrefetches = 0;
+  page.on("pageerror", error => errors.push(`runtime: ${error.message}`));
+  page.on("console", message => { if (message.type() === "error") errors.push(`console: ${message.text()}`); });
+  page.on("requestfailed", request => {
+    if (request.failure()?.errorText === "net::ERR_ABORTED" && request.url().includes("_rsc=")) cancelledPrefetches++;
+    else errors.push(`network: ${request.url()} ${request.failure()?.errorText}`);
+  });
   const started = Date.now();
   const total = 2005;
   await importConversations(page, [exportConversation(
@@ -48,7 +57,7 @@ test("Timeline reaches the last page and locates boundary deep links", async ({ 
   const boundaryIds = new Map<number, string>();
   for (let pageIndex = 1; pageIndex <= 20; pageIndex++) {
     console.log(`TIMELINE before-page ${pageIndex} ${Date.now() - started}ms`);
-    await page.getByRole("button", { name: "下一段 →" }).click();
+    await page.getByTestId("message-next-page").click();
     console.log(`TIMELINE after-page ${pageIndex} ${Date.now() - started}ms`);
     await expect(page.getByText(`${pageIndex * 100 + 1}–${Math.min((pageIndex + 1) * 100, total)} / ${total}`)).toBeVisible();
     for (const number of [101, 1000, 2000, total]) {
@@ -59,8 +68,8 @@ test("Timeline reaches the last page and locates boundary deep links", async ({ 
     }
   }
   await expect(page.getByLabel(`选择第 ${total} 条 Message`)).toBeVisible();
-  await expect(page.getByRole("button", { name: "下一段 →" })).toBeDisabled();
-  await page.getByRole("button", { name: "← 上一段" }).click();
+  await expect(page.getByTestId("message-next-page")).toBeDisabled();
+  await page.getByTestId("message-previous-page").click();
   await expect(page.getByText(`1901–2000 / ${total}`)).toBeVisible();
 
   for (const number of [101, 1000, 2000, total]) {
@@ -79,21 +88,27 @@ test("Timeline reaches the last page and locates boundary deep links", async ({ 
   await page.getByLabel("Search Messages").fill("Synthetic numbered message 1000");
   await page.getByRole("button", { name: "下一条", exact: true }).click();
   await expect(page.getByLabel("选择第 1000 条 Message")).toBeVisible();
-  await page.getByRole("button", { name: "下一段 →" }).click();
+  await page.getByTestId("message-next-page").click();
   await expect(page.getByText(`1001–1100 / ${total}`)).toBeVisible();
-  await page.getByRole("button", { name: "← 上一段" }).click();
+  await page.getByTestId("message-previous-page").click();
   await expect(page.getByText(`901–1000 / ${total}`)).toBeVisible();
   if (process.env.PALOS_ACCEPTANCE_SCREENSHOT_DIR) {
     await page.screenshot({ path: path.join(process.env.PALOS_ACCEPTANCE_SCREENSHOT_DIR, "palos-v1102-timeline-navigation.png") });
   }
+  console.log(`TIMELINE browser errors ${errors.length}; cancelled prefetches ${cancelledPrefetches}`);
+  expect(errors).toEqual([]);
 });
 
 test("Raw Message browser search handles ten queries and cross-conversation links", async ({ page }) => {
   test.setTimeout(120_000);
   const errors: string[] = [];
+  let cancelledPrefetches = 0;
   page.on("pageerror", error => errors.push(`runtime: ${error.message}`));
   page.on("console", message => { if (message.type() === "error") errors.push(`console: ${message.text()}`); });
-  page.on("requestfailed", request => errors.push(`network: ${request.url()} ${request.failure()?.errorText}`));
+  page.on("requestfailed", request => {
+    if (request.failure()?.errorText === "net::ERR_ABORTED" && request.url().includes("_rsc=")) cancelledPrefetches++;
+    else errors.push(`network: ${request.url()} ${request.failure()?.errorText}`);
+  });
   await importConversations(page, [
     exportConversation("acceptance-alpha", "Synthetic Alpha", [
       "Copper lantern anchors the archive.",
@@ -113,6 +128,7 @@ test("Raw Message browser search handles ten queries and cross-conversation link
     ]),
   ]);
   await page.goto("/search");
+  await expect(page.getByText("Synthetic Alpha", { exact: true }).first()).toBeVisible();
   await page.getByLabel("高级模式：包含 Raw Message").check();
   await page.getByLabel("Entity Type").selectOption("message");
   const input = page.getByRole("searchbox", { name: "全文搜索" });
@@ -143,10 +159,13 @@ test("Raw Message browser search handles ten queries and cross-conversation link
     const count = item.present ? (await page.locator('a[href*="?message="]').count()) / 2 : 0;
     console.log(`RAW_SEARCH ${JSON.stringify({ query: item.q, ms: Date.now() - started, count, top1: item.title || null })}`);
   }
+  await input.fill("");
+  await expect.poll(() => new URL(page.url()).searchParams.get("q")).toBeNull();
   await input.fill("Copper lantern");
   await input.fill("Silver compass");
   await input.fill("");
   await input.fill("green orchard statement");
+  await expect.poll(() => new URL(page.url()).searchParams.get("q")).toBe("green orchard statement");
   await expect(page.locator('a[href*="?message="]').first()).toContainText("Synthetic Beta");
   if (process.env.PALOS_ACCEPTANCE_SCREENSHOT_DIR) {
     await page.locator('a[href*="?message="]').first().scrollIntoViewIfNeeded();
@@ -156,6 +175,7 @@ test("Raw Message browser search handles ten queries and cross-conversation link
   await expect(page).toHaveURL(/\/conversation\/[^/?]+\?message=[^#]+#message-/);
   await expect(page.getByText("Synthetic Beta", { exact: true }).first()).toBeVisible();
   await expect(page.locator('[data-message-highlighted="true"]')).toContainText("green orchard statement");
+  console.log(`RAW_SEARCH browser errors ${errors.length}; cancelled prefetches ${cancelledPrefetches}`);
   expect(errors).toEqual([]);
 });
 
@@ -167,7 +187,10 @@ test("Continue Import keeps its target and reports repeated TXT appends accurate
   await expect(page).toHaveURL(/\/conversation\/[^/?]+$/);
   const detailUrl = page.url();
   await page.getByRole("link", { name: "📥 继续导入到本对话" }).click();
-  await expect(page).toHaveURL(/\/import\?targetConversationId=/);
+  await expect.poll(() => {
+    const url = new URL(page.url());
+    return url.searchParams.get("existingTargetId") ?? url.searchParams.get("targetConversationId");
+  }).toBe(new URL(detailUrl).pathname.split("/").pop());
   await expect(page.getByText("当前目标：Synthetic Continue Import target", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: /TXT File/ }).click();
   const file = { name: "synthetic-continue.txt", mimeType: "text/plain", buffer: Buffer.from("User: Repeatable fixture\nAssistant: Append as written") };

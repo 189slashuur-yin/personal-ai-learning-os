@@ -1,4 +1,5 @@
 import type { ConversationStorage } from "@/core/contracts/conversation-storage";
+import { validateKnowledgeRefs } from "@/core/services/knowledge-context-service";
 import type { Conversation } from "@/core/entities/conversation";
 import { DEFAULT_WORKSPACE_ID } from "@/core/entities/workspace";
 import { normalizeStoredConversationContext } from "@/infrastructure/storage/context-normalization";
@@ -7,13 +8,19 @@ const CONVERSATIONS_KEY = "ai-learning-os.conversations";
 
 export class BrowserConversationStorage implements ConversationStorage {
   save(conversation: Conversation) {
+    if (conversation.knowledgeContextRefs !== undefined && !validateKnowledgeRefs(conversation.knowledgeContextRefs)) {
+      throw new Error("Invalid Conversation Knowledge Context refs.");
+    }
     const conversations = this.getAll();
     const existingIndex = conversations.findIndex(
       (storedConversation) => storedConversation.id === conversation.id,
     );
 
     if (existingIndex >= 0) {
-      conversations[existingIndex] = conversation;
+      conversations[existingIndex] = {
+        ...conversation,
+        knowledgeContextRefs: conversations[existingIndex].knowledgeContextRefs,
+      };
     } else {
       conversations.push(conversation);
     }
@@ -24,6 +31,24 @@ export class BrowserConversationStorage implements ConversationStorage {
     );
   }
 
+  /** Called only by the scoped Knowledge Context writer after baseline comparison. */
+  saveKnowledgeContext(conversation: Conversation) {
+    const conversations = this.getAll();
+    const index = conversations.findIndex((item) => item.id === conversation.id);
+    if (index < 0) throw new Error("Conversation no longer exists.");
+    conversations[index] = conversation;
+    window.localStorage.setItem(CONVERSATIONS_KEY, JSON.stringify(conversations));
+  }
+
+  /** Explicit aggregate replacement for a confirmed version restore. */
+  replaceForVersionRestore(conversation: Conversation) {
+    const conversations = this.getAll();
+    const index = conversations.findIndex((item) => item.id === conversation.id);
+    if (index < 0) throw new Error("Conversation no longer exists.");
+    conversations[index] = conversation;
+    window.localStorage.setItem(CONVERSATIONS_KEY, JSON.stringify(conversations));
+  }
+
   getAll(): Conversation[] {
     const storedConversations = window.localStorage.getItem(CONVERSATIONS_KEY);
 
@@ -32,6 +57,7 @@ export class BrowserConversationStorage implements ConversationStorage {
     }
 
     return (JSON.parse(storedConversations) as Conversation[])
+      .filter((conversation) => conversation.knowledgeContextRefs === undefined || validateKnowledgeRefs(conversation.knowledgeContextRefs))
       .map((conversation) => ({
         ...conversation,
         workspaceId: conversation.workspaceId ?? DEFAULT_WORKSPACE_ID,

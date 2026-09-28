@@ -1,3 +1,5 @@
+import type { KnowledgeContextRef } from "@/core/entities/knowledge-context-ref";
+
 export const conversationSourceTypes = [
   "ChatGPT",
   "Claude",
@@ -41,6 +43,7 @@ export type Conversation = {
   conclusion?: string;
   pendingQuestions?: string;
   context?: ConversationContext;
+  knowledgeContextRefs?: KnowledgeContextRef[];
   externalSource?: "chatgpt";
   externalConversationId?: string;
   importedAt?: string;

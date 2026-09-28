@@ -3,10 +3,14 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import type { AnalyzerRun } from "@/core/entities/analyzer-run";
+import type { KnowledgeReuseAuditItem } from "@/core/entities/knowledge-context-ref";
 import type { ImportedSource } from "@/core/entities/imported-source";
 import type { Proposal } from "@/core/entities/proposal";
 import type { ProviderCapability } from "@/core/entities/provider-capability";
 import { AnalyzerExecutionService } from "@/core/services/analyzer-execution";
+import { knowledgeAuditSnapshotFingerprint } from "@/core/services/knowledge-context-service";
+import { resolveAnalyzerKnowledgeContext } from "@/infrastructure/storage/analyzer-knowledge-context";
+import { KnowledgeReuseAudit } from "@/app/knowledge-reuse-audit";
 import { PromptTemplateService } from "@/core/services/prompt-template-service";
 import { ProviderConfigurationService } from "@/core/services/provider-configuration-service";
 import { ProviderService } from "@/core/services/provider-service";
@@ -23,6 +27,7 @@ import { CapabilityBadges } from "@/app/capability-badges";
 import { persistIndexedDBGeneratedProposal } from "@/app/conversation/[id]/proposal-persistence";
 
 type AnalysisState =
+  | { status: "ready"; source: ImportedSource; knowledge: KnowledgeReuseAuditItem[] }
   | { status: "analyzing" }
   | { status: "complete"; proposal: Proposal }
   | { status: "error"; message: string }
@@ -35,7 +40,7 @@ function formatDate(value: string) {
   }).format(new Date(value));
 }
 
-function runSourceAnalysis(source: ImportedSource, simulateFailure = false) {
+function runSourceAnalysis(source: ImportedSource, simulateFailure = false, excludedKnowledgeCardIds: string[] = [], expectedKnowledgeCardIds?: string[], expectedKnowledgeFingerprint?: string, expectedCompleteKnowledgeFingerprint?: string) {
   const provider = new ProviderService(
     new BrowserAIProviderStorage(),
     new BrowserProviderConfigurationStorage(),
@@ -45,7 +50,8 @@ function runSourceAnalysis(source: ImportedSource, simulateFailure = false) {
     provider,
     new PromptTemplateService(new BrowserPromptTemplateStorage()),
     new BrowserAnalyzerRunStorage(),
-  ).runSource(source, { simulateRecoverableError: simulateFailure });
+    resolveAnalyzerKnowledgeContext,
+  ).runSource(source, { simulateRecoverableError: simulateFailure, excludedKnowledgeCardIds, expectedKnowledgeCardIds, expectedKnowledgeFingerprint, expectedCompleteKnowledgeFingerprint });
 }
 
 async function persistProposal(proposal: Proposal) {
@@ -59,6 +65,7 @@ async function persistProposal(proposal: Proposal) {
 export function AnalysisResult() {
   const [state, setState] = useState<AnalysisState>({ status: "analyzing" });
   const [latestRun, setLatestRun] = useState<AnalyzerRun | null>(null);
+  const [excludedKnowledgeCardIds, setExcludedKnowledgeCardIds] = useState<string[]>([]);
   const [providerDetails] = useState<{
     id: string;
     name: string;
@@ -95,7 +102,22 @@ export function AnalysisResult() {
         return;
       }
 
-      const result = await runSourceAnalysis(source);
+      let knowledge: KnowledgeReuseAuditItem[];
+      try {
+        knowledge = await resolveAnalyzerKnowledgeContext(source.conversationId);
+      } catch (error) {
+        setState({ status: "error", message: error instanceof Error ? error.message : "Could not read Referenced Knowledge." });
+        return;
+      }
+      if (knowledge.length) {
+        setState({ status: "ready", source, knowledge });
+        return;
+      }
+      const result = await runSourceAnalysis(source, false, [], [], knowledgeAuditSnapshotFingerprint([]), knowledgeAuditSnapshotFingerprint([])).catch((error) => {
+        setState({ status: "error", message: error instanceof Error ? error.message : "Knowledge selection changed." });
+        return null;
+      });
+      if (!result) return;
       setLatestRun(result.run);
 
       if (result.proposal) {
@@ -123,6 +145,29 @@ export function AnalysisResult() {
     return () => window.clearTimeout(analysisTimer);
   }, []);
 
+  async function runPreviewedSource(source: ImportedSource, knowledge: KnowledgeReuseAuditItem[]) {
+    setState({ status: "analyzing" });
+    const effective = knowledge.filter((item) => !excludedKnowledgeCardIds.includes(item.knowledgeCardId));
+    const result = await runSourceAnalysis(source, false, excludedKnowledgeCardIds,
+      effective.map((item) => item.knowledgeCardId), knowledgeAuditSnapshotFingerprint(effective), knowledgeAuditSnapshotFingerprint(knowledge)).catch((error) => {
+        setState({ status: "error", message: error instanceof Error ? error.message : "Knowledge selection changed." });
+        return null;
+      });
+    if (!result) return;
+    setExcludedKnowledgeCardIds([]);
+    setLatestRun(result.run);
+    if (!result.proposal) {
+      setState({ status: "error", message: result.run.error?.message ?? "Analyzer 运行失败。" });
+      return;
+    }
+    try {
+      await persistProposal(result.proposal);
+      setState({ status: "complete", proposal: result.proposal });
+    } catch (error) {
+      setState({ status: "error", message: error instanceof Error ? error.message : "Proposal 保存失败。" });
+    }
+  }
+
   async function retryOrSimulate(simulateFailure = false) {
     const sourceStorage = createSourceStorage();
     const sourceId = latestRun?.sourceId;
@@ -132,6 +177,17 @@ export function AnalysisResult() {
 
     if (!source) {
       setState({ status: "missing-source" });
+      return;
+    }
+
+    try {
+      const knowledge = await resolveAnalyzerKnowledgeContext(source.conversationId);
+      if (knowledge.length) {
+        setState({ status: "ready", source, knowledge });
+        return;
+      }
+    } catch (error) {
+      setState({ status: "error", message: error instanceof Error ? error.message : "Could not read Referenced Knowledge." });
       return;
     }
 
@@ -178,6 +234,16 @@ export function AnalysisResult() {
     );
   }
 
+  if (state.status === "ready") return <section className="mt-8 max-w-2xl rounded-xl border border-sky-200 bg-sky-50 p-6">
+    <h2 className="font-semibold">Referenced Knowledge for this run · {state.knowledge.length - excludedKnowledgeCardIds.length}/{state.knowledge.length}</h2>
+    <p className="mt-1 text-sm">Saved snapshots are supplemental context. Exclusions apply only to this run.</p>
+    <ul className="mt-3 space-y-2">{state.knowledge.map((item) => <li key={item.knowledgeCardId}><label className="flex gap-2 text-sm">
+      <input checked={!excludedKnowledgeCardIds.includes(item.knowledgeCardId)} onChange={(event) => setExcludedKnowledgeCardIds((current) => event.target.checked ? current.filter((id) => id !== item.knowledgeCardId) : [...current, item.knowledgeCardId])} type="checkbox" />
+      <span>{item.titleSnapshot}{item.sourceStatus === "snapshot-only" ? " · Source unavailable, saved snapshot" : item.sourceStatus === "archived-warning" ? " · Archived" : item.sourceStatus === "updated" ? " · Source updated, using saved snapshot" : ""}</span>
+    </label></li>)}</ul>
+    <button className="mt-4 rounded-lg bg-zinc-950 px-4 py-2 text-sm text-white" onClick={() => void runPreviewedSource(state.source, state.knowledge)} type="button">Run Analyzer</button>
+  </section>;
+
   if (state.status === "analyzing") {
     return (
       <section className="mt-8 max-w-2xl rounded-xl border border-zinc-200 bg-white p-6">
@@ -200,6 +266,7 @@ export function AnalysisResult() {
       <section className="mt-8 max-w-2xl rounded-xl border border-red-200 bg-red-50 p-6">
         <p className="font-medium text-red-950">未生成 Proposal</p>
         <p className="mt-2 text-sm leading-6 text-red-800">{state.message}</p>
+        <KnowledgeReuseAudit items={latestRun?.knowledgeReuseAudit} />
         {latestRun?.providerId === "ollama" ? (
           <p className="mt-3 text-sm leading-6 text-red-800">
             本次失败未写入 Proposal。你可以前往{" "}

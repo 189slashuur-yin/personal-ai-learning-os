@@ -1,5 +1,10 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import type { Conversation } from "@/core/entities/conversation";
+import type { KnowledgeContextRef } from "@/core/entities/knowledge-context-ref";
+import { IndexedDBKnowledgeContextMutationWriter } from "@/infrastructure/storage/indexeddb/idb-knowledge-context-mutation-writer";
+import { StorageBackedKnowledgeContextMutationWriter } from "@/infrastructure/storage/storage-backed-knowledge-context-mutation-writer";
+import { BrowserConversationStorage } from "@/infrastructure/storage/browser-conversation-storage";
+import { KnowledgeContextConflictError, KnowledgeContextCommittedUnverifiedError } from "@/core/contracts/knowledge-context-mutation-writer";
 import type { Message } from "@/core/entities/message";
 import type { Round } from "@/core/entities/round";
 import { ChatGPTExportImportService } from "@/core/services/chatgpt-export-import";
@@ -114,6 +119,17 @@ class FakeObjectStore {
     private readonly data: StoreData,
     private readonly transaction: FakeTransaction,
   ) {}
+
+  get(id: string) {
+    this.transaction.operation();
+    const request = new FakeRequest<unknown>();
+    queueMicrotask(() => {
+      request.result = this.data.get(id);
+      request.onsuccess?.();
+      this.transaction.operationDone();
+    });
+    return request;
+  }
 
   getAll() {
     this.transaction.operation();
@@ -279,10 +295,14 @@ class FakeDatabase {
 class FakeIndexedDB {
   stores = new Map<string, StoreData>();
   failTransactions = 0;
+  transactionCount = 0;
+  failOnTransactionNumber = 0;
 
   open() {
     const request = new FakeRequest<IDBDatabase>() as IDBOpenDBRequest;
     const db = new FakeDatabase(this.stores, () => {
+      this.transactionCount += 1;
+      if (this.transactionCount === this.failOnTransactionNumber) return true;
       if (this.failTransactions <= 0) return false;
       this.failTransactions -= 1;
       return true;
@@ -5016,5 +5036,123 @@ describe("post-v1.10.0 Review durability", () => {
 
     expect(await readAll("proposals")).toEqual([expectedProposal]);
     expect(await readAll("knowledge-cards")).toEqual([concurrentCard]);
+  });
+});
+
+
+describe("v1.11 Knowledge Context scoped persistence", () => {
+  const ref: KnowledgeContextRef = {
+    knowledgeCardId: "card-1", titleSnapshot: "Title", contentSnapshot: "Frozen",
+    knowledgeUpdatedAtSnapshot: now, order: 0, originalContentLength: 6, contentTruncated: false,
+  };
+
+  it("keeps newer refs when a stale tab saves ordinary Conversation fields", async () => {
+    const storage = new IndexedDBConversationStorage();
+    await writeOne("conversations", conversation("ordinary-c"));
+    clearCaches();
+    await preloadAll();
+    const stale = storage.getById("ordinary-c")!;
+    await new IndexedDBKnowledgeContextMutationWriter().execute({
+      conversationId: "ordinary-c", expectedRefs: [], nextRefs: [ref],
+    });
+    for (const patch of [
+      { title: "renamed" }, { summary: "overview" },
+      { context: { currentState: "context" } }, { workspaceId: "moved" },
+      { order: 3 }, { note: "note" },
+    ]) {
+      storage.save({ ...stale, ...patch, updatedAt: now });
+      await settle();
+      const stored = (await readAll<Conversation>("conversations"))[0];
+      expect(stored).toMatchObject(patch);
+      expect(stored.knowledgeContextRefs).toEqual([ref]);
+    }
+    clearCaches();
+    await preloadAll();
+    expect(storage.getById("ordinary-c")?.knowledgeContextRefs).toEqual([ref]);
+  });
+
+  it("scoped refs mutation preserves a newer ordinary field", async () => {
+    await writeOne("conversations", conversation("ordinary-c"));
+    new IndexedDBConversationStorage().save({ ...conversation("ordinary-c"), title: "new title" });
+    await settle();
+    await new IndexedDBKnowledgeContextMutationWriter().execute({
+      conversationId: "ordinary-c", expectedRefs: [], nextRefs: [ref],
+    });
+    expect((await readAll<Conversation>("conversations"))[0]).toMatchObject({
+      title: "new title", knowledgeContextRefs: [ref],
+    });
+  });
+
+  it("patches only refs on the authoritative Conversation and rejects stale tab baselines", async () => {
+    await writeOne("conversations", { ...conversation("knowledge-c"), note: "newer note" });
+    const tabA = new IndexedDBKnowledgeContextMutationWriter();
+    const tabB = new IndexedDBKnowledgeContextMutationWriter();
+    const receipt = await tabA.execute({ conversationId: "knowledge-c", expectedRefs: [], nextRefs: [ref] });
+    expect(receipt.verified).toBe(true);
+    await expect(tabB.execute({ conversationId: "knowledge-c", expectedRefs: [], nextRefs: [] }))
+      .rejects.toBeInstanceOf(KnowledgeContextConflictError);
+    const stored = (await readAll<Conversation>("conversations"))[0];
+    expect(stored.note).toBe("newer note");
+    expect(stored.knowledgeContextRefs).toEqual([ref]);
+  });
+
+  it("retains the committed refs when read-back fails and never compensates", async () => {
+    await writeOne("conversations", conversation("unverified-c"));
+    fakeIndexedDB.failOnTransactionNumber = fakeIndexedDB.transactionCount + 2;
+    await expect(new IndexedDBKnowledgeContextMutationWriter().execute({
+      conversationId: "unverified-c", expectedRefs: [], nextRefs: [ref],
+    })).rejects.toBeInstanceOf(KnowledgeContextCommittedUnverifiedError);
+    expect((await readAll<Conversation>("conversations"))[0].knowledgeContextRefs).toEqual([ref]);
+  });
+
+  it("keeps LocalStorage debug refs and Run audit with the same optional-field semantics", async () => {
+    const conversations = new BrowserConversationStorage();
+    conversations.save(conversation("debug-c"));
+    const stale = conversations.getById("debug-c")!;
+    const writer = new StorageBackedKnowledgeContextMutationWriter(conversations);
+    await writer.execute({ conversationId: "debug-c", expectedRefs: [], nextRefs: [ref] });
+    expect(conversations.getById("debug-c")?.knowledgeContextRefs).toEqual([ref]);
+    conversations.save({ ...stale, title: "ordinary local edit" });
+    expect(conversations.getById("debug-c")).toMatchObject({ title: "ordinary local edit", knowledgeContextRefs: [ref] });
+    await expect(writer.execute({ conversationId: "debug-c", expectedRefs: [], nextRefs: [] }))
+      .rejects.toBeInstanceOf(KnowledgeContextConflictError);
+    const audit = [{ knowledgeCardId: ref.knowledgeCardId, titleSnapshot: ref.titleSnapshot,
+      contentSnapshot: ref.contentSnapshot, knowledgeUpdatedAtSnapshot: ref.knowledgeUpdatedAtSnapshot,
+      originalContentLength: ref.originalContentLength, contentTruncated: ref.contentTruncated }];
+    new BrowserAnalyzerRunStorage().save({ id: "debug-run", providerId: "demo", providerName: "Demo",
+      status: "failed", startedAt: now, knowledgeReuseAudit: audit });
+    expect(new BrowserAnalyzerRunStorage().getById("debug-run")?.knowledgeReuseAudit).toEqual(audit);
+    const bundle = await new AppDataStorage().exportData();
+    expect(bundle.data["ai-learning-os.analyzer-runs"]).toEqual([expect.objectContaining({ knowledgeReuseAudit: audit })]);
+  });
+
+  it("round-trips refs and Proposal audit without changing the seven-store schema", async () => {
+    const proposal = { id: "knowledge-p", title: "P", summary: "S", sourceEvidence: { sourceName: "S", excerpt: "E" },
+      generatedBy: "Demo Analyzer Generated", status: "Pending", createdAt: now,
+      knowledgeReuseAudit: [{ knowledgeCardId: ref.knowledgeCardId, titleSnapshot: ref.titleSnapshot,
+        contentSnapshot: ref.contentSnapshot, knowledgeUpdatedAtSnapshot: ref.knowledgeUpdatedAtSnapshot,
+        originalContentLength: ref.originalContentLength, contentTruncated: ref.contentTruncated }] };
+    await replaceStores({ conversations: [{ ...conversation("knowledge-c"), knowledgeContextRefs: [ref] }],
+      messages: [], rounds: [], sources: [], proposals: [proposal], "knowledge-cards": [], "conversation-versions": [] });
+    const storage = new AppDataStorage();
+    const bundle = await storage.exportData();
+    expect(bundle.indexedDB?.conversations?.[0].knowledgeContextRefs).toEqual([ref]);
+    expect(bundle.indexedDB?.proposals?.[0].knowledgeReuseAudit).toEqual(proposal.knowledgeReuseAudit);
+    await replaceStores({ conversations: [], messages: [], rounds: [], sources: [], proposals: [],
+      "knowledge-cards": [], "conversation-versions": [] });
+    await storage.importData(bundle, []);
+    expect((await readAll<Conversation>("conversations"))[0].knowledgeContextRefs).toEqual([ref]);
+    expect((await readAll<typeof proposal>("proposals"))[0].knowledgeReuseAudit).toEqual(proposal.knowledgeReuseAudit);
+    expect(fakeIndexedDB.stores.size).toBe(7);
+  });
+
+  it("rejects malformed optional refs and audits before restore mutation", async () => {
+    const storage = new AppDataStorage();
+    const bundle: AppDataBundle = { schemaVersion: 1, exportedAt: now, data: {},
+      indexedDB: { conversations: [{ ...conversation("bad-c"), knowledgeContextRefs: [{ ...ref, contentSnapshot: "x".repeat(4001) }] }] } };
+    await expect(storage.importData(bundle, [])).rejects.toThrow("knowledgeContextRefs is malformed");
+    bundle.indexedDB = { proposals: [{ id: "bad-p", knowledgeReuseAudit: [{ ...ref, originalContentLength: -1 }] }] as never };
+    await expect(storage.importData(bundle, [])).rejects.toThrow("knowledgeReuseAudit is malformed");
+    expect(await readAll("conversations")).toEqual([]);
   });
 });

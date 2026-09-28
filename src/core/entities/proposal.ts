@@ -3,6 +3,7 @@ import type {
   AnalyzerSuggestedAction,
 } from "@/core/entities/analyzer-output-schema";
 import type { ProviderCapability } from "@/core/entities/provider-capability";
+import type { KnowledgeReuseAuditItem } from "@/core/entities/knowledge-context-ref";
 
 export type Proposal = {
   id: string;
@@ -30,4 +31,5 @@ export type Proposal = {
   purpose?: "knowledge-create" | "knowledge-update" | "summary";
   targetKnowledgeId?: string;
   createdAt: string;
+  knowledgeReuseAudit?: KnowledgeReuseAuditItem[];
 };

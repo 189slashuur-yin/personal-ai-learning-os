@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import type { Proposal } from "@/core/entities/proposal";
+import { KnowledgeReuseAudit } from "@/app/knowledge-reuse-audit";
 import type { KnowledgeCard } from "@/core/entities/knowledge-card";
 import type { Conversation } from "@/core/entities/conversation";
 import type { Message } from "@/core/entities/message";
@@ -358,6 +359,7 @@ export function ReviewProposal({ proposalId }: { proposalId?: string }) {
 
       <section>
         <h3 className="text-sm font-semibold text-zinc-900">来源证据</h3>
+        <KnowledgeReuseAudit items={state.proposal.knowledgeReuseAudit} showUnrecorded />
         <div className="mt-2 rounded-lg bg-zinc-50 p-4">
           <p className="text-sm font-medium text-zinc-600">
             {state.proposal.sourceEvidence.sourceName}

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import type { Proposal } from "@/core/entities/proposal";
 import { CapabilityBadges } from "@/app/capability-badges";
+import { KnowledgeReuseAudit } from "@/app/knowledge-reuse-audit";
 
 const statusStyles: Record<Proposal["status"], string> = {
   Pending: "bg-amber-50 text-amber-700",
@@ -74,6 +75,7 @@ export function ProposalWorkspace({
           <p className="mt-3 line-clamp-3 text-sm leading-6 text-zinc-600">
             {proposal.summary}
           </p>
+          <KnowledgeReuseAudit items={proposal.knowledgeReuseAudit} showUnrecorded />
 
           <dl className="mt-4 grid gap-3 rounded-lg bg-zinc-50 p-4 text-sm sm:grid-cols-2">
             <div>

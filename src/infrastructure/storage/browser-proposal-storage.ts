@@ -1,4 +1,5 @@
 import type { ProposalStorage } from "@/core/contracts/proposal-storage";
+import { validateKnowledgeAudit } from "@/core/services/knowledge-context-service";
 import type { Proposal } from "@/core/entities/proposal";
 import {
   clearCurrentProposalPointer,
@@ -10,6 +11,9 @@ const PROPOSALS_KEY = "ai-learning-os.proposals";
 
 export class BrowserProposalStorage implements ProposalStorage {
   save(proposal: Proposal) {
+    if (proposal.knowledgeReuseAudit !== undefined && !validateKnowledgeAudit(proposal.knowledgeReuseAudit)) {
+      throw new Error("Invalid Proposal Knowledge reuse audit.");
+    }
     const proposals = this.getAll();
     const existingIndex = proposals.findIndex(
       (storedProposal) => storedProposal.id === proposal.id,
@@ -55,7 +59,7 @@ export class BrowserProposalStorage implements ProposalStorage {
   private readStoredProposals() {
     const storedProposals = window.localStorage.getItem(PROPOSALS_KEY);
     return storedProposals
-      ? (JSON.parse(storedProposals) as Proposal[])
+      ? (JSON.parse(storedProposals) as Proposal[]).filter((proposal) => proposal.knowledgeReuseAudit === undefined || validateKnowledgeAudit(proposal.knowledgeReuseAudit))
       : [];
   }
 

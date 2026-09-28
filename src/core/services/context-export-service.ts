@@ -111,6 +111,16 @@ export function createContinueContextText(
       )
     : ["- （暂无关联 Task）"];
 
+  const refs = [...(exported.conversation.knowledgeContextRefs ?? [])]
+    .sort((left, right) => left.order - right.order);
+  const referencedKnowledgeLines = refs.length
+    ? ["", "## Referenced Knowledge", ...refs.flatMap((ref, index) => [
+        `### ${index + 1}. ${ref.titleSnapshot}`,
+        ref.contentSnapshot,
+        "",
+      ])]
+    : [];
+
   return [
     `# 继续这个主题：${exported.conversation.title}`,
     "",
@@ -127,6 +137,7 @@ export function createContinueContextText(
     "## Next Actions / 下一步行动",
     `- Context：${textOrFallback(exported.context.nextActions)}`,
     ...taskLines,
+    ...referencedKnowledgeLines,
   ].join("\n");
 }
 

@@ -135,6 +135,24 @@ function createHarness() {
 }
 
 describe("ConversationVersionService restore referential integrity", () => {
+  it("preserves current refs for an old snapshot and restores recorded refs for a new snapshot", async () => {
+    const harness = createHarness();
+    const currentRef = { knowledgeCardId: "current", titleSnapshot: "Current", contentSnapshot: "Current text",
+      knowledgeUpdatedAtSnapshot: timestamp, order: 0, originalContentLength: 12, contentTruncated: false };
+    const savedRef = { ...currentRef, knowledgeCardId: "saved", titleSnapshot: "Saved", contentSnapshot: "Saved text",
+      originalContentLength: 10 };
+    harness.conversations.save({ ...harness.conversations.getById(conversationId)!, knowledgeContextRefs: [currentRef] });
+    const restore = () => harness.service.restoreSnapshot(conversationId, "version", {
+      sources: harness.sources, rounds: harness.rounds, writer: harness.writer,
+    });
+    await restore();
+    expect(harness.conversations.getById(conversationId)?.knowledgeContextRefs).toEqual([currentRef]);
+    const version = harness.versions.getByConversationId(conversationId)[0];
+    harness.versions.save({ ...version, snapshotData: { ...version.snapshotData,
+      conversation: { ...version.snapshotData.conversation, knowledgeContextRefs: [savedRef] } } });
+    await restore();
+    expect(harness.conversations.getById(conversationId)?.knowledgeContextRefs).toEqual([savedRef]);
+  });
   it("regenerates Message identity and remaps stable Round references", async () => {
     const harness = createHarness();
     const restored = await harness.service.restoreSnapshot(

@@ -2,6 +2,7 @@ import type {
   AnalyzerRunDependencyIds,
   AnalyzerRunStorage,
 } from "@/core/contracts/analyzer-run-storage";
+import { validateKnowledgeAudit } from "@/core/services/knowledge-context-service";
 import type { AnalyzerRun } from "@/core/entities/analyzer-run";
 
 const ANALYZER_RUNS_KEY = "ai-learning-os.analyzer-runs";
@@ -23,6 +24,9 @@ function isAnalyzerRun(value: unknown): value is AnalyzerRun {
 
 export class BrowserAnalyzerRunStorage implements AnalyzerRunStorage {
   save(run: AnalyzerRun): void {
+    if (run.knowledgeReuseAudit !== undefined && !validateKnowledgeAudit(run.knowledgeReuseAudit)) {
+      throw new Error("Invalid Analyzer Run Knowledge reuse audit.");
+    }
     const runs = this.getAll();
     const existingIndex = runs.findIndex((storedRun) => storedRun.id === run.id);
 
@@ -44,7 +48,7 @@ export class BrowserAnalyzerRunStorage implements AnalyzerRunStorage {
 
     try {
       const parsed: unknown = JSON.parse(storedRuns);
-      return (Array.isArray(parsed) ? parsed.filter(isAnalyzerRun) : [])
+      return (Array.isArray(parsed) ? parsed.filter((run) => isAnalyzerRun(run) && (run.knowledgeReuseAudit === undefined || validateKnowledgeAudit(run.knowledgeReuseAudit))) : [])
         .map((run) => ({ ...run, status: run.status === ("success" as AnalyzerRun["status"]) ? "completed" as const : run.status }))
         .sort(
         (left, right) => right.startedAt.localeCompare(left.startedAt),

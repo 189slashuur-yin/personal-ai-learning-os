@@ -47,6 +47,7 @@ test("Demo Analyzer Review accept and reject persist without runtime errors", as
     .getByRole("button", { name: "可选：生成 AI 整理建议", exact: true })
     .click();
   await expect(proposalSectionAfterAccept).toContainText("Completed");
+  await expect(proposalSectionAfterAccept.getByRole("link", { name: "确认加入知识库", exact: true })).toHaveCount(2);
   await proposalSectionAfterAccept
     .getByRole("link", { name: "确认加入知识库", exact: true })
     .first()

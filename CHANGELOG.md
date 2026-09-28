@@ -2,7 +2,16 @@
 
 本文件记录当前仓库已经完成的 Sprint 与关键提交。日期使用仓库 commit date。
 
-当前口径：PALOS v1.10.2 UX / compatibility patch release；annotated tag `v1.10.2` 对应本次发布提交。
+当前口径：PALOS v1.11.0 Knowledge Context Reuse release；annotated tag `v1.11.0` 对应本次发布提交。
+
+## 2026-09-28 — PALOS v1.11.0 Knowledge Context Reuse Release
+
+- Conversation Detail 提供跨 Conversation 的 Referenced Knowledge 选择；Continue Topic 使用按顺序保存的 frozen snapshots。最多 5 条，单条正文最多 4,000 字符、合计最多 16,000 字符；截断须确认，超预算拒绝。
+- Knowledge 来源更新后须显式 Refresh；删除来源仍可使用保存快照，归档来源给出警告。普通 Conversation 字段写入保留权威 refs，专用 writer 对选择变更做基线比较与读回。
+- Source、Messages、Round Analyzer 使用 supplemental Knowledge；单次运行可临时排除 refs，不改变 Conversation 选择。AnalyzerRun 和 Proposal 保留本次实际使用的 `knowledgeReuseAudit`；失败保留 audit，retry 新建 run，旧记录缺字段仍表示未记录。
+- `sourceEvidence` 必须归属于 primary Source/selected Messages，Knowledge reuse audit 不参与 primary evidence 或 provenance；有 refs 时不合格 provider 输出按 `INVALID_OUTPUT` 拒绝生成 Proposal。零 refs 保持旧 Provider 调用与 prompt 行为。
+- 新旧备份可读，新字段有效时可导出与恢复。IndexedDB 仍为 v1／七个 store；Provider 两个方法仅增加可选 supplemental 参数，依赖和外部 Storage contract 未改。
+- 最终门禁：Vitest 487/487、Chrome 15/15、lint、production build、diff 与 Markdown 相对链接检查通过。长 Timeline 仍有优化空间；LocalStorage 调试模式跨标签页保证较弱，字符预算不是模型 token 预算。未实现 RAG、自动选择、KnowledgeRevision、Daily Sync 或实时跨标签页刷新。
 
 ## 2026-09-27 — PALOS v1.10.2 UX / Compatibility Patch Release
 

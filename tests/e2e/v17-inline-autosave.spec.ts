@@ -139,6 +139,7 @@ test("inline Round records autosave, inherit passively, and stay responsive", as
     .nth(0)
     .locator('[data-round-record-field="notes"]')
     .fill("rapid final draft");
+  await expect(cards.nth(0).getByRole("button", { name: "已保存" })).toBeVisible();
   await cards.nth(0).getByRole("button", { name: "折叠" }).click();
   await cards
     .nth(2)

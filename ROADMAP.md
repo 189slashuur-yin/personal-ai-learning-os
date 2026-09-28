@@ -2,13 +2,17 @@
 
 状态定义：`已完成` 表示能力已在当前工作区实现；`未开始` 表示尚无实现承诺。后续 Sprint 的主题开始前需要重新确认范围。
 
-## Current release
+## Current baseline and planning focus
 
-- Current Version：PALOS v1.10.2 UX / compatibility patch release
-- Current Focus：ChatGPT Export 分片兼容、长 Timeline 可达性、导入与恢复文案
-- Release Metadata：annotated tag `v1.10.2`；release baseline `v1.10.1` / `8a803c8b`
-- Automated Status：本次发布门禁结果见 HANDOFF 与发布任务最终报告
-- Scope Guard：ADR-005 / v1.11 Knowledge Context Reuse 不在本版；延期事项见下方清单
+- Published Version：PALOS v1.11.0 Knowledge Context Reuse release
+- Release base：v1.10.2 commit `67834928fe8884566c349cd7c4d2f4495b42df82`
+- Current Focus：发布后验证与延期优化；release commit/tag 及门禁记录见 HANDOFF
+- Release Gates：Vitest 487/487、Chrome 15/15、lint、build、diff/link checks passed
+- Scope Guard：不做 RAG、自动选择、KnowledgeRevision、Daily Sync、实时跨标签页刷新或新 DB store
+
+## v1.11 Sprint 0 — architecture freeze
+
+Baseline: published v1.10.2 commit `67834928fe8884566c349cd7c4d2f4495b42df82`, annotated tag object `537e1c9de9c95600545b3a4347f69e91494cbc91`. ADR-005 is accepted as an implementation contract; no v1.11 production feature is implemented in Sprint 0. Sprint 1 covers relation model, resolver, scoped persistence and restore/export compatibility; Sprint 2 covers Conversation selection UX and Continue Topic; Sprint 3 covers Analyzer/Provider supplemental context and reuse audit. Each sprint's scope, forbidden work, DoD and tests are in [ADR-005](docs/adr/ADR-005-knowledge-context-reuse.md).
 
 ## v1.10.2 UX / compatibility release
 
@@ -37,7 +41,7 @@
 | UX / Manual validation | Analyzer / Proposal / Review 的概念与入口 | Needs manual validation | 保留人工 Review 边界；验证用户是否理解建议为何不直接成为 Knowledge |
 | UX / Manual validation | Conversation sorting | Needs manual validation | 核实当前排序选项是否满足实际组织需求 |
 | UX / Manual validation | Workspace / 多级 Folder UX | Needs manual validation | 早期路线记录多层能力；复测当前层级、导航与过滤，不预判为缺失 |
-| Planned capabilities | Knowledge → Context Reuse | Planned | ADR-005 / v1.11 Sprint 0 草稿；本版不实现 |
+| Current implementation | Knowledge → Context Reuse | Released in v1.11.0 | Referenced Knowledge、frozen snapshots、Continue Topic、Provider supplemental reuse 与 run/Proposal audit 已发布；约束见 ADR-005 |
 | Planned capabilities | Knowledge revision lifecycle | Planned | 当前仅有局部 update/snapshot primitive；完整用户流程待设计 |
 | Planned capabilities | Manual Message → Knowledge | Confirmed missing | 现有人工路径来自 Round/Overview；需要单独设计草稿与 provenance |
 | Planned capabilities | cross-tab live refresh | Planned | 当前通过冲突保护避免覆盖，不提供实时订阅刷新 |

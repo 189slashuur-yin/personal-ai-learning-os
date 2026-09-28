@@ -1,4 +1,4 @@
-import type { AnalyzerProvider } from "@/core/contracts/analyzer-provider";
+import type { AnalyzerProvider, AnalyzerSupplementalContext } from "@/core/contracts/analyzer-provider";
 import type { AIProvider } from "@/core/entities/ai-provider";
 import type { AnalyzerOutputSchema } from "@/core/entities/analyzer-output-schema";
 import type { ImportedSource } from "@/core/entities/imported-source";
@@ -38,14 +38,14 @@ export const demoProviderInfo: AIProvider = {
 export class DemoProvider implements AnalyzerProvider {
   readonly providerInfo = demoProviderInfo;
 
-  async analyzeSource(source: ImportedSource): Promise<Proposal> {
+  async analyzeSource(source: ImportedSource, supplementalContext?: AnalyzerSupplementalContext): Promise<Proposal> {
     const content = normalizeText(source.content);
     const sourceTitle = source.name.replace(/\.txt$/i, "");
     const generatedAt = new Date().toISOString();
 
     const output: AnalyzerOutputSchema = {
       title: `关于「${sourceTitle}」的内容提炼`,
-      summary: excerpt(content, SUMMARY_LENGTH),
+      summary: this.summaryWithKnowledge(content, supplementalContext),
       evidence: excerpt(content, EVIDENCE_LENGTH),
       confidence: 0.82,
       suggestedAction: "create",
@@ -81,6 +81,7 @@ export class DemoProvider implements AnalyzerProvider {
   async analyzeMessages(
     conversationId: string,
     selectedMessages: Message[],
+    supplementalContext?: AnalyzerSupplementalContext,
   ): Promise<Proposal> {
     if (selectedMessages.length === 0) {
       throw new Error("Demo Analyzer 至少需要一条 Message。");
@@ -99,7 +100,7 @@ export class DemoProvider implements AnalyzerProvider {
     const generatedAt = new Date().toISOString();
     const output: AnalyzerOutputSchema = {
       title: `基于 ${orderedMessages.length} 条 Message 的内容提炼`,
-      summary: excerpt(normalizedEvidence, SUMMARY_LENGTH),
+      summary: this.summaryWithKnowledge(normalizedEvidence, supplementalContext),
       evidence,
       confidence: 0.78,
       suggestedAction: "create",
@@ -130,5 +131,13 @@ export class DemoProvider implements AnalyzerProvider {
       status: "Pending",
       createdAt: generatedAt,
     };
+  }
+
+  private summaryWithKnowledge(primary: string, context?: AnalyzerSupplementalContext): string {
+    if (!context?.referencedKnowledge.length) return excerpt(primary, SUMMARY_LENGTH);
+    const reference = context.referencedKnowledge
+      .map((item) => `${item.titleSnapshot}: ${normalizeText(item.contentSnapshot)}`)
+      .join("; ");
+    return excerpt(`${excerpt(primary, 80)} | 参考上下文：${reference}`, SUMMARY_LENGTH);
   }
 }

@@ -1,9 +1,35 @@
 import type { ConversationStorage } from "@/core/contracts/conversation-storage";
+import { validateKnowledgeRefs } from "@/core/services/knowledge-context-service";
 import type { Conversation } from "@/core/entities/conversation";
 import { DEFAULT_WORKSPACE_ID } from "@/core/entities/workspace";
 import { normalizeStoredConversationContext } from "@/infrastructure/storage/context-normalization";
 import { getConversationCache, setConversationCache } from "./preload";
-import { deleteMany, deleteOne, persistInBackground, writeOne } from "./database";
+import { deleteMany, deleteOne, openPalosDB, persistInBackground } from "./database";
+
+/** Ordinary saves never own the Knowledge selection of an existing record. */
+async function savePreservingKnowledgeRefs(incoming: Conversation): Promise<void> {
+  const db = await openPalosDB();
+  return new Promise<void>((resolve, reject) => {
+    const tx = db.transaction("conversations", "readwrite");
+    const store = tx.objectStore("conversations");
+    const request = store.get(incoming.id) as IDBRequest<Conversation | undefined>;
+    let written: Conversation = incoming;
+    request.onsuccess = () => {
+      const current = request.result;
+      written = current
+        ? { ...incoming, knowledgeContextRefs: current.knowledgeContextRefs }
+        : incoming;
+      store.put(written);
+    };
+    tx.oncomplete = () => {
+      const cache = getConversationCache();
+      setConversationCache([...cache.filter((item) => item.id !== written.id), written]);
+      resolve();
+    };
+    tx.onerror = () => reject(tx.error ?? new Error("Conversation save failed."));
+    tx.onabort = () => reject(tx.error ?? new Error("Conversation save aborted."));
+  });
+}
 
 export function normalizeIndexedDBConversation(
   conversation: Conversation,
@@ -32,17 +58,20 @@ export function normalizeIndexedDBConversation(
 
 export class IndexedDBConversationStorage implements ConversationStorage {
   save(conversation: Conversation): void {
+    if (conversation.knowledgeContextRefs !== undefined && !validateKnowledgeRefs(conversation.knowledgeContextRefs)) {
+      throw new Error("Invalid Conversation Knowledge Context refs.");
+    }
     const normalized = normalizeIndexedDBConversation(conversation);
     const cache = getConversationCache();
     const existingIndex = cache.findIndex((c) => c.id === normalized.id);
     if (existingIndex >= 0) {
-      cache[existingIndex] = normalized;
+      cache[existingIndex] = { ...normalized, knowledgeContextRefs: cache[existingIndex].knowledgeContextRefs };
     } else {
       cache.push(normalized);
     }
     persistInBackground(
       "save conversation",
-      writeOne("conversations", normalized),
+      savePreservingKnowledgeRefs(normalized),
     );
   }
 

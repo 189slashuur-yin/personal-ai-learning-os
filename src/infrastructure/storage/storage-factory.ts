@@ -6,6 +6,10 @@ import type { ProposalStorage } from "@/core/contracts/proposal-storage";
 import type { KnowledgeCardStorage } from "@/core/contracts/knowledge-card-storage";
 import type { ConversationVersionStorage } from "@/core/contracts/conversation-version-storage";
 import type { ConversationVersionRestoreWriter } from "@/core/contracts/conversation-version-restore-writer";
+import type { KnowledgeContextMutationWriter } from "@/core/contracts/knowledge-context-mutation-writer";
+import { IndexedDBKnowledgeContextMutationWriter } from "./indexeddb/idb-knowledge-context-mutation-writer";
+import { StorageBackedKnowledgeContextMutationWriter } from "./storage-backed-knowledge-context-mutation-writer";
+import { KnowledgeContextSelectionService } from "@/core/services/knowledge-context-selection-service";
 import type { RoundMutationWriter } from "@/core/contracts/round-mutation-writer";
 import { BrowserConversationStorage } from "./browser-conversation-storage";
 import { BrowserMessageStorage } from "./browser-message-storage";
@@ -168,4 +172,16 @@ export function createRoundMutationWriter(): RoundMutationWriter {
     return new IndexedDBRoundMutationWriter();
   }
   return new StorageBackedRoundMutationWriter(new BrowserRoundStorage());
+}
+
+export function createKnowledgeContextMutationWriter(): KnowledgeContextMutationWriter {
+  return getStorageMode() === "indexedDB"
+    ? new IndexedDBKnowledgeContextMutationWriter()
+    : new StorageBackedKnowledgeContextMutationWriter();
+}
+
+export function createKnowledgeContextSelectionService(): KnowledgeContextSelectionService {
+  return new KnowledgeContextSelectionService(
+    createKnowledgeCardStorage(), createKnowledgeContextMutationWriter(),
+  );
 }

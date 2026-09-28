@@ -87,6 +87,21 @@ function resolve(
 }
 
 describe("Knowledge provenance read model", () => {
+  it("does not infer primary provenance from a reused Knowledge audit", () => {
+    const reused = {
+      ...card({ sourceConversationId: undefined, sourceRoundId: undefined,
+        sourceMessageIds: undefined, sourceEvidenceExcerpt: undefined }),
+      knowledgeReuseAudit: [{ knowledgeCardId: "message-1", titleSnapshot: "Reused",
+        contentSnapshot: "Supplemental only" }],
+    };
+    const result = resolve(reused);
+    expect(result.current.conversation.status).toBe("not-recorded");
+    expect(result.current.round.status).toBe("not-recorded");
+    expect(result.current.messagesStatus).toBe("not-recorded");
+    expect(result.current.messages).toEqual([]);
+    expect(result.savedEvidence.sourceEvidenceExcerpt).toBeUndefined();
+  });
+
   it("resolves a complete trusted Conversation, Round and multiple Messages", () => {
     const result = resolve();
 

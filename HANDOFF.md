@@ -1,3 +1,40 @@
+# PALOS v1.11.0 — Knowledge Context Reuse release
+
+## 2026-09-28 final audit closure
+
+- 基线为 `v1.10.2^{}` / `67834928fe8884566c349cd7c4d2f4495b42df82`。Final Audit 修复了临时排除 refs 的 stale preview 漏检：run 前从权威 Conversation 读取完整选择，核对 ID、顺序与 frozen snapshot；任何冲突均在创建 run/audit 前拒绝。
+- Provider evidence boundary：有 refs 的运行要求 `sourceEvidence.excerpt` 可定位于 primary Source 或选中 Messages；Knowledge-only evidence 导致 `INVALID_OUTPUT`，失败 run 保留 audit，不生成 Proposal。Demo 与 Ollama 走同一执行边界；零 refs 保留旧调用/prompt。reuse audit 不参与 primary provenance resolver。
+- Timeline 2005 Message 本次定位性重复 3/3 通过，每轮约 2.1 分钟；此前旧选择器曾在第 14 段附近停顿。长页面翻段按钮使用稳定测试标识后，每段核对可见范围；最终 production Chrome 从首段到末段、101/1000/2000/2005 深链及搜索跳段全过。长 Timeline 的实际性能优化仍为延期项。
+- Raw Search 本次定位性重复 3/3；十次查询的 URL 与结果约 363–396 ms 收敛，快速清空/重输和跨 Conversation 跳转通过。最终测试明确等待导入完成和运行时索引就绪，并核对 URL 最终状态。Continue Import 测试接受产品既有的 `existingTargetId` 规范化参数；Round autosave 测试等待已保存状态再 reload。
+- Browser smoke：2 refs 临时排除 1 后 Proposal audit 为 1、持久选择仍为 2；删除来源使用快照；更新未 Refresh 使用旧快照、Refresh 后新 run 使用新快照；失败 run 保留 audit、retry 新 run；零 refs 旧路径；5 refs、15,997 字符的详情/Continue Topic 均通过。
+- 最终门禁：Knowledge 与 provenance targeted Vitest 32/32；全量 Vitest 487/487；production Chrome 15/15；lint、production build、`git diff --check`、Markdown 相对链接检查通过。核心 E2E 的 console.error、pageerror、未解释 failed request 均为 0；Next.js 在主动导航时取消的预取/静态请求单独记录。
+- 兼容性：新增可选 Conversation refs 与 AnalyzerRun/Proposal audit；Provider 两个方法仅增加可选 supplemental 参数；package/依赖、外部 Storage contract、RoundContext、IndexedDB v1／七个 store 未改。LocalStorage 调试模式跨标签页事务保证较弱；4,000/16,000 是字符预算，非 token 保证。未实现 RAG、自动选择、KnowledgeRevision、Daily Sync 或实时跨标签页刷新。
+- 发布操作：单一 release commit、annotated tag `v1.11.0` 与远端核验值见本次发布报告。
+
+---
+
+# PALOS v1.11 Sprint 1 + 1.1 + 2 + 3 candidate — Knowledge Context reuse
+
+- Baseline: `v1.10.2^{}` / `67834928fe8884566c349cd7c4d2f4495b42df82`; Sprint 0 ADR-005 architecture is accepted for implementation. This working tree is an uncommitted Sprint 1 + 1.1 + 2 + 3 candidate, not a release.
+- Added optional Conversation `knowledgeContextRefs` and Run/Proposal `knowledgeReuseAudit` types. The resolver owns frozen snapshots, status lookup, duplicate/order validation, five-ref and 4,000/16,000-character limits, plus explicit truncation confirmation results.
+- IndexedDB Knowledge Context writer reads the durable Conversation inside a scoped readwrite transaction, compares the expected refs, patches only refs, and verifies by authoritative read-back. Stale commands fail closed; a committed-but-unverified write is reported without compensation. LocalStorage debug mode has an equivalent scoped writer for its synchronous storage path.
+- App Data restore validates optional refs/audits, accepts old bundles with missing fields, and round-trips valid new fields. IndexedDB remains version 1 with seven stores. No automatic migration write was added.
+- Sprint 1.1 hardens ordinary Conversation saves: IndexedDB reads current authority inside a readwrite transaction and preserves refs, while LocalStorage debug mode preserves refs synchronously. Duplicate starts without refs; merge keeps target refs; old ConversationVersion snapshots preserve current refs and newer snapshots restore recorded refs.
+- Sprint 2 adds Conversation Detail selection of up to five cross-Conversation Knowledge cards, durable Add/Remove/Reorder/Refresh, truncation confirmation, updated/archived/deleted source states, and frozen Continue Topic output.
+- Sprint 3 adds optional supplemental context parameters to the two existing Provider methods. The execution boundary reads durable Conversation refs before each Source/Message/Round run, checks the visible selection, applies temporary exclusions, and saves an explicit bounded audit on running/completed/failed AnalyzerRuns. Retry creates a new run and resolves again. A produced Proposal copies the run audit; primary evidence/origin stays separate. Demo consumes supplemental snapshots without changing zero-ref output; Ollama appends a separated untrusted-data section only for nonzero refs. Conversation Detail and Analysis page preview references; Proposal/Review and latest run show read-only audit summaries.
+- Key files: `src/core/entities/knowledge-context-ref.ts`, `src/core/services/knowledge-context-service.ts`, `src/core/contracts/knowledge-context-mutation-writer.ts`, `src/infrastructure/storage/indexeddb/idb-knowledge-context-mutation-writer.ts`, `src/infrastructure/storage/storage-backed-knowledge-context-mutation-writer.ts`, `src/infrastructure/storage/app-data-storage.ts`, and Sprint 1 tests.
+- Candidate gates: Sprint 2 baseline was Vitest 476/476 and Playwright 12/12. Sprint 3 targeted Vitest 6/6, full Vitest 482/482, Playwright 14/14, lint and production build pass. The first combined browser run timed out in four long/sequence-sensitive cases; those cases passed individually after making the Review test wait for its second Proposal. The final complete browser run passed, including exclusion, saved snapshot, stale preview, failed provider audit/retry and Review accept/reject. Diff/link checks pass. No commit, tag, push or PR was created.
+- Remaining risk: LocalStorage debug mode has synchronous compare/write semantics rather than IndexedDB cross-tab transactions. Stale ordinary updates can still conflict with newer ordinary fields; the Sprint 1.1 guarantee specifically protects refs. Cross-tab live refresh and long-Timeline performance work are outside this sprint. AnalyzerRun remains an operational LocalStorage record by the frozen ADR; Proposal remains an IndexedDB canonical record.
+
+# PALOS v1.11 Sprint 0 — architecture freeze
+
+## 2026-09-27 architecture handoff
+
+- Baseline: published v1.10.2 commit `67834928fe8884566c349cd7c4d2f4495b42df82`; annotated tag object `537e1c9de9c95600545b3a4347f69e91494cbc91`. Remote `main` and peeled tag match the commit.
+- Correct checkout: `/Users/yindaxuan/Documents/codexdemotest1`. The separate old dirty checkout under `Documents/Codex/2026-09-27/referenced-chatgpt-conversation-this-is-an/work/palos-v1102-acceptance` remains untouched. ADR-005 draft began with SHA-256 `07fb94c759b768953014c9751fac2a7783ef52235f6cc51d8cc2cebea09c1fe7`.
+- ADR-005 freezes optional Conversation refs and AnalyzerRun/Proposal reuse audit, 5 refs, 4,000 characters per snapshot, 16,000 total, scoped authoritative transaction writes, snapshot-only deleted sources, optional provider supplemental context, and three sprint boundaries. RoundContext and IndexedDB v1/seven stores remain unchanged.
+- Sprint 0 changes documentation only. No production code, migration, commit, tag, push or PR. Start Sprint 1 with the ADR's DoD and tests; first implementation risk is a stale cached Conversation overwriting unrelated fields or concurrent refs. Restore validation, legacy backups and failure audit retention are the next critical checks.
+
 # PALOS v1.10.2 — UX / compatibility release
 
 ## 2026-09-27 Final Acceptance / release closure

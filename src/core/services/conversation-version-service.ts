@@ -131,6 +131,9 @@ export class ConversationVersionService {
     const timestamp = new Date().toISOString();
     const restoredConversation: Conversation = {
       ...cloneConversation(version.snapshotData.conversation),
+      // Pre-v1.11 snapshots did not record refs; preserve the current selection.
+      knowledgeContextRefs: version.snapshotData.conversation.knowledgeContextRefs
+        ?? currentConversation.knowledgeContextRefs,
       id: currentConversation.id,
       updatedAt: timestamp,
       lastOpenedAt: timestamp,

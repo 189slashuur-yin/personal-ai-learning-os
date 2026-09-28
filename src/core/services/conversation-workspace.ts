@@ -186,6 +186,8 @@ export async function duplicateConversationWorkspace(
     context: originalConversation.context
       ? { ...originalConversation.context }
       : undefined,
+    // A duplicate is a new selection boundary, even if its transcript is copied.
+    knowledgeContextRefs: undefined,
     createdAt: timestamp,
     updatedAt: timestamp,
     lastOpenedAt: timestamp,

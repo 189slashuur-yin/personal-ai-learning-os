@@ -6,6 +6,7 @@ import type {
 } from "@/core/contracts/conversation-version-restore-writer";
 import type { MessageStorage } from "@/core/contracts/message-storage";
 import type { RoundStorage } from "@/core/contracts/round-storage";
+import { BrowserConversationStorage } from "./browser-conversation-storage";
 
 type RestoreStorages = {
   conversations: ConversationStorage;
@@ -22,7 +23,11 @@ export class StorageBackedConversationVersionRestoreWriter
     command: ConversationVersionRestoreCommand,
   ): Promise<ConversationVersionRestoreReceipt> {
     const conversationId = command.after.conversation.id;
-    this.storages.conversations.save(command.after.conversation);
+    if (this.storages.conversations instanceof BrowserConversationStorage) {
+      this.storages.conversations.replaceForVersionRestore(command.after.conversation);
+    } else {
+      this.storages.conversations.save(command.after.conversation);
+    }
     this.storages.messages.replaceByConversationId(
       conversationId,
       [...command.after.messages],

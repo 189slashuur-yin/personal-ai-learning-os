@@ -1,3 +1,4 @@
+import { validateKnowledgeRefs, validateKnowledgeAudit } from "@/core/services/knowledge-context-service";
 import type { Conversation } from "@/core/entities/conversation";
 import type { ConversationVersion } from "@/core/entities/conversation-version";
 import type { ImportedSource } from "@/core/entities/imported-source";
@@ -148,7 +149,26 @@ function validateReference(
   }
 }
 
+function validateKnowledgeOptionalRecords(bundle: AppDataBundle): void {
+  const local = bundle.data;
+  for (const [key, field, check] of [
+    ["ai-learning-os.conversations", "knowledgeContextRefs", validateKnowledgeRefs],
+    ["ai-learning-os.proposals", "knowledgeReuseAudit", validateKnowledgeAudit],
+    ["ai-learning-os.analyzer-runs", "knowledgeReuseAudit", validateKnowledgeAudit],
+  ] as const) {
+    const value = local[key];
+    if (value === undefined) continue;
+    if (!Array.isArray(value)) throw new Error(`${key} must be an array.`);
+    for (const [index, item] of value.entries()) {
+      if (!isRecord(item) || (item[field] !== undefined && !check(item[field]))) {
+        throw new Error(`${key}[${index}].${field} is malformed.`);
+      }
+    }
+  }
+}
+
 function validateIndexedDBBundle(bundle: AppDataBundle): void {
+  validateKnowledgeOptionalRecords(bundle);
   if (bundle.indexedDB === undefined) return;
   if (!isRecord(bundle.indexedDB)) {
     throw new Error("IndexedDB restore payload must be an object.");
@@ -177,6 +197,11 @@ function validateIndexedDBBundle(bundle: AppDataBundle): void {
     ),
   ) as Partial<Record<IndexedDBBundleKey, Set<string>>>;
 
+  for (const record of records.conversations ?? []) {
+    if (record.knowledgeContextRefs !== undefined && !validateKnowledgeRefs(record.knowledgeContextRefs)) {
+      throw new Error(`conversations.${record.id}.knowledgeContextRefs is malformed.`);
+    }
+  }
   for (const record of records.messages ?? []) {
     validateReference(record, "conversationId", ids.conversations, `messages.${record.id}`);
   }
@@ -198,6 +223,9 @@ function validateIndexedDBBundle(bundle: AppDataBundle): void {
     validateReference(record, "conversationId", ids.conversations, `sources.${record.id}`);
   }
   for (const record of records.proposals ?? []) {
+    if (record.knowledgeReuseAudit !== undefined && !validateKnowledgeAudit(record.knowledgeReuseAudit)) {
+      throw new Error(`proposals.${record.id}.knowledgeReuseAudit is malformed.`);
+    }
     validateReference(record, "conversationId", ids.conversations, `proposals.${record.id}`);
     validateReference(record, "sourceId", ids.sources, `proposals.${record.id}`);
     validateReference(record, "sourceRoundId", ids.rounds, `proposals.${record.id}`);

@@ -152,6 +152,17 @@ class AtomicFakeObjectStore {
     private readonly transaction: AtomicFakeTransaction,
   ) {}
 
+  get(id: string): IDBRequest<unknown> {
+    this.transaction.operation();
+    const request = new FakeRequest<unknown>();
+    queueMicrotask(() => {
+      request.result = this.data.get(id);
+      request.onsuccess?.();
+      this.transaction.operationDone();
+    });
+    return request as unknown as IDBRequest<unknown>;
+  }
+
   getAll(): IDBRequest<unknown[]> {
     this.transaction.operation();
     const request = new FakeRequest<unknown[]>();

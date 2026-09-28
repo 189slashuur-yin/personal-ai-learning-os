@@ -76,6 +76,11 @@ import { ConversationAssets } from "./conversation-assets";
 import { RoundWorkspace } from "./round-workspace";
 import { ConversationWorkspaceMode } from "./conversation-workspace-mode";
 import { ConversationContextPanel } from "./conversation-context-panel";
+import { ReferencedKnowledge } from "./referenced-knowledge";
+import { AnalyzerKnowledgePreview } from "./analyzer-knowledge-preview";
+import { KnowledgeReuseAudit } from "@/app/knowledge-reuse-audit";
+import { resolveAnalyzerKnowledgeContext } from "@/infrastructure/storage/analyzer-knowledge-context";
+import { knowledgeAuditSnapshotFingerprint } from "@/core/services/knowledge-context-service";
 import { ConversationSnapshotHistory } from "./conversation-snapshot-history";
 import { RoundNavigator } from "./round-navigator";
 import { persistIndexedDBGeneratedProposal } from "./proposal-persistence";
@@ -178,6 +183,7 @@ function createAnalyzerExecutionService(providerId?: string) {
     provider,
     new PromptTemplateService(new BrowserPromptTemplateStorage()),
     new BrowserAnalyzerRunStorage(),
+    resolveAnalyzerKnowledgeContext,
   );
 }
 
@@ -233,6 +239,11 @@ export function ConversationDetail({
   const [latestAnalyzerRun, setLatestAnalyzerRun] =
     useState<AnalyzerRun | null>(null);
   const [analyzeProviderId, setAnalyzeProviderId] = useState("demo");
+  const [excludedKnowledgeCardIds, setExcludedKnowledgeCardIds] = useState<string[]>([]);
+  const [previewKnowledgeCardIds, setPreviewKnowledgeCardIds] = useState<string[] | null>(null);
+  const [previewKnowledgeFingerprint, setPreviewKnowledgeFingerprint] = useState<string | null>(null);
+  const [previewCompleteKnowledgeFingerprint, setPreviewCompleteKnowledgeFingerprint] = useState<string | null>(null);
+  const [knowledgePreviewRevision, setKnowledgePreviewRevision] = useState(0);
   const [analyzerElapsed, setAnalyzerElapsed] = useState(0);
   const analyzerTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -699,6 +710,22 @@ export function ConversationDetail({
     }
   }
 
+  async function resetKnowledgeRunSelection(id: string) {
+    setExcludedKnowledgeCardIds([]);
+    setPreviewKnowledgeCardIds(null);
+    setPreviewKnowledgeFingerprint(null);
+    setPreviewCompleteKnowledgeFingerprint(null);
+    try {
+      const current = await resolveAnalyzerKnowledgeContext(id);
+      setPreviewKnowledgeCardIds(current.map((item) => item.knowledgeCardId));
+      setPreviewKnowledgeFingerprint(knowledgeAuditSnapshotFingerprint(current));
+      setPreviewCompleteKnowledgeFingerprint(knowledgeAuditSnapshotFingerprint(current));
+      setKnowledgePreviewRevision((revision) => revision + 1);
+    } catch {
+      setPreviewKnowledgeCardIds(null);
+    }
+  }
+
   function scrollToAnchor(anchorId: string) {
     const element = document.getElementById(anchorId);
     if (element) {
@@ -707,7 +734,7 @@ export function ConversationDetail({
   }
 
   async function runSourceAnalyzer(simulateFailure = false) {
-    if (state.status !== "ready" || !state.source) {
+    if (state.status !== "ready" || !state.source || previewKnowledgeCardIds === null) {
       return;
     }
 
@@ -719,8 +746,14 @@ export function ConversationDetail({
     new BrowserAppEventLogStorage().record("analyze started", state.conversation.id, analyzeProviderId);
     const result = await createAnalyzerExecutionService(analyzeProviderId).runSource(state.source, {
       simulateRecoverableError: simulateFailure,
-    });
+      excludedKnowledgeCardIds,
+      expectedKnowledgeCardIds: previewKnowledgeCardIds,
+      expectedKnowledgeFingerprint: previewKnowledgeFingerprint ?? undefined,
+        expectedCompleteKnowledgeFingerprint: previewCompleteKnowledgeFingerprint ?? undefined,
+    }).catch((error) => { setAnalyzerError(error instanceof Error ? error.message : "Could not verify Knowledge selection."); return null; });
     if (analyzerTimerRef.current) { clearInterval(analyzerTimerRef.current); analyzerTimerRef.current = null; }
+    await resetKnowledgeRunSelection(state.conversation.id);
+    if (!result) { setLatestAnalyzerRun(null); return; }
     setLatestAnalyzerRun(result.run);
 
     if (!result.proposal) {
@@ -753,11 +786,21 @@ export function ConversationDetail({
 
   async function runRoundAnalyzer(round: Round) {
     if (state.status !== "ready") return;
+    if (previewKnowledgeCardIds === null) {
+      setAnalyzerError("Referenced Knowledge preview is loading. Try again shortly.");
+      return;
+    }
     setAnalyzerSuccess(null);
     setLatestAnalyzerRun({ id: "pending", conversationId: state.conversation.id, roundId: round.id, providerId: providerDetails.id, providerName: providerDetails.name, status: "running", startedAt: new Date().toISOString() });
     const messageIdSet = new Set(round.messageIds);
     const roundMessages = state.messages.filter((message) => messageIdSet.has(message.id));
-    const result = await createAnalyzerExecutionService(analyzeProviderId).runRound(round, roundMessages);
+    const result = await createAnalyzerExecutionService(analyzeProviderId).runRound(round, roundMessages, {
+      excludedKnowledgeCardIds, expectedKnowledgeCardIds: previewKnowledgeCardIds,
+      expectedKnowledgeFingerprint: previewKnowledgeFingerprint ?? undefined,
+        expectedCompleteKnowledgeFingerprint: previewCompleteKnowledgeFingerprint ?? undefined,
+    }).catch((error) => { setAnalyzerError(error instanceof Error ? error.message : "Could not verify Knowledge selection."); return null; });
+    await resetKnowledgeRunSelection(state.conversation.id);
+    if (!result) { setLatestAnalyzerRun(null); return; }
     setLatestAnalyzerRun(result.run);
     if (!result.proposal) {
       setAnalyzerError(result.run.error?.message ?? "Round Analyzer 运行失败。");
@@ -855,7 +898,7 @@ export function ConversationDetail({
   }
 
   async function runMessageAnalyzer() {
-    if (state.status !== "ready" || selectedMessageIds.size === 0) {
+    if (state.status !== "ready" || selectedMessageIds.size === 0 || previewKnowledgeCardIds === null) {
       return;
     }
 
@@ -867,7 +910,12 @@ export function ConversationDetail({
     const result = await createAnalyzerExecutionService(analyzeProviderId).runMessages(
       state.conversation.id,
       selectedMessages,
-    );
+      { excludedKnowledgeCardIds, expectedKnowledgeCardIds: previewKnowledgeCardIds,
+        expectedKnowledgeFingerprint: previewKnowledgeFingerprint ?? undefined,
+        expectedCompleteKnowledgeFingerprint: previewCompleteKnowledgeFingerprint ?? undefined },
+    ).catch((error) => { setAnalyzerError(error instanceof Error ? error.message : "Could not verify Knowledge selection."); return null; });
+    await resetKnowledgeRunSelection(state.conversation.id);
+    if (!result) { setLatestAnalyzerRun(null); return; }
     setLatestAnalyzerRun(result.run);
 
     if (!result.proposal) {
@@ -897,7 +945,8 @@ export function ConversationDetail({
     if (
       state.status !== "ready" ||
       latestAnalyzerRun?.status !== "failed" ||
-      !latestAnalyzerRun.error?.recoverable
+      !latestAnalyzerRun.error?.recoverable ||
+      previewKnowledgeCardIds === null
     ) {
       return;
     }
@@ -912,7 +961,13 @@ export function ConversationDetail({
         return;
       }
 
-      const result = await createAnalyzerExecutionService().runSource(retrySource);
+      const result = await createAnalyzerExecutionService().runSource(retrySource, {
+        excludedKnowledgeCardIds, expectedKnowledgeCardIds: previewKnowledgeCardIds,
+        expectedKnowledgeFingerprint: previewKnowledgeFingerprint ?? undefined,
+        expectedCompleteKnowledgeFingerprint: previewCompleteKnowledgeFingerprint ?? undefined,
+      }).catch((error) => { setAnalyzerError(error instanceof Error ? error.message : "Could not verify Knowledge selection."); return null; });
+      await resetKnowledgeRunSelection(state.conversation.id);
+      if (!result) return;
       setLatestAnalyzerRun(result.run);
 
       if (!result.proposal) {
@@ -952,7 +1007,12 @@ export function ConversationDetail({
     const result = await createAnalyzerExecutionService().runMessages(
       state.conversation.id,
       retryMessages,
-    );
+      { excludedKnowledgeCardIds, expectedKnowledgeCardIds: previewKnowledgeCardIds,
+        expectedKnowledgeFingerprint: previewKnowledgeFingerprint ?? undefined,
+        expectedCompleteKnowledgeFingerprint: previewCompleteKnowledgeFingerprint ?? undefined },
+    ).catch((error) => { setAnalyzerError(error instanceof Error ? error.message : "Could not verify Knowledge selection."); return null; });
+    await resetKnowledgeRunSelection(state.conversation.id);
+    if (!result) return;
     setLatestAnalyzerRun(result.run);
 
     if (!result.proposal) {
@@ -1624,6 +1684,7 @@ export function ConversationDetail({
       ) : null}
 
       <div id="section-rounds">
+        <p className="mb-2 text-xs text-zinc-600">Round Analyzer will use {previewKnowledgeCardIds?.length ?? "…"} referenced Knowledge snapshots. <a className="text-sky-700 underline" href="#section-proposal">Review or temporarily exclude them before running</a>.</p>
         {detailMode === "workspace" ? (
           <ConversationWorkspaceMode
             conversationId={conversationId}
@@ -1634,7 +1695,7 @@ export function ConversationDetail({
           <RoundWorkspace
             conversationId={conversationId}
             key={`round-workspace-${roundWorkspaceRevision}`}
-            onAnalyzeRound={runRoundAnalyzer}
+            onAnalyzeRound={previewKnowledgeCardIds === null ? undefined : runRoundAnalyzer}
           />
         )}
       </div>
@@ -1650,6 +1711,14 @@ export function ConversationDetail({
           })
         }
         versions={state.versions}
+      />
+
+      <ReferencedKnowledge
+        conversationId={conversation.id}
+        refs={conversation.knowledgeContextRefs ?? []}
+        onChanged={(knowledgeContextRefs) => setState((current) => current.status === "ready"
+          ? { ...current, conversation: { ...current.conversation, knowledgeContextRefs } }
+          : current)}
       />
 
       {/* P0-5: Raw Timeline / 原始对话 — prominent entry point */}
@@ -2391,9 +2460,9 @@ export function ConversationDetail({
               </ol>
               {messageTimelineMode === "full" && state.messages.length > TIMELINE_PAGE_SIZE ? (
                 <div className="mt-4 flex items-center justify-between gap-3 rounded-lg border border-zinc-200 bg-white px-4 py-3 text-sm">
-                  <button className="font-semibold text-sky-700 disabled:text-zinc-300" disabled={timelinePageStart === 0} onClick={() => setMessagePageStart(Math.max(0, timelinePageStart - TIMELINE_PAGE_SIZE))} type="button">← 上一段</button>
+                  <button data-testid="message-previous-page" className="font-semibold text-sky-700 disabled:text-zinc-300" disabled={timelinePageStart === 0} onClick={() => setMessagePageStart(Math.max(0, timelinePageStart - TIMELINE_PAGE_SIZE))} type="button">← 上一段</button>
                   <span className="text-zinc-500">{timelinePageStart + 1}–{Math.min(timelinePageStart + TIMELINE_PAGE_SIZE, state.messages.length)} / {state.messages.length}</span>
-                  <button className="font-semibold text-sky-700 disabled:text-zinc-300" disabled={timelinePageStart + TIMELINE_PAGE_SIZE >= state.messages.length} onClick={() => setMessagePageStart(timelinePageStart + TIMELINE_PAGE_SIZE)} type="button">下一段 →</button>
+                  <button data-testid="message-next-page" className="font-semibold text-sky-700 disabled:text-zinc-300" disabled={timelinePageStart + TIMELINE_PAGE_SIZE >= state.messages.length} onClick={() => setMessagePageStart(timelinePageStart + TIMELINE_PAGE_SIZE)} type="button">下一段 →</button>
                 </div>
               ) : null}
               {messageTimelineMode === "preview" && state.messages.length > PREVIEW_MESSAGE_COUNT ? (
@@ -2527,9 +2596,10 @@ export function ConversationDetail({
                   <div className="mb-3 flex justify-end">
                     <CapabilityBadges capabilities={providerDetails.capabilities} />
                   </div>
+                  <p className="mb-2 text-xs text-zinc-500">This run will use {previewKnowledgeCardIds?.length ?? "…"} referenced Knowledge snapshots. <a className="text-sky-700 underline" href="#section-proposal">Review or temporarily exclude</a>.</p>
                   <button
                     className="rounded-lg bg-zinc-950 px-4 py-2.5 text-sm font-medium text-white hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-300"
-                    disabled={selectedMessageIds.size === 0 || messageTimelineMode !== "full"}
+                    disabled={selectedMessageIds.size === 0 || messageTimelineMode !== "full" || previewKnowledgeCardIds === null}
                     onClick={runMessageAnalyzer}
                     type="button"
                   >
@@ -2566,6 +2636,17 @@ export function ConversationDetail({
         <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
           <p className="text-sm text-zinc-500">共 {proposals.length} 条 Proposal</p>
           <div className="text-right">
+            <AnalyzerKnowledgePreview
+              conversationId={conversation.id}
+              revision={`${knowledgePreviewRevision}:${JSON.stringify(conversation.knowledgeContextRefs)}`}
+              excludedIds={excludedKnowledgeCardIds}
+              onChange={(excluded, effective, fingerprint, completeFingerprint) => {
+                setExcludedKnowledgeCardIds(excluded);
+                setPreviewKnowledgeCardIds(effective);
+                setPreviewKnowledgeFingerprint(fingerprint);
+                setPreviewCompleteKnowledgeFingerprint(completeFingerprint);
+              }}
+            />
             <p className="mb-2 text-xs text-zinc-500">
               当前 Provider：{providerDetails.name}
             </p>
@@ -2575,7 +2656,7 @@ export function ConversationDetail({
             <label className="mb-3 block text-xs font-semibold text-zinc-600">本次 Analyze Provider<select className="ml-2 rounded-lg border border-zinc-200 bg-white px-3 py-2" onChange={(event) => setAnalyzeProviderId(event.target.value)} value={analyzeProviderId}><option value="demo">Demo</option><option value="ollama">Ollama</option><option disabled value="openai">OpenAI（disabled）</option><option disabled value="claude">Claude（disabled）</option></select></label>
             <button
               className="rounded-lg border border-zinc-200 bg-white px-4 py-2.5 text-sm font-medium text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-40"
-              disabled={!source || saveStatus === "editing"}
+              disabled={!source || saveStatus === "editing" || previewKnowledgeCardIds === null}
               onClick={() => runSourceAnalyzer(false)}
               type="button"
             >
@@ -2585,7 +2666,7 @@ export function ConversationDetail({
             {providerDetails.id === "demo" && showAnalyzerFailureInjection ? (
             <button
               className="ml-2 rounded-lg border border-zinc-200 bg-white px-4 py-2.5 text-sm font-medium text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-40"
-              disabled={!source || saveStatus === "editing"}
+              disabled={!source || saveStatus === "editing" || previewKnowledgeCardIds === null}
               onClick={() => runSourceAnalyzer(true)}
               type="button"
             >
@@ -2611,6 +2692,7 @@ export function ConversationDetail({
                 {latestAnalyzerRun.error.code}：{latestAnalyzerRun.error.message}
               </p>
             ) : null}
+            <KnowledgeReuseAudit items={latestAnalyzerRun.knowledgeReuseAudit} />
             {latestAnalyzerRun.status === "failed" &&
             latestAnalyzerRun.error?.recoverable ? (
               <button
